@@ -5,6 +5,7 @@ import (
 
 	host "rounds.com.ar/watcher/shared"
 	view "rounds.com.ar/watcher/view"
+	websocket "rounds.com.ar/watcher/websocket"
 )
 
 func main() {
@@ -39,4 +40,6 @@ func main() {
 	}
 
 	view.Table("Packages", []string{"Name", "Version", "Description", "Icon"}, packageNames)
+
+	websocket.Init()
 }
