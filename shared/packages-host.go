@@ -14,17 +14,25 @@ import (
 	pb "rounds.com.ar/sdk/shared/package"
 )
 
-// NewPackageHost creates a new package host
-func NewPackageHost(packagesDir string) *PackageHost {
-	return &PackageHost{
+// PackagesHost manages the lifecycle of packages
+type PackagesHost struct {
+	PackagesDir string
+	Packages    map[string]*Package
+	NextPort    int
+	mutex       sync.Mutex
+}
+
+// NewPackagesHost creates a new package host
+func NewPackagesHost(packagesDir string) *PackagesHost {
+	return &PackagesHost{
 		PackagesDir: packagesDir,
-		Packages:    make(map[string]*PackageInfo),
+		Packages:    make(map[string]*Package),
 		NextPort:    50051, // Starting port for packages
 	}
 }
 
 // DiscoverPackages finds all executable packages in the packages directory
-func (h *PackageHost) DiscoverPackages() error {
+func (h *PackagesHost) DiscoverPackages() error {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
@@ -45,7 +53,7 @@ func (h *PackageHost) DiscoverPackages() error {
 			h.NextPort++
 
 			packagePath := filePath
-			h.Packages[packagePath] = &PackageInfo{
+			h.Packages[packagePath] = &Package{
 				BasePort: port,
 			}
 		}
@@ -54,7 +62,7 @@ func (h *PackageHost) DiscoverPackages() error {
 	return nil
 }
 
-func (h *PackageHost) GetAllPackages() (
+func (h *PackagesHost) GetAllPackages() (
 	[]struct {
 		Item     string
 		Callback func() (bool, error)
@@ -85,7 +93,7 @@ func (h *PackageHost) GetAllPackages() (
 }
 
 // CloseAllPackages stops all packages and cleans up
-func (h *PackageHost) CloseAllPackages() {
+func (h *PackagesHost) CloseAllPackages() {
 	for _, info := range h.Packages {
 		if info.Connection != nil {
 			// Try to stop the package gracefully

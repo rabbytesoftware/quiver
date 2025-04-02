@@ -14,7 +14,7 @@ import (
 )
 
 // startPackage launches a package process and connects to it
-func (h *PackageHost) startPackage(path string, info *PackageInfo) error {
+func (h *PackagesHost) startPackage(path string, info *Package) error {
 	// Launch the package with the port as an argument
 	portStr := strconv.Itoa(info.BasePort)
 	cmd := exec.Command(path, portStr)
@@ -52,12 +52,6 @@ func (h *PackageHost) startPackage(path string, info *PackageInfo) error {
 	// =========================
 	// 			Getters
 	// =========================
-	
-	packageName, err := client.GetPackageName(ctx, &pb.Empty{})
-	if err != nil {
-		return fmt.Errorf("failed to get package name: %w", err)
-	}
-	info.PackageName = packageName.Value
 
 	versionResp, err := client.GetVersion(ctx, &pb.Empty{})
 	if err != nil {
@@ -83,5 +77,11 @@ func (h *PackageHost) startPackage(path string, info *PackageInfo) error {
 	}
 	info.Description = descResp.Value
 	
+	maxPortsResp, err := client.GetMaxPorts(ctx, &pb.Empty{})
+	if err != nil {
+		return fmt.Errorf("failed to get package version: %w", err)
+	}
+	info.MaxPorts = maxPortsResp.Value
+
 	return nil
 }

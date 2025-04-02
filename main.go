@@ -5,7 +5,6 @@ import (
 
 	host "rounds.com.ar/watcher/shared"
 	view "rounds.com.ar/watcher/view"
-	websocket "rounds.com.ar/watcher/websocket"
 )
 
 func main() {
@@ -13,7 +12,7 @@ func main() {
 
 	// Create package host
 	packagesDir := "./pkgs"
-	host := host.NewPackageHost(packagesDir)
+	host := host.NewPackagesHost(packagesDir)
 
 	// Discover packages
 	if err := host.DiscoverPackages(); err != nil {
@@ -40,6 +39,4 @@ func main() {
 	}
 
 	view.Table("Packages", []string{"Name", "Version", "Description", "Icon"}, packageNames)
-
-	websocket.Init()
 }
