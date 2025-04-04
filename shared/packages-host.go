@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	pb "rounds.com.ar/sdk/package"
+	pb "rounds.com.ar/watcher/sdk/package"
 )
 
 // PackagesHost manages the lifecycle of packages

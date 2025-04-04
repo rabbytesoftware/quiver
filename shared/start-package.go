@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	pb "rounds.com.ar/sdk/package"
+	pb "rounds.com.ar/watcher/sdk/package"
 )
 
 // startPackage launches a package process and connects to it

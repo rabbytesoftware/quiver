@@ -4,7 +4,7 @@ go 1.22.5
 
 require (
 	github.com/pterm/pterm v0.12.80
-	rounds.com.ar/sdk v0.0.0
+	rounds.com.ar/watcher/sdk v0.0.0
 )
 
 require (
@@ -29,4 +29,4 @@ require (
 	google.golang.org/protobuf v1.36.4 // indirect
 )
 
-replace rounds.com.ar/sdk => ../shared
+replace rounds.com.ar/watcher/sdk => ../shared

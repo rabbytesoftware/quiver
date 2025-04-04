@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	pb "rounds.com.ar/sdk/package"
+	pb "rounds.com.ar/watcher/sdk/package"
 )
 
 type Package struct {
