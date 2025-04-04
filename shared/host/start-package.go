@@ -1,7 +1,6 @@
 package shared
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,10 +10,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "rounds.com.ar/watcher/sdk/package"
+	pkg "rounds.com.ar/watcher/shared"
 )
 
 // startPackage launches a package process and connects to it
-func (h *PackagesHost) startPackage(path string, info *Package) error {
+func (h *PackagesHost) startPackage(path string, info *pkg.Package) error {
 	// Launch the package with the port as an argument
 	portStr := strconv.Itoa(info.BasePort)
 	cmd := exec.Command(path, portStr)
@@ -45,43 +45,6 @@ func (h *PackagesHost) startPackage(path string, info *Package) error {
 	info.Connection = conn
 	
 	// Get package information
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-	
-
-	// =========================
-	// 			Getters
-	// =========================
-
-	versionResp, err := client.GetVersion(ctx, &pb.Empty{})
-	if err != nil {
-		return fmt.Errorf("failed to get package version: %w", err)
-	}
-	info.Version = versionResp.Value
-
-	nameResp, err := client.GetName(ctx, &pb.Empty{})
-	if err != nil {
-		return fmt.Errorf("failed to get package name: %w", err)
-	}
-	info.Name = nameResp.Value
-
-	iconResp, err := client.GetIcon(ctx, &pb.Empty{})
-	if err != nil {
-		return fmt.Errorf("failed to get package version: %w", err)
-	}
-	info.Icon = iconResp.Value
-
-	descResp, err := client.GetDescription(ctx, &pb.Empty{})
-	if err != nil {
-		return fmt.Errorf("failed to get package version: %w", err)
-	}
-	info.Description = descResp.Value
-	
-	maxPortsResp, err := client.GetMaxPorts(ctx, &pb.Empty{})
-	if err != nil {
-		return fmt.Errorf("failed to get package version: %w", err)
-	}
-	info.MaxPorts = maxPortsResp.Value
 
 	return nil
 }

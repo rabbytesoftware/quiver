@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	host "rounds.com.ar/watcher/shared"
+	host "rounds.com.ar/watcher/shared/host"
 	view "rounds.com.ar/watcher/view"
 )
 
