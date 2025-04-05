@@ -14,10 +14,12 @@ import (
 )
 
 // startPackage launches a package process and connects to it
-func (h *PackagesHost) startPackage(path string, info *pkg.Package) error {
+func (h *PackagesHost) startPackage(pkg *pkg.Package) error {
 	// Launch the package with the port as an argument
-	portStr := strconv.Itoa(info.BasePort)
-	cmd := exec.Command(path, portStr)
+	cmd := exec.Command(
+		pkg.Runtimepath, 
+		strconv.Itoa(pkg.BasePort),
+	)
 	
 	// Set up pipes for stderr to capture package output
 	cmd.Stderr = os.Stderr
@@ -27,13 +29,13 @@ func (h *PackagesHost) startPackage(path string, info *pkg.Package) error {
 		return fmt.Errorf("failed to start package process: %w", err)
 	}
 	
-	info.Process = cmd.Process
+	pkg.Process = cmd.Process
 	
 	// Wait for the gRPC server to start
 	time.Sleep(1 * time.Second)
 	
 	// Connect to the package
-	addr := fmt.Sprintf("localhost:%d", info.BasePort)
+	addr := fmt.Sprintf("localhost:%d", pkg.BasePort)
 	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithTimeout(5*time.Second))
 	if err != nil {
 		return fmt.Errorf("failed to connect to package: %w", err)
@@ -41,10 +43,8 @@ func (h *PackagesHost) startPackage(path string, info *pkg.Package) error {
 	
 	// Create a client
 	client := pb.NewPackageServiceClient(conn)
-	info.Client = client
-	info.Connection = conn
-	
-	// Get package information
+	pkg.Client = client
+	pkg.Connection = conn
 
 	return nil
 }

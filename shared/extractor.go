@@ -10,18 +10,10 @@ import (
 	"runtime"
 
 	entrypoint "rounds.com.ar/watcher/sdk/base/entrypoint"
-	pkginfo "rounds.com.ar/watcher/sdk/base/package-config"
 )
 
-// WatcherPackage represents an extracted watcher package
-type WatcherPackage struct {
-	TempDir       string        			// Temporary directory where the package is extracted
-	RuntimeConfig *pkginfo.PackageConfig 	// The package.json configuration
-	Executable    string        			// Path to the executable for the current OS
-}
-
 // ExtractWatcherPackage extracts a .watcher file to a temporary directory
-func ExtractWatcherPackage(packagePath string) (*WatcherPackage, error) {
+func ExtractWatcherPackage(packagePath string) (*Package, error) {
 	// Create a unique temporary directory
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("watcher_%s_%d", 
 		filepath.Base(packagePath), os.Getpid()))
@@ -125,15 +117,15 @@ func ExtractWatcherPackage(packagePath string) (*WatcherPackage, error) {
 		}
 	}
 	
-	return &WatcherPackage{
-		TempDir:       tempDir,
-		RuntimeConfig: config,
-		Executable:    executablePath,
+	return &Package{
+		TempDir:    	tempDir,
+		Metadata: 		config,
+		Runtimepath: 	executablePath,
 	}, nil
 }
 
 // CleanupWatcherPackage removes the temporary directory of an extracted package
-func CleanupWatcherPackage(wp *WatcherPackage) error {
+func CleanupWatcherPackage(wp *Package) error {
 	if wp != nil && wp.TempDir != "" {
 		return os.RemoveAll(wp.TempDir)
 	}

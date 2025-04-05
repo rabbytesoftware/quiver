@@ -21,8 +21,6 @@ type PackagesHost struct {
 	Packages    map[string]*shared.Package
 	NextPort    int
 	mutex       sync.Mutex
-	// Store extracted watcher packages
-	WatcherPackages map[string]*shared.WatcherPackage
 }
 
 // NewPackagesHost creates a new package host
@@ -30,7 +28,6 @@ func NewPackagesHost(packagesDir string) *PackagesHost {
 	return &PackagesHost{
 		PackagesDir:     packagesDir,
 		Packages:        make(map[string]*shared.Package),
-		WatcherPackages: make(map[string]*shared.WatcherPackage),
 		NextPort:        50051, // Starting port for packages
 	}
 }
@@ -66,13 +63,8 @@ func (h *PackagesHost) DiscoverPackages() error {
 			h.NextPort++
 			
 			// Store the watcher package
-			h.WatcherPackages[filePath] = watcherPkg
-			
-			// Register the package in the packages map
-			h.Packages[filePath] = &shared.Package{
-				BasePort: port,
-				Metadata: watcherPkg.RuntimeConfig,
-			}
+			watcherPkg.BasePort = port
+			h.Packages[filePath] = watcherPkg
 			
 			continue
 		}
@@ -105,17 +97,14 @@ func (h *PackagesHost) GetAllPackages() (
 		Callback func() (bool, error)
 	}
 
-	for path, info := range h.Packages {
-		path := path // Create local copy for closure
-		info := info // Create local copy for closure
-		
+	for path, pkg := range h.Packages {
 		list = append(list, struct {
 			Item     string
 			Callback func() (bool, error)
 		}{
 			Item: path,
 			Callback: func() (bool, error) {
-				err := h.startPackage(path, info)
+				err := h.startPackage(pkg)
 				return err != nil, err
 			},
 		})
@@ -126,24 +115,24 @@ func (h *PackagesHost) GetAllPackages() (
 
 // CloseAllPackages stops all packages and cleans up
 func (h *PackagesHost) CloseAllPackages() {
-	for path, info := range h.Packages {
-		if info.Connection != nil {
+	for path, pkg := range h.Packages {
+		if pkg.Connection != nil {
 			// Try to stop the package gracefully
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-			info.Client.Exit(ctx, &pb.Empty{})
+			pkg.Client.Exit(ctx, &pb.Empty{})
 			cancel()
 
 			// Close the connection
-			info.Connection.Close()
+			pkg.Connection.Close()
 		}
 
 		// Kill the process if it's still running
-		if info.Process != nil {
-			info.Process.Kill()
+		if pkg.Process != nil {
+			pkg.Process.Kill()
 		}
 		
 		// Clean up watcher package if applicable
-		if wp, ok := h.WatcherPackages[path]; ok {
+		if wp, ok := h.Packages[path]; ok {
 			shared.CleanupWatcherPackage(wp)
 		}
 	}

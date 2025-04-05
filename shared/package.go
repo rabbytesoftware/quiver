@@ -14,6 +14,9 @@ import (
 type Package struct {
 	Metadata  	*pc.PackageConfig
 
+	Runtimepath string
+	TempDir     string
+
 	Client      pb.PackageServiceClient
 
 	Process     *os.Process
