@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -65,52 +63,15 @@ func (h *PackagesHost) DiscoverPackages() error {
 			// Store the watcher package
 			watcherPkg.BasePort = port
 			h.Packages[filePath] = watcherPkg
+
+			// Cleanup the watcher package
+			shared.CleanupWatcherPackage(watcherPkg)
 			
 			continue
-		}
-		
-		// Handle regular executable packages (non-watcher)
-		if isExecutable(filePath) {
-			// Generate a port for this package
-			port := h.NextPort
-			h.NextPort++
-
-			packagePath := filePath
-			h.Packages[packagePath] = &shared.Package{
-				BasePort: port,
-			}
 		}
 	}
 
 	return nil
-}
-
-func (h *PackagesHost) GetAllPackages() (
-	[]struct {
-		Item     string
-		Callback func() (bool, error)
-	},
-	error,
-) {
-	var list []struct {
-		Item     string
-		Callback func() (bool, error)
-	}
-
-	for path, pkg := range h.Packages {
-		list = append(list, struct {
-			Item     string
-			Callback func() (bool, error)
-		}{
-			Item: path,
-			Callback: func() (bool, error) {
-				err := h.startPackage(pkg)
-				return err != nil, err
-			},
-		})
-	}
-
-	return list, nil
 }
 
 // CloseAllPackages stops all packages and cleans up
@@ -135,20 +96,5 @@ func (h *PackagesHost) CloseAllPackages() {
 		if wp, ok := h.Packages[path]; ok {
 			shared.CleanupWatcherPackage(wp)
 		}
-	}
-}
-
-// isExecutable checks if a file is executable based on the OS
-func isExecutable(path string) bool {
-	if runtime.GOOS == "windows" {
-		// On Windows, check if the file has .exe extension
-		return strings.ToLower(filepath.Ext(path)) == ".exe"
-	} else {
-		// On Unix-like systems, check file permissions
-		info, err := os.Stat(path)
-		if err != nil {
-			return false
-		}
-		return info.Mode()&0111 != 0
 	}
 }

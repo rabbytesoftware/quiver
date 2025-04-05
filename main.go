@@ -24,14 +24,6 @@ func main() {
 		return
 	}
 
-	// Load all packages -> Test the package host
-	packages, err := host.GetAllPackages()
-	if err != nil {
-		log.Fatalf("Failed to load packages: %v", err)
-	}
-	view.ProgressLoader("Loading Packages", "Loading", packages)
-	defer host.CloseAllPackages()
-
 	// Display loaded packages
 	packageNames := make([][]string, 0, len(host.Packages))
 	for _, pkg := range host.Packages {
