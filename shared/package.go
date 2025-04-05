@@ -7,15 +7,12 @@ import (
 
 	"google.golang.org/grpc"
 
+	pc "rounds.com.ar/watcher/sdk/base/package-config"
 	pb "rounds.com.ar/watcher/sdk/package"
 )
 
 type Package struct {
-	Version     string
-	Icon 		string
-	Name        string
-	Description string
-	MaxPorts	int32
+	Metadata  	*pc.PackageConfig
 
 	Client      pb.PackageServiceClient
 

@@ -34,9 +34,10 @@ func main() {
 
 	// Display loaded packages
 	packageNames := make([][]string, 0, len(host.Packages))
-	for _, info := range host.Packages {
-		packageNames = append(packageNames, []string{info.Name, info.Version, info.Description, info.Icon})
+	for _, pkg := range host.Packages {
+		meta := pkg.Metadata
+		packageNames = append(packageNames, []string{meta.Name, meta.Version, meta.URL, meta.BuildNumber})
 	}
 
-	view.Table("Packages", []string{"Name", "Version", "Description", "Icon"}, packageNames)
+	view.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
 }

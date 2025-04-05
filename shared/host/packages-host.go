@@ -51,7 +51,7 @@ func (h *PackagesHost) DiscoverPackages() error {
 		}
 
 		filePath := filepath.Join(h.PackagesDir, file.Name())
-		
+
 		// Check if it's a watcher package (.watcher extension)
 		if strings.ToLower(filepath.Ext(filePath)) == ".watcher" {
 			// Extract the watcher package
@@ -71,7 +71,7 @@ func (h *PackagesHost) DiscoverPackages() error {
 			// Register the package in the packages map
 			h.Packages[filePath] = &shared.Package{
 				BasePort: port,
-				
+				Metadata: watcherPkg.RuntimeConfig,
 			}
 			
 			continue
