@@ -26,7 +26,9 @@ func NewPackagesHost(packagesDir string) *PackagesHost {
 	return &PackagesHost{
 		PackagesDir:     packagesDir,
 		Packages:        make(map[string]*shared.Package),
-		NextPort:        50051, // Starting port for packages
+		NextPort:        50051, // TODO: With the NetBridge system, we can check if 
+								// TODO: the port is on use by another software, and
+								// TODO: try another.
 	}
 }
 
