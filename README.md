@@ -26,7 +26,7 @@ Stay tuned for updates!
 
 ## Testing Workflow
 
-![1744152698206](assets/how-we-test-things.png)
+![1744152698206](.github/how-we-test-things.png)
 
 At Rabbyte, we follow a structured testing workflow to ensure the quality of our builds. Here's how it works:
 
