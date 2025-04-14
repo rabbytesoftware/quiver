@@ -1,4 +1,4 @@
-package shared
+package packages
 
 import (
 	"fmt"
@@ -9,15 +9,27 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
 	pb "rounds.com.ar/watcher/sdk/package"
-	pkg "rounds.com.ar/watcher/shared"
 )
 
+type PackageRuntime struct {
+	PackagePath string
+	RuntimePath string
+	TempDir     string
+
+	Client      pb.PackageServiceClient
+
+	Process     *os.Process
+	Connection  *grpc.ClientConn
+	BasePort    int
+}
+
 // startPackage launches a package process and connects to it
-func (h *PackagesHost) startPackage(pkg *pkg.Package) error {
+func (pkg *PackageRuntime) StartPackage() error {
 	// Launch the package with the port as an argument
 	cmd := exec.Command(
-		pkg.Runtimepath, 
+		pkg.RuntimePath, 
 		strconv.Itoa(pkg.BasePort),
 	)
 	
@@ -45,6 +57,24 @@ func (h *PackagesHost) startPackage(pkg *pkg.Package) error {
 	client := pb.NewPackageServiceClient(conn)
 	pkg.Client = client
 	pkg.Connection = conn
+
+	return nil
+}
+
+func (pkg *PackageRuntime) StopPackage() error {
+	if pkg.Process != nil {
+		if err := pkg.Process.Kill(); err != nil {
+			return fmt.Errorf("failed to kill package process: %w", err)
+		}
+		pkg.Process = nil
+	}
+
+	if pkg.Connection != nil {
+		if err := pkg.Connection.Close(); err != nil {
+			return fmt.Errorf("failed to close connection: %w", err)
+		}
+		pkg.Connection = nil
+	}
 
 	return nil
 }
