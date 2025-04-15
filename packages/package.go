@@ -33,7 +33,7 @@ func (pkg *Package) Start() error {
 func (pkg *Package) Remove() error {
 	err := pkg.Exit()
 	if err != nil {
-		fmt.Println("Error exiting the package:", err)
+		return fmt.Errorf("failed to exit the package: %w", err)
 	}
 
 	err = pkg.Runtime.StopPackage()
