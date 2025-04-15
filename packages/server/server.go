@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	pkgs "rounds.com.ar/watcher/packages"
+	logger "rounds.com.ar/watcher/view/logger"
 )
 
 type PackagesServer struct {
@@ -58,13 +59,13 @@ func (h *PackagesServer) Discover() error {
 
 			err := watcherPkg.Start()
 			if err != nil {
-				fmt.Printf("Warning: Failed to extract watcher package %s: %v\n", filePath, err)
+				logger.It.Warn("Failed to extract watcher package %s: %v\n", filePath, err)
 				continue
 			}
 
 			err = watcherPkg.Remove()
 			if err != nil {
-				fmt.Printf("Warning: Failed to remove watcher package %s: %v\n", filePath, err)
+				logger.It.Warn("Warning: Failed to remove watcher package %s: %v\n", filePath, err)
 				continue
 			}
 			
