@@ -24,8 +24,6 @@ func main() {
 		logger.It.Warn("No packages found in %s", packagesDir)
 	}
 
-	// "test"
-
 	packageNames := make([][]string, 0, len(pkgServer.Packages))
 	for _, pkg := range pkgServer.Packages {
 		packageNames = append(packageNames, []string{pkg.Name, pkg.Version, pkg.URL, pkg.BuildNumber})
