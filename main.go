@@ -1,34 +1,35 @@
 package main
 
 import (
-	"log"
-
 	server "rounds.com.ar/watcher/packages/server"
-	view "rounds.com.ar/watcher/view"
+	ui "rounds.com.ar/watcher/view"
+	logger "rounds.com.ar/watcher/view/logger"
 )
 
 func main() {
-	view.Init()
+	logger.It = logger.NewLogger()
 
-	// Create package host
+	ui.Welcome(logger.It)
+
+	logger.It.Load("Loading packages...")
 	packagesDir := "./pkgs"
 	pkgServer := server.NewPackagesServer(packagesDir)
 
-	// Discover packages
 	if err := pkgServer.Discover(); err != nil {
-		log.Fatalf("Failed to discover packages: %v", err)
-	}
-
-	if len(pkgServer.Packages) == 0 {
-		log.Printf("No packages found in %s", packagesDir)
+		logger.It.Fatal("Failed to discover packages: %v", err)
 		return
 	}
 
-	// Display loaded packages
+	if len(pkgServer.Packages) == 0 {
+		logger.It.Warn("No packages found in %s", packagesDir)
+	}
+
 	packageNames := make([][]string, 0, len(pkgServer.Packages))
 	for _, pkg := range pkgServer.Packages {
 		packageNames = append(packageNames, []string{pkg.Name, pkg.Version, pkg.URL, pkg.BuildNumber})
 	}
 
-	view.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
+	ui.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
+
+	logger.It.Ok("Packages loaded successfully")
 }
