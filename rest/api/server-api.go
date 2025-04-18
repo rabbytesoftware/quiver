@@ -20,7 +20,7 @@ func CreateServerAPI(addr string) (*ApiServer){
 
 func (s *ApiServer) Run() error{
 	router := mux.NewRouter()
-	subrouter := router.PathPrefix("api-url/v1").Subrouter()
+	subrouter := router.PathPrefix("api/v1").Subrouter()
 	packagesHandler := packages_routes.NewHandler().PackagesRoutes(subrouter)
 	singlePackageHandler := packages_routes.NewHandler().SinglePackageRoutes(subrouter)
 
