@@ -32,7 +32,11 @@ func (h *Handler) SinglePackageRoutes(router *mux.Router){
 	// Run package 
 	router.HandleFunc("/package/{name}/run", single_package_handlers.RunPackageHandler).Methods("PATCH")
 
+	// Initialize package
+	router.HandleFunc("/package/{name}/init", single_package_handlers.InitPackageHandler)
+
 	// Stop package process 
 	router.HandleFunc("/package/{name}/stop", single_package_handlers.ShutdownPackageHandler).Methods("PATCH")
+
 }
 
