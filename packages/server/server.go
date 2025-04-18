@@ -2,7 +2,7 @@ package server
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -34,7 +34,7 @@ func (h *PackagesServer) Discover() error {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	files, err := ioutil.ReadDir(h.PackagesDir)
+	files, err := os.ReadDir(h.PackagesDir)
 	if err != nil {
 		return fmt.Errorf("failed to read packages directory: %w", err)
 	}
@@ -57,13 +57,13 @@ func (h *PackagesServer) Discover() error {
 			watcherPkg.Runtime.BasePort = h.NextPort
 			h.NextPort++
 
-			err := watcherPkg.Start()
+			err := watcherPkg.Init()
 			if err != nil {
 				logger.It.Warn("Failed to extract watcher package %s: %v\n", filePath, err)
 				continue
 			}
 
-			err = watcherPkg.Remove()
+			err = watcherPkg.Shutdown()
 			if err != nil {
 				logger.It.Warn("Warning: Failed to remove watcher package %s: %v\n", filePath, err)
 				continue
@@ -80,6 +80,6 @@ func (h *PackagesServer) Discover() error {
 // CloseAllPackages stops all packages and cleans up
 func (h *PackagesServer) CloseAll() {
 	for _, pkg := range h.Packages {
-		pkg.Remove()
+		pkg.Shutdown()
 	}
 }
