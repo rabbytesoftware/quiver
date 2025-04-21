@@ -2,6 +2,8 @@
 
 Welcome to the **Watcher API** documentation.
 
+---
+
 ## Features 💎
 
 - Packages
