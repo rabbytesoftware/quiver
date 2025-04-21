@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 	packages "rounds.com.ar/watcher/packages"
 	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
+	logger "rounds.com.ar/watcher/view/logger"
 )
 
 func getPackage(name string) (*packages.Package, error) {
@@ -49,7 +50,7 @@ func GetSinglePackageHandler(w http.ResponseWriter, r *http.Request){
 	pkg, err := getPackage(pkgName)
 
 	if err != nil {
-		fmt.Println("Error:", err)
+		logger.It.Error("Error: %v", err)
     return
 	}
 

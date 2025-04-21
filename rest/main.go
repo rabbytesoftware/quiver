@@ -24,12 +24,12 @@ func main() {
 	// Check if any result
 	if len(pkgServer.Packages) == 0 {
 		logger.It.Warn("no packages found in %s", packagesDir)
-		return
 	}
 
 	// Assign to global variable
 	packages_global_variables.Packages = pkgServer.Packages 
 
+	// Return error if server fails
 	if err := serverApi.Run(); err != nil {
 		logger.It.Error("Error running server.")
 	}
