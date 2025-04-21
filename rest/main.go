@@ -1,12 +1,10 @@
-package api_main
+package main
 
 import (
-	"fmt"
-
 	server "rounds.com.ar/watcher/packages/server"
 	api "rounds.com.ar/watcher/rest/api"
-	logger "rounds.com.ar/watcher/view/logger"
 	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
+	logger "rounds.com.ar/watcher/view/logger"
 )
 
 
@@ -14,7 +12,7 @@ func main() {
 	serverApi := api.CreateServerAPI(":8080")
 
 	logger.It.Load("Loading packages...")
-	packagesDir := "./pkgs"
+	packagesDir := "../pkgs"
 	pkgServer := server.NewPackagesServer(packagesDir)
 
 	// Get packages list
@@ -33,6 +31,6 @@ func main() {
 	packages_global_variables.Packages = pkgServer.Packages 
 
 	if err := serverApi.Run(); err != nil {
-		fmt.Errorf("Error running server.")
+		logger.It.Error("Error running server.")
 	}
 }

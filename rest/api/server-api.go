@@ -21,8 +21,9 @@ func CreateServerAPI(addr string) (*ApiServer){
 func (s *ApiServer) Run() error{
 	router := mux.NewRouter()
 	subrouter := router.PathPrefix("api/v1").Subrouter()
-	packagesHandler := packages_routes.NewHandler().PackagesRoutes(subrouter)
-	singlePackageHandler := packages_routes.NewHandler().SinglePackageRoutes(subrouter)
+
+	packages_routes.NewHandler().PackagesRoutes(subrouter)
+	packages_routes.NewHandler().SinglePackageRoutes(subrouter)
 
 	log.Println("Server listening on", s.addr)
 

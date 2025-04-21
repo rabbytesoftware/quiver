@@ -1,10 +1,11 @@
 package single_package_handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
-	"encoding/json"
+
 	"github.com/gorilla/mux"
 	packages "rounds.com.ar/watcher/packages"
 	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
@@ -62,6 +63,21 @@ func DeletePackageHandler(w http.ResponseWriter, r *http.Request){
 	pkgName := strings.ToLower(params["name"])
 
 	checkIfPackageNameIsValid(pkgName, w)
+
+	// pkg, err := getPackage(pkgName)
+
+	// if err != nil {
+	// 	fmt.Println("Error:", err)
+	// 	return
+	// }
+
+	// if _, err := pkg.Uninstall(); err != nil {
+	// 	http.Error(w, "An error occurred while uninstalling the package.", http.StatusBadRequest)
+	// 	return
+	// }
+
+	w.WriteHeader(http.StatusNoContent)
+	w.Write([]byte(""))
 }
 
 func InstallPackageHandler(w http.ResponseWriter, r *http.Request){
@@ -82,7 +98,7 @@ func InstallPackageHandler(w http.ResponseWriter, r *http.Request){
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte("The package has been successfully installed."))
 }
 
