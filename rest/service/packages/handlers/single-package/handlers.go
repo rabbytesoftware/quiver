@@ -1,26 +1,26 @@
 package single_package_handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
-
+	"encoding/json"
 	"github.com/gorilla/mux"
 	packages "rounds.com.ar/watcher/packages"
-	pc "rounds.com.ar/watcher/sdk/base/package-config"
+	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
 )
 
-func getPackage(name string) *packages.Package {
-	pkg := &packages.Package{
-	PackageConfig: &pc.PackageConfig{
-		// Inicializá campos necesarios acá
-	},
-	Runtime: &packages.PackageRuntime{
-		// Inicializá campos necesarios acá
-	},
-}	
+func getPackage(name string) (*packages.Package, error) {
+	packagesList := packages_global_variables.Packages
+	pkg, ok := packagesList[name]
 
-	return pkg
+	if !ok {
+    return nil, fmt.Errorf("package '%s' not found", name)
+	}
+
+  return pkg, nil
 }
+
 
 func checkIfPackageNameIsValid(name string, w http.ResponseWriter) {
 	if len(name) == 0 {
@@ -45,6 +45,16 @@ func GetSinglePackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
+	pkg, err := getPackage(pkgName)
+
+	if err != nil {
+		fmt.Println("Error:", err)
+    return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(pkg)
 }
 
 func DeletePackageHandler(w http.ResponseWriter, r *http.Request){
@@ -60,7 +70,12 @@ func InstallPackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg := getPackage(pkgName)
+	pkg, err := getPackage(pkgName)
+
+	if err != nil {
+		fmt.Println("Error:", err)
+    return
+	}
 
 	if _, err := pkg.Install(); err != nil {
 		http.Error(w, "An error occurred while installing the package.", http.StatusBadRequest)
@@ -77,12 +92,20 @@ func RunPackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg := getPackage(pkgName)
+	pkg, err := getPackage(pkgName)
+
+	if err != nil {
+		fmt.Println("Error:", err)
+    return
+	}
 
 	if _, err := pkg.Run(); err != nil {
 		http.Error(w, "Error running package.", http.StatusBadRequest)
 		return
 	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Running package..."))
 }
 
 func ShutdownPackageHandler(w http.ResponseWriter, r *http.Request){
@@ -92,12 +115,20 @@ func ShutdownPackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg := getPackage(pkgName)
+	pkg, err := getPackage(pkgName)
+
+	if err != nil {
+		fmt.Println("Error:", err)
+    return
+	}
 
 	if err := pkg.Shutdown(); err != nil {
 		http.Error(w, "Error shutting down package process.", http.StatusBadRequest)
 		return
 	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Shutting down package..."))
 }
 
 func InitPackageHandler(w http.ResponseWriter, r *http.Request){
@@ -106,10 +137,18 @@ func InitPackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg := getPackage(pkgName)
+	pkg, err := getPackage(pkgName)
+
+	if err != nil {
+		fmt.Println("Error:", err)
+    return
+	}
 
 	if err := pkg.Init(); err != nil {
 		http.Error(w, "Error initializing package.", http.StatusBadRequest)
 		return
 	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Initializing package..."))
 }
