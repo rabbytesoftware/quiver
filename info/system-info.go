@@ -1,4 +1,4 @@
-package kerner
+package info
 
 var DevelopedBy string 	= "Rabbyte Software"
 var Version string 		= "dev 5.25"

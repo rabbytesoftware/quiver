@@ -1,7 +1,9 @@
 package main
 
 import (
+	netbridge "rounds.com.ar/watcher/netbridge"
 	server "rounds.com.ar/watcher/packages/server"
+
 	ui "rounds.com.ar/watcher/view"
 	logger "rounds.com.ar/watcher/view/logger"
 )
@@ -10,6 +12,14 @@ func main() {
 	logger.It = logger.NewLogger()
 
 	ui.Welcome(logger.It)
+
+	logger.It.Load("Loading Netbridge...")
+	netbridge, err := netbridge.NewNetbridge()
+	if err != nil {
+		logger.It.Fatal("Failed to init Netbridge: %v", err)
+		return
+	}
+	logger.It.Ok("Device registered with IP: %s", netbridge.PublicIP)
 
 	logger.It.Load("Loading packages...")
 	packagesDir := "./pkgs"

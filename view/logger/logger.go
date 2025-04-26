@@ -24,29 +24,29 @@ func (l *Logger) log(level LogLevel, msg string, attributes ...any) {
 }
 
 func (l *Logger) Debug(msg string, attributes ...any) {
-	l.log(Debug, msg)
+	l.log(Debug, msg, attributes...)
 }
 
 func (l *Logger) Info(msg string, attributes ...any) {
-	l.log(Info, msg)
+	l.log(Info, msg, attributes...)
 }
 
 func (l *Logger) Ok(msg string, attributes ...any) {
-	l.log(Ok, msg)
+	l.log(Ok, msg, attributes...)
 }
 
 func (l *Logger) Load(msg string, attributes ...any) {
-	l.log(Load, msg)
+	l.log(Load, msg, attributes...)
 }
 
 func (l *Logger) Warn(msg string, attributes ...any) {
-	l.log(Warn, msg)
+	l.log(Warn, msg, attributes...)
 }
 
 func (l *Logger) Error(msg string, attributes ...any) {
-	l.log(Error, msg)
+	l.log(Error, msg, attributes...)
 }
 
 func (l *Logger) Fatal(msg string, attributes ...any) {
-	l.log(Fatal, msg)
+	l.log(Fatal, msg, attributes...)
 }
