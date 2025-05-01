@@ -14,7 +14,13 @@ import (
 
 func getPackage(name string) (*packages.Package, error) {
 	packagesList := packages_global_variables.Packages
-	pkg, ok := packagesList[name]
+	// Convert package name
+	// from this 'package-name'
+	// to this 'pkgs/package-name.watcher'
+	pkgFullName := strings.Join([]string{"pkgs/", name, ".watcher"}, "")
+
+	// Fetch package by fullName
+	pkg, ok := packagesList[pkgFullName]
 
 	if !ok {
     return nil, fmt.Errorf("package '%s' not found", name)
@@ -65,6 +71,7 @@ func DeletePackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
+	// TODO
 	// pkg, err := getPackage(pkgName)
 
 	// if err != nil {
