@@ -12,9 +12,9 @@ func main() {
 	serverApi := api.CreateServerAPI(":8080")
 
 	logger.It.Load("Loading packages...")
-	packagesDir := "../pkgs"
+	packagesDir := "./pkgs"
 	pkgServer := server.NewPackagesServer(packagesDir)
-
+	logger.It.Info("%s", packagesDir)
 	// Get packages list
 	if err := pkgServer.Discover(); err != nil {
 		logger.It.Fatal("failed to discover packages: %v", err)
