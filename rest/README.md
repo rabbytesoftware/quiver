@@ -37,7 +37,19 @@ Retrieve the list of all available packages.
 **Request Body**
 
 ```json
-{}
+{
+  "pkgs/package-name.watcher": {
+    "url": "String<URL>",
+    "name": "String",
+    "version": "String",
+    "maintainers": "String[]",
+    "icon": "String<Path>",
+    "netbridge": {
+      "maxports": "Number"
+    },
+    "buildNumber": "String<Number>"
+  }
+}
 ```
 
 ---
@@ -55,7 +67,17 @@ Get information about a specific package.
 **Request Body**
 
 ```json
-{}
+{
+  "url": "String<URL>",
+  "name": "String",
+  "version": "String",
+  "maintainers": "String[]",
+  "icon": "String<Path>",
+  "netbridge": {
+    "maxports": "Number"
+  },
+  "buildNumber": "String<Number>"
+}
 ```
 
 ---
