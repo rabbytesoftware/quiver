@@ -7,27 +7,12 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	packages "rounds.com.ar/watcher/packages"
+	functions "rounds.com.ar/watcher/rest/shared/utils/packages/functions"
 	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
 	logger "rounds.com.ar/watcher/view/logger"
 )
 
-func getPackage(name string) (*packages.Package, error) {
-	packagesList := packages_global_variables.Packages
-	// Convert package name
-	// from this 'package-name'
-	// to this 'pkgs/package-name.watcher'
-	pkgFullName := strings.Join([]string{"pkgs/", name, ".watcher"}, "")
-
-	// Fetch package by fullName
-	pkg, ok := packagesList[pkgFullName]
-
-	if !ok {
-    return nil, fmt.Errorf("package '%s' not found", name)
-	}
-
-  return pkg, nil
-}
+// * Utils *
 
 
 func checkIfPackageNameIsValid(name string, w http.ResponseWriter) {
@@ -47,22 +32,27 @@ func checkIfPackageNameIsValid(name string, w http.ResponseWriter) {
 
 }
 
+// * Handlers *
+
 func GetSinglePackageHandler(w http.ResponseWriter, r *http.Request){
 	params := mux.Vars(r)
 	pkgName := strings.ToLower(params["name"])
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := getPackage(pkgName)
+	_, err := functions.GetPackage(pkgName)
 
 	if err != nil {
 		logger.It.Error("Error: %v", err)
     return
 	}
 
+	pkgs := packages_global_variables.Packages
+	filteredPkg, _ := functions.FilterPackagesRuntimeKey(pkgs, pkgName)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(pkg)
+	json.NewEncoder(w).Encode(filteredPkg)
 }
 
 func DeletePackageHandler(w http.ResponseWriter, r *http.Request){
@@ -94,7 +84,7 @@ func InstallPackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := getPackage(pkgName)
+	pkg, err := functions.GetPackage(pkgName)
 
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -116,7 +106,7 @@ func RunPackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := getPackage(pkgName)
+	pkg, err := functions.GetPackage(pkgName)
 
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -139,7 +129,7 @@ func ShutdownPackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := getPackage(pkgName)
+	pkg, err := functions.GetPackage(pkgName)
 
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -161,7 +151,7 @@ func InitPackageHandler(w http.ResponseWriter, r *http.Request){
 
 	checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := getPackage(pkgName)
+	pkg, err := functions.GetPackage(pkgName)
 
 	if err != nil {
 		fmt.Println("Error:", err)
