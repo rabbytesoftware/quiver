@@ -4,6 +4,8 @@ import (
 	server "rounds.com.ar/watcher/packages/server"
 	ui "rounds.com.ar/watcher/view"
 	logger "rounds.com.ar/watcher/view/logger"
+	api "rounds.com.ar/watcher/rest/api"
+	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
 )
 
 func main() {
@@ -32,4 +34,15 @@ func main() {
 	ui.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
 
 	logger.It.Ok("Packages loaded successfully")
+
+	// Server API
+	serverApi := api.CreateServerAPI(":8080")
+
+	// Assign to packages global variable
+	packages_global_variables.Packages = pkgServer.Packages 
+
+	// Return error if server fails
+	if err := serverApi.Run(); err != nil {
+		logger.It.Error("Error running server.")
+	}
 }
