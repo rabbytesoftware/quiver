@@ -8,6 +8,7 @@ import (
 type LogEntry struct {
 	Timestamp time.Time
 	Level     LogLevel
+	Service   string
 	Message   string
 }
 

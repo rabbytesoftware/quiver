@@ -13,17 +13,17 @@ func main() {
 
 	ui.Welcome(logger.It)
 
-	logger.It.Load("Loading packages...")
+	logger.It.Load("api-main", "Loading packages...")
 	packagesDir := "./pkgs"
 	pkgServer := server.NewPackagesServer(packagesDir)
 
 	if err := pkgServer.Discover(); err != nil {
-		logger.It.Fatal("Failed to discover packages: %v", err)
+		logger.It.Fatal("api-main", "Failed to discover packages: %v", err)
 		return
 	}
 
 	if len(pkgServer.Packages) == 0 {
-		logger.It.Warn("No packages found in %s", packagesDir)
+		logger.It.Warn("api-main", "No packages found in %s", packagesDir)
 	}
 
 	packageNames := make([][]string, 0, len(pkgServer.Packages))
@@ -33,7 +33,7 @@ func main() {
 
 	ui.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
 
-	logger.It.Ok("Packages loaded successfully")
+	logger.It.Ok("api-main", "Packages loaded successfully")
 
 	// Server API
 	serverApi := api.CreateServerAPI(":8080")
@@ -43,6 +43,6 @@ func main() {
 
 	// Return error if server fails
 	if err := serverApi.Run(); err != nil {
-		logger.It.Error("Error running server.")
+		logger.It.Error("api-main", "Error running server.")
 	}
 }
