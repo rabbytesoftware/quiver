@@ -6,7 +6,7 @@ import (
 )
 
 func CompressFile(originalFile *os.File, compressFolderPath, level string) error{
-	// Create compressed file
+	// Create compressed file with name format
 	// "level-compressed-timestamp.txt.gz"
 	createdFile, createErr := CreateFile(compressFolderPath, level, true)
 
@@ -16,8 +16,9 @@ func CompressFile(originalFile *os.File, compressFolderPath, level string) error
 
 	defer createdFile.Close()
 
-	// Compress created file
+	// Create gzip writer
 	compressedFile := CompressToGzipFile(createdFile)
+	defer compressedFile.Close()
 
 	// Copy original file content
 	// to the compressed one
@@ -27,13 +28,11 @@ func CompressFile(originalFile *os.File, compressFolderPath, level string) error
 		return fmt.Errorf("could not copy original file content to the compressed one:", copyErr)
 	}
 
-	defer compressedFile.Close()
-
 	// Delete original file
 	deleteErr := DeleteFile(originalFile)
 
 	if deleteErr != nil {
-		return fmt.Errorf("Could not delete the original file:", deleteErr)
+		return fmt.Errorf("could not delete the original file:", deleteErr)
 	}
 
 	return nil
