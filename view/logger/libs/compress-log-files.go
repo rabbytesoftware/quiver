@@ -4,7 +4,7 @@ import (
 	"os"
 )
 
-func CompressFile(f *os.File, compressFolderPath string){
+func CompressFile(f *os.File, compressFolderPath string, level string){
 	// Comprime el archivo a GZIP
 		// Crea un archivo "level-compressed-timestamp.txt.gz"
 		// Copia el contenido del archivo original al archivo comprimido
