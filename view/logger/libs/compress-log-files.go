@@ -1,13 +1,40 @@
 package logger
 
 import (
+	"fmt"
 	"os"
 )
 
-func CompressFile(f *os.File, compressFolderPath string, level string){
-	// Comprime el archivo a GZIP
-		// Crea un archivo "level-compressed-timestamp.txt.gz"
-		// Copia el contenido del archivo original al archivo comprimido
-		// Elimina el archivo original
-		// Mueve el archivo GZIP a una carpeta donde se encuentran los archivos comprimidos
+func CompressFile(originalFile *os.File, compressFolderPath, level string) error{
+	// Create compressed file
+	// "level-compressed-timestamp.txt.gz"
+	createdFile, createErr := CreateFile(compressFolderPath, level, true)
+
+	if createErr != nil {
+		return fmt.Errorf("could not create compressed file:", createErr)
+	}
+
+	defer createdFile.Close()
+
+	// Compress created file
+	compressedFile := CompressToGzipFile(createdFile)
+
+	// Copy original file content
+	// to the compressed one
+	copyErr := CopyFileContentToCompressedGzipFile(originalFile, compressedFile)
+
+	if copyErr != nil {
+		return fmt.Errorf("could not copy original file content to the compressed one:", copyErr)
+	}
+
+	defer compressedFile.Close()
+
+	// Delete original file
+	deleteErr := DeleteFile(originalFile)
+
+	if deleteErr != nil {
+		return fmt.Errorf("Could not delete the original file:", deleteErr)
+	}
+
+	return nil
 }

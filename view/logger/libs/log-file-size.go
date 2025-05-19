@@ -1,10 +1,10 @@
 package logger
 
-import(
-	"strings"
+import (
+	"fmt"
 	"os"
 	"strconv"
-	"fmt"
+	"strings"
 )
 
 func GetFileSize(f *os.File, unit string) (int64, error) {
@@ -21,16 +21,17 @@ func GetFileSize(f *os.File, unit string) (int64, error) {
 	// Improve readability.
 	// Working with bytes
 	// directly can be messy
-
 	switch strings.ToLower(unit) {
-    case "mb":
-        return fileSizeInBytes / 1_000_000, nil // 1 million
-    case "gb":
-        return fileSizeInBytes / 1_000_000_000, nil // 1 billion
-    default:
-        return fileSizeInBytes, nil
-  }
-	
+		case "kb":
+    	return fileSizeInBytes / 1_024, nil
+		case "mb":
+    	return fileSizeInBytes / (1024 * 1024), nil
+		case "gb":
+    	return fileSizeInBytes / (1024 * 1024 * 1024), nil
+		default:
+    	return fileSizeInBytes, nil
+	}
+
 }
 
 func GetMaxFileSize() int {

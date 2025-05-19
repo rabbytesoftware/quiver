@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"time"
+	"compress/gzip"
 )
 
 func createOrAppendFile(folderPath string, l Logger) (*os.File, error) {
@@ -27,16 +28,15 @@ func createOrAppendFile(folderPath string, l Logger) (*os.File, error) {
 
 func CreateFile(folderPath, level string, compressed bool) (*os.File, error){
 	// Create folder if not exists
-	err := os.MkdirAll(folderPath, os.ModePerm)
-  if err != nil {
-    fmt.Println("Error creating log folder:", err)
-    return nil, err
+	createFolderErr := os.MkdirAll(folderPath, os.ModePerm)
+  if createFolderErr != nil {
+    return nil, fmt.Errorf("error creating log folder:", createFolderErr)
   }
 	
 	var filePath string = ""
 
 	// Compress and uncompress
-	// file names are different
+	// file's name are different
 	if compressed {
 		timestamp := time.Now().Format("2006-01-02_15-04-05.000")
 		filePath = fmt.Sprintf("%s/%s-compressed-%s.txt.gz", folderPath, level, timestamp)
@@ -45,12 +45,12 @@ func CreateFile(folderPath, level string, compressed bool) (*os.File, error){
 	}
 
 	// Create file
-	file, err := os.Create(filePath)
-	if err != nil {
-		return nil, err
+	createdFile, createFileErr := os.Create(filePath)
+	if createFileErr != nil {
+		return nil, fmt.Errorf("error creating log file:", createFileErr)
 	}
-
-	return file, nil
+	
+	return createdFile, nil
 }
 
 // Do nothing
