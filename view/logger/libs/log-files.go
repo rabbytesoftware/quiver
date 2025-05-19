@@ -87,10 +87,10 @@ func SaveLogToFile(folderPath string, l Logger) error {
   logLine := fmt.Sprintf("[%s] %s: %s - (%s)\n", l.Level, l.Service, l.Message, l.Timestamp)
 
 	// Append log
-  _, err = file.WriteString(logLine)
+  _, writeErr := file.WriteString(logLine)
 
-  if err != nil {
-    fmt.Println("Error writing to log file:", err)
+  if writeErr != nil {
+		return fmt.Errorf("error writing to log file: %w", writeErr)
   }
 
 	return nil
