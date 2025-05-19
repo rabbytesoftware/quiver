@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"time"
-	"compress/gzip"
 )
 
 func createOrAppendFile(folderPath string, l Logger) (*os.File, error) {
@@ -26,11 +25,11 @@ func createOrAppendFile(folderPath string, l Logger) (*os.File, error) {
 	return file, nil;
 }
 
-func CreateFile(folderPath, level string, compressed bool) (*os.File, error){
+func CreateLogFile(folderPath, level string, compressed bool) (*os.File, error){
 	// Create folder if not exists
 	createFolderErr := os.MkdirAll(folderPath, os.ModePerm)
   if createFolderErr != nil {
-    return nil, fmt.Errorf("error creating log folder:", createFolderErr)
+    return nil, fmt.Errorf("error creating log folder: %w", createFolderErr)
   }
 	
 	var filePath string = ""
@@ -47,24 +46,37 @@ func CreateFile(folderPath, level string, compressed bool) (*os.File, error){
 	// Create file
 	createdFile, createFileErr := os.Create(filePath)
 	if createFileErr != nil {
-		return nil, fmt.Errorf("error creating log file:", createFileErr)
+		return nil, fmt.Errorf("error creating log file: %w", createFileErr)
 	}
 	
 	return createdFile, nil
 }
 
-// Do nothing
-func AppendLogToFile() (*os.File, error){
-	return nil, nil
+func AppendLogToFile(folderPath, level, content string) error {
+	filePath := fmt.Sprintf("%s/%s.txt", folderPath, level)
+	f, openErr := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+
+  if openErr != nil {
+    return fmt.Errorf("could not open file: %w", openErr)
+  }
+
+  defer f.Close()
+
+	_, writeErr := f.WriteString(content)
+
+	if writeErr != nil {
+		return fmt.Errorf("could not write in file: %w", writeErr)
+	}
+
+	return nil
 }
 
-func SaveLogToFile(folderPath string, l Logger){
+func SaveLogToFile(folderPath string, l Logger) error {
 	// Open file
-	file, err := createOrAppendFile(folderPath, l)
+	file, openErr := createOrAppendFile(folderPath, l)
 
-	if err != nil {
-		fmt.Println("Error opening log file:", err)
-		return;
+	if openErr != nil {
+		return fmt.Errorf("Error opening log file: %w", openErr)
 	}
 
 	// Close file
@@ -80,4 +92,6 @@ func SaveLogToFile(folderPath string, l Logger){
   if err != nil {
     fmt.Println("Error writing to log file:", err)
   }
+
+	return nil
 }
