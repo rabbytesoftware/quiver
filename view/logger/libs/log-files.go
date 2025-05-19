@@ -68,7 +68,7 @@ func SaveLogToFile(folderPath string, l Logger){
 	}
 
 	// Close file
-	file.Close()
+	defer file.Close()
 
 	// Log message format:
 	// [Level] Service: Message - (Timestamp)

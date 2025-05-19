@@ -1,10 +1,11 @@
 package logger
 
 import (
+	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
-	"fmt"
-	"compress/gzip"
+	"path/filepath"
 )
 
 func CopyFileContent(originalFile, newFile *os.File) error {
@@ -59,8 +60,48 @@ func DeleteFile(f *os.File) error {
 	return nil
 }
 
-func CompressToGzipFile(f *os.File) *gzip.Writer{
+func CompressToGzipFile(f *os.File) *gzip.Writer {
 	gzWriter := gzip.NewWriter(f)
 
 	return gzWriter
+}
+
+func FindFile(root, filename string) (string, error) {
+	var foundPath string
+
+	// Search by filename
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+    if err != nil {
+      return err
+    }
+		
+    if !d.IsDir() && d.Name() == filename {
+      foundPath = path
+      return filepath.SkipDir // stop search
+    }
+    
+		return nil
+  })
+
+	// Check if error
+  if err != nil {
+    return "", err
+  }
+
+	// Check if path is empty
+  if foundPath == "" {
+    return "", fmt.Errorf("file %s not found", filename)
+  }
+  
+	return foundPath, nil
+}
+
+func CheckIfFileExists(root, filename string) bool {
+	_, err := FindFile(root, filename)
+
+	if err != nil {
+		return false
+	}
+
+	return true
 }
