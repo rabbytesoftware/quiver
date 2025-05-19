@@ -105,3 +105,23 @@ func CheckIfFileExists(root, filename string) bool {
 
 	return true
 }
+
+func LogLevelToString(l Logger) string {
+	return l.Level.String()
+}
+
+func GetFile(root, filename string) (*os.File, error) {
+	filePath, findErr := FindFile(root, filename)
+
+	if findErr != nil {
+		return nil, fmt.Errorf("file not found: %w", findErr)
+	}
+
+	file, openErr := os.OpenFile(filePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+
+	if openErr != nil {
+		return nil, fmt.Errorf("could not open file: %w", openErr)
+	}
+
+	return file, nil
+}

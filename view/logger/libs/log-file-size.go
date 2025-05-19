@@ -51,3 +51,13 @@ func GetMaxFileSize() int {
 
   return size
 }
+
+func IsFileTooLarge(f *os.File) (bool, error) {
+	fileSize, err := GetFileSize(f, "mb")
+
+	if err != nil {
+		return false, fmt.Errorf("could not get file size: %w", err)
+	}
+
+	return fileSize >= 64, nil
+}
