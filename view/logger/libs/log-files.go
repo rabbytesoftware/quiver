@@ -35,8 +35,8 @@ func CreateLogFile(folderPath, level string, compressed bool) (*os.File, error){
 	return createdFile, nil
 }
 
-func AppendLogToFile(folderPath, level, content string) (*os.File, error) {
-	filePath := fmt.Sprintf("%s/%s.txt", folderPath, strings.ToLower(level))
+func AppendLogToFile(filePath, level, content string) (*os.File, error) {
+	// filePath := fmt.Sprintf("%s/%s.txt", folderPath, strings.ToLower(level))
 	f, openErr := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 
   if openErr != nil {
@@ -55,14 +55,33 @@ func AppendLogToFile(folderPath, level, content string) (*os.File, error) {
 }
 
 func SaveLogToFile(folderPath string, l Logger) error {
-
-
+	levelLower := strings.ToLower(l.Level.String())
 	// Log message format:
 	// [Level] Service: Message - (Timestamp)
-	logLine := fmt.Sprintf("[%s] %s: %s - (%s)\n", l.Level, l.Service, l.Message, l.Timestamp)
+	logLine := fmt.Sprintf("[%s] %s: %s - (%s)\n", levelLower, l.Service, l.Message, l.Timestamp)
+	filePath := fmt.Sprintf("%s/%s.txt", folderPath, levelLower)
+
+	// Find file by path
+	foundFile, findErr := GetFile(".", filePath)
+
+	if findErr != nil {
+		return fmt.Errorf("file not found: %w", findErr)
+	}
+
+	// Get file size in Megabytes
+	fileSizeInMegabytes, sizeErr := GetFileSize(foundFile, "mb")
+
+	if sizeErr != nil {
+		return fmt.Errorf("could not get file size: %w", sizeErr)
+	}
+
+	// Check if file is too big
+	if fileSizeInMegabytes >= 64 {
+		CompressFile(foundFile, "logs/compressed", levelLower)
+	}
 
 	// Append log to file
-	file, writeErr := AppendLogToFile(folderPath, l.Level, logLine)
+	file, writeErr := AppendLogToFile(filePath, l.Level, logLine)
 
 	if writeErr != nil {
 		return fmt.Errorf("error writing log file: %w", writeErr)

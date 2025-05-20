@@ -111,12 +111,14 @@ func LogLevelToString(l Logger) string {
 }
 
 func GetFile(root, filename string) (*os.File, error) {
+	// Get file path
 	filePath, findErr := FindFile(root, filename)
 
 	if findErr != nil {
 		return nil, fmt.Errorf("file not found: %w", findErr)
 	}
 
+	// Get file
 	file, openErr := os.OpenFile(filePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 
 	if openErr != nil {
