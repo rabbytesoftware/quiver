@@ -20,9 +20,14 @@ func (l *Logger) log(level LogLevel, service string, msg string,  attributes ...
 		Service:   service,
 		Message:   fmt.Sprintf(msg, attributes...),
 	}
+	
+	err := SaveLogToFile("./logs", entry)
 
-	// SaveLogToFile(entry)
-
+	if err != nil {
+		fmt.Println("Could not save log to file: %w", err)
+		return
+	}
+	
 	fmt.Println(entry.FormattedString())
 }
 

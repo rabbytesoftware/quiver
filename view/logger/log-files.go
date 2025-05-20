@@ -5,8 +5,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"rounds.com.ar/watcher/view/logger"
 )
 
 func CreateLogFile(folderPath, level string, compressed bool) (*os.File, error){
@@ -16,7 +14,7 @@ func CreateLogFile(folderPath, level string, compressed bool) (*os.File, error){
     return nil, fmt.Errorf("error creating log folder: %w", createFolderErr)
   }
 	
-	var filePath string = ""
+	filePath := ""
 	levelLower := strings.ToLower(level)
 
 	// Compress and uncompress
@@ -56,32 +54,39 @@ func AppendLogToFile(filePath, level, content string) (*os.File, error) {
 	return f, nil
 }
 
-func SaveLogToFile(folderPath string, l *logger.LogEntry) error {
-	
+func SaveLogToFile(folderPath string, l LogEntry) error {
 
 	levelLower := strings.ToLower(l.Level.String()) 
 	// Log message format:
 	// [Level] Service: Message - (Timestamp)
 	logLine := fmt.Sprintf("[%s] %s: %s - (%s)\n", levelLower, l.Service, l.Message, l.Timestamp)
-	filePath := fmt.Sprintf("%s/%s.txt", folderPath, levelLower)
+	filename := fmt.Sprintf("%s.txt", levelLower)
+	filePath := fmt.Sprintf("%s/%s", folderPath, filename)
 
 	// Find file by path
-	foundFile, findErr := GetFile(".", filePath)
-
+	foundFile, findErr := GetFile(".", filename)
+	
 	if findErr != nil {
-		return fmt.Errorf("file not found: %w", findErr)
+		fmt.Println("%w", findErr)
+		newFile, createErr := CreateLogFile(folderPath, levelLower, false)
+
+		if createErr != nil {
+			return createErr
+		}
+
+		foundFile = newFile
 	}
 
 	// Get file size in Megabytes
 	fileSizeInMegabytes, sizeErr := GetFileSize(foundFile, "mb")
-
+	
 	if sizeErr != nil {
 		return fmt.Errorf("could not get file size: %w", sizeErr)
 	}
 
 	// Check if file is too big
 	if fileSizeInMegabytes >= 64 {
-		CompressFile(foundFile, "logs/compressed", levelLower)
+		CompressFile(foundFile, folderPath + "/compressed", levelLower)
 	}
 
 	// Append log to file

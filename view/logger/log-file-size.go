@@ -23,7 +23,7 @@ func GetFileSize(f *os.File, unit string) (int64, error) {
 	// directly can be messy
 	switch strings.ToLower(unit) {
 		case "kb":
-    	return fileSizeInBytes / 1_024, nil
+    	return fileSizeInBytes / 1024, nil
 		case "mb":
     	return fileSizeInBytes / (1024 * 1024), nil
 		case "gb":

@@ -99,11 +99,7 @@ func FindFile(root, filename string) (string, error) {
 func CheckIfFileExists(root, filename string) bool {
 	_, err := FindFile(root, filename)
 
-	if err != nil {
-		return false
-	}
-
-	return true
+	return err != nil
 }
 
 func GetFile(root, filename string) (*os.File, error) {
