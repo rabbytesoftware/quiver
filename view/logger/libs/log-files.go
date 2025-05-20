@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"rounds.com.ar/watcher/view/logger"
 )
 
 func CreateLogFile(folderPath, level string, compressed bool) (*os.File, error){
@@ -54,8 +56,10 @@ func AppendLogToFile(filePath, level, content string) (*os.File, error) {
 	return f, nil
 }
 
-func SaveLogToFile(folderPath string, l Logger) error {
-	levelLower := strings.ToLower(l.Level.String())
+func SaveLogToFile(folderPath string, l *logger.LogEntry) error {
+	
+
+	levelLower := strings.ToLower(l.Level.String()) 
 	// Log message format:
 	// [Level] Service: Message - (Timestamp)
 	logLine := fmt.Sprintf("[%s] %s: %s - (%s)\n", levelLower, l.Service, l.Message, l.Timestamp)
@@ -81,7 +85,7 @@ func SaveLogToFile(folderPath string, l Logger) error {
 	}
 
 	// Append log to file
-	file, writeErr := AppendLogToFile(filePath, l.Level, logLine)
+	file, writeErr := AppendLogToFile(filePath, levelLower, logLine)
 
 	if writeErr != nil {
 		return fmt.Errorf("error writing log file: %w", writeErr)

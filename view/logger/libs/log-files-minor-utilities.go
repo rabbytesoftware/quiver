@@ -106,10 +106,6 @@ func CheckIfFileExists(root, filename string) bool {
 	return true
 }
 
-func LogLevelToString(l Logger) string {
-	return l.Level.String()
-}
-
 func GetFile(root, filename string) (*os.File, error) {
 	// Get file path
 	filePath, findErr := FindFile(root, filename)

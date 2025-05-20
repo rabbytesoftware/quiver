@@ -21,6 +21,8 @@ func (l *Logger) log(level LogLevel, service string, msg string,  attributes ...
 		Message:   fmt.Sprintf(msg, attributes...),
 	}
 
+	// SaveLogToFile(entry)
+
 	fmt.Println(entry.FormattedString())
 }
 
