@@ -24,7 +24,7 @@ func (l *Logger) log(level LogLevel, service string, msg string,  attributes ...
 	err := SaveLogToFile("./logs", entry)
 
 	if err != nil {
-		fmt.Println("Could not save log to file: %w", err)
+		fmt.Println("[Could not save log to file] ", err)
 		return
 	}
 	

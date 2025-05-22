@@ -12,7 +12,7 @@ func GetFileSize(f *os.File, unit string) (int64, error) {
 	fileInfo, err := f.Stat()
 
 	if err != nil {
-		return -1, err;
+		return -1, fmt.Errorf("could not get file info: %w", err);
 	}
 
 	// Get file size in bytes

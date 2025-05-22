@@ -48,7 +48,6 @@ func CopyFileContentToCompressedGzipFile(originalFile *os.File, compressedFile *
 	// Copy content
 	_, copyErr := io.Copy(compressedFile, readOriginalPath)
 
-	fmt.Println("File descriptor:", originalFile.Fd())
 
 	if copyErr != nil {
 		return fmt.Errorf("could not copy content: %w", copyErr)

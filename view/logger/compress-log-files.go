@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"fmt"
 	"os"
 )
 
@@ -11,7 +10,7 @@ func CompressFile(originalFile *os.File, compressFolderPath, level string) error
 	createdFile, createErr := CreateLogFile(compressFolderPath, level, true)
 
 	if createErr != nil {
-		return fmt.Errorf("could not create compressed file: %w", createErr)
+		return createErr
 	}
 	
 	// Create gzip writer

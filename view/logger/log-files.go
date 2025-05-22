@@ -69,7 +69,6 @@ func SaveLogToFile(folderPath string, l LogEntry) error {
 	// If file not exists, try
 	// to create a new one
 	if findErr != nil {
-		fmt.Println("%w", findErr)
 		newFile, createErr := CreateLogFile(folderPath, levelLower, false)
 
 		if createErr != nil {
@@ -79,16 +78,12 @@ func SaveLogToFile(folderPath string, l LogEntry) error {
 		foundFile = newFile
 	}
 
-	// Get file size in Megabytes
-	// fileSizeInMegabytes, sizeErr := GetFileSize(foundFile, "mb")
-	
-	// if sizeErr != nil {
-	// 	return fmt.Errorf("could not get file size: %w", sizeErr)
-	// }
+
+	// Check if file is too
+	// large
 	isTooLarge, tooLargeErr := IsFileTooLarge(foundFile)
 
 	if tooLargeErr != nil {
-		fmt.Println("Internal error: %w", tooLargeErr)
 		return tooLargeErr
 	}
 
@@ -97,7 +92,6 @@ func SaveLogToFile(folderPath string, l LogEntry) error {
 		compressErr := CompressFile(foundFile, folderPath + "/compressed", levelLower)
 
 		if compressErr != nil {
-			fmt.Println("Internal error: %w", compressErr)
 			return compressErr
 		}
 	}
