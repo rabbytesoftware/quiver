@@ -25,15 +25,15 @@ func CompressFile(originalFile *os.File, compressFolderPath, level string) error
 		return copyErr
 	}
 	
-	defer createdFile.Close()
-	defer compressedFile.Close()
-
 	// Delete original file
 	deleteErr := DeleteFile(originalFile)
-
+	
 	if deleteErr != nil {
 		return deleteErr
 	}
+
+	defer createdFile.Close()
+	defer compressedFile.Close()
 
 	return nil
 }
