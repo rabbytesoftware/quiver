@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func CopyFileContent(originalFile, newFile *os.File) error {
@@ -34,18 +35,35 @@ func CopyFileContentToCompressedGzipFile(originalFile *os.File, compressedFile *
 		return fmt.Errorf("could not seek file: %w", seekErr)
 	}
 
+	// Open original file as
+	// reader
+	originalFilePath := GetFilePath(originalFile)
+
+	readOriginalPath, readErr := os.Open(originalFilePath)
+
+	if readErr != nil {
+		return fmt.Errorf("could not read file %s", originalFilePath)
+	}
+
 	// Copy content
-	_, copyErr := io.Copy(compressedFile, originalFile)
+	_, copyErr := io.Copy(compressedFile, readOriginalPath)
+
+	fmt.Println("File descriptor:", originalFile.Fd())
 
 	if copyErr != nil {
 		return fmt.Errorf("could not copy content: %w", copyErr)
+	}
+
+	// Close compressed file
+	if err := compressedFile.Close(); err != nil {
+		return fmt.Errorf("could not close compressed file: %w", err)
 	}
 
 	return nil
 }
 
 func DeleteFile(f *os.File) error {
-	filePath := f.Name()
+	filePath := GetFilePath(f)
 
 	// Attempt to close the file before deleting it
 	if closeErr := f.Close(); closeErr != nil {
@@ -119,3 +137,19 @@ func GetFile(root, filename string) (*os.File, error) {
 
 	return file, nil
 }
+
+func GetFilePath(f *os.File) string {
+	return f.Name()
+}
+
+func GetFilename(f *os.File) string {
+	path := GetFilePath(f)
+
+	pathParts := strings.Split(path, "/")
+
+	// Get last one (filename)
+	return pathParts[len(pathParts) - 1]
+}
+
+
+
