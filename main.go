@@ -1,11 +1,11 @@
 package main
 
 import (
-	server "rounds.com.ar/watcher/packages/server"
-	ui "rounds.com.ar/watcher/view"
-	logger "rounds.com.ar/watcher/view/logger"
-	api "rounds.com.ar/watcher/rest/api"
-	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
+	netbridge "github.com/rabbytesoftware/quiver/netbridge"
+	server "github.com/rabbytesoftware/quiver/packages/server"
+
+	ui "github.com/rabbytesoftware/quiver/view"
+	logger "github.com/rabbytesoftware/quiver/view/logger"
 )
 
 func main() {
@@ -13,7 +13,16 @@ func main() {
 
 	ui.Welcome(logger.It)
 
-	logger.It.Load("api-main", "Loading packages...")
+	logger.It.Load("Loading Netbridge...")
+  logger.It.Load("main", "Loading Netbridge...")
+	netbridge, err := netbridge.NewNetbridge()
+	if err != nil {
+		logger.It.Fatal("Failed to init Netbridge: %v", err)
+		return
+	}
+	logger.It.Ok("Device registered with IP: %s", netbridge.PublicIP)
+
+	logger.It.Load("main", "Loading packages...")
 	packagesDir := "./pkgs"
 	pkgServer := server.NewPackagesServer(packagesDir)
 

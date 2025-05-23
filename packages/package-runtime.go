@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	pb "rounds.com.ar/watcher/sdk/package"
+	pb "github.com/rabbytesoftware/quiver.compiler/shared/package"
 )
 
 type PackageRuntime struct {

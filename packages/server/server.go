@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	pkgs "rounds.com.ar/watcher/packages"
-	logger "rounds.com.ar/watcher/view/logger"
+	pkgs "github.com/rabbytesoftware/quiver/packages"
+	logger "github.com/rabbytesoftware/quiver/view/logger"
 )
 
 type PackagesServer struct {
