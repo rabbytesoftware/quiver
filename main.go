@@ -42,4 +42,15 @@ func main() {
 	ui.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
 
 	logger.It.Ok("Packages loaded successfully")
+
+	// Server API
+	serverApi := api.CreateServerAPI(":8080")
+
+	// Assign to packages global variable
+	packages_global_variables.Packages = pkgServer.Packages 
+
+	// Return error if server fails
+	if err := serverApi.Run(); err != nil {
+		logger.It.Error("Error running server.")
+	}
 }
