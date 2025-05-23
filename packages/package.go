@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	pc "rounds.com.ar/watcher/sdk/base/package-config"
-	pb "rounds.com.ar/watcher/sdk/package"
+	pc "github.com/rabbytesoftware/quiver.sdk/base/package-config"
+	pb "github.com/rabbytesoftware/quiver.sdk/package"
 )
 
 type Package struct {

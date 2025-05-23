@@ -7,7 +7,7 @@ import (
 
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
-	"rounds.com.ar/watcher/netbridge/port"
+	"github.com/rabbytesoftware/quiver/netbridge/port"
 )
 
 // UPnPClient defines a common interface for all UPnP client types

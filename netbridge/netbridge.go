@@ -3,8 +3,8 @@ package netbridge
 import (
 	"net"
 
-	port "rounds.com.ar/watcher/netbridge/port"
-	upnp "rounds.com.ar/watcher/netbridge/upnp"
+	port "github.com/rabbytesoftware/quiver/netbridge/port"
+	upnp "github.com/rabbytesoftware/quiver/netbridge/upnp"
 )
 
 type Netbridge struct {

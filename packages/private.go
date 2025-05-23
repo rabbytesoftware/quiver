@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"time"
 
-	entrypoint "rounds.com.ar/watcher/sdk/base/entrypoint"
-	pc "rounds.com.ar/watcher/sdk/base/package-config"
-	pb "rounds.com.ar/watcher/sdk/package"
+	entrypoint "github.com/rabbytesoftware/quiver.sdk/base/entrypoint"
+	pc "github.com/rabbytesoftware/quiver.sdk/base/package-config"
+	pb "github.com/rabbytesoftware/quiver.sdk/package"
 )
 
 func (pkg *Package) exit() error {

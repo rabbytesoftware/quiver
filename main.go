@@ -1,11 +1,11 @@
 package main
 
 import (
-	netbridge "rounds.com.ar/watcher/netbridge"
-	server "rounds.com.ar/watcher/packages/server"
+	netbridge "github.com/rabbytesoftware/quiver/netbridge"
+	server "github.com/rabbytesoftware/quiver/packages/server"
 
-	ui "rounds.com.ar/watcher/view"
-	logger "rounds.com.ar/watcher/view/logger"
+	ui "github.com/rabbytesoftware/quiver/view"
+	logger "github.com/rabbytesoftware/quiver/view/logger"
 )
 
 func main() {

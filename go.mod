@@ -1,11 +1,11 @@
-module rounds.com.ar/watcher
+module github.com/rabbytesoftware/quiver
 
-go 1.22.5
+go 1.24.2
 
 require (
 	github.com/huin/goupnp v1.3.0
 	github.com/pterm/pterm v0.12.80
-	rounds.com.ar/watcher/sdk v0.0.0
+	github.com/rabbytesoftware/quiver.sdk v0.0.0
 )
 
 require (
@@ -31,4 +31,4 @@ require (
 	google.golang.org/protobuf v1.36.4 // indirect
 )
 
-replace rounds.com.ar/watcher/sdk => ../shared
+replace github.com/rabbytesoftware/quiver.sdk => ../shared
