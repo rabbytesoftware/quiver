@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	pc "github.com/rabbytesoftware/quiver.sdk/base/package-config"
-	pb "github.com/rabbytesoftware/quiver.sdk/package"
+	pc "github.com/rabbytesoftware/quiver.compiler/shared/base/package-config"
+	pb "github.com/rabbytesoftware/quiver.compiler/shared/package"
 )
 
 type Package struct {

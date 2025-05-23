@@ -5,7 +5,7 @@ go 1.24.2
 require (
 	github.com/huin/goupnp v1.3.0
 	github.com/pterm/pterm v0.12.80
-	github.com/rabbytesoftware/quiver.sdk v0.0.0
+	github.com/rabbytesoftware/quiver.compiler v1.25.5
 )
 
 require (
@@ -30,5 +30,3 @@ require (
 	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.4 // indirect
 )
-
-replace github.com/rabbytesoftware/quiver.sdk => ../shared

@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"time"
 
-	entrypoint "github.com/rabbytesoftware/quiver.sdk/base/entrypoint"
-	pc "github.com/rabbytesoftware/quiver.sdk/base/package-config"
-	pb "github.com/rabbytesoftware/quiver.sdk/package"
+	entrypoint "github.com/rabbytesoftware/quiver.compiler/shared/base/entrypoint"
+	pc "github.com/rabbytesoftware/quiver.compiler/shared/base/package-config"
+	pb "github.com/rabbytesoftware/quiver.compiler/shared/package"
 )
 
 func (pkg *Package) exit() error {
