@@ -1,26 +1,25 @@
 package view
 
 import (
-	"rounds.com.ar/watcher/kerner"
-	"rounds.com.ar/watcher/view/logger"
+	"github.com/rabbytesoftware/quiver/info"
+	"github.com/rabbytesoftware/quiver/view/logger"
 )
 
 func Welcome(
 	log *logger.Logger,
 ) {
-	log.Info(` ___       __   ________  _________  ________  ___  ___  _______   ________     `)
-	log.Info(`|\  \     |\  \|\   __  \|\___   ___\\   ____\|\  \|\  \|\  ___ \ |\   __  \    `)
-	log.Info(`\ \  \    \ \  \ \  \|\  \|___ \  \_\ \  \___|\ \  \\\  \ \   __/|\ \  \|\  \   `)
-	log.Info(` \ \  \  __\ \  \ \   __  \   \ \  \ \ \  \    \ \   __  \ \  \_|/_\ \   _  _\  `)
-	log.Info(`  \ \  \|\__\_\  \ \  \ \  \   \ \  \ \ \  \____\ \  \ \  \ \  \_|\ \ \  \\  \| `)
-	log.Info(`   \ \____________\ \__\ \__\   \ \__\ \ \_______\ \__\ \__\ \_______\ \__\\ _\ `)
-	log.Info(`    \|____________|\|__|\|__|    \|__|  \|_______|\|__|\|__|\|_______|\|__|\|__|`)
-	log.Info(`                                                                                `)
-	log.Info(`~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Welcome to Watcher ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`)
-	log.Info("Developed by the people behind " + kerner.DevelopedBy + ".")
-	log.Info("Watcher and Watcher SDK is license under " + kerner.License + ".")
-	log.Info("Version: " 		+ kerner.Version)
-	log.Info("Maintainers: " 	+ kerner.Maintainers)
+	log.Info(` _____       _                `)
+	log.Info(`|  _  |     (_)               `)
+	log.Info(`| | | |_   _ ___   _____ _ __ `)
+	log.Info(`| | | | | | | \ \ / / _ \ '__|`)
+	log.Info(`\ \/' / |_| | |\ V /  __/ |   `)
+	log.Info(` \_/\_\\__,_|_| \_/ \___|_|   `)
+	log.Info(`                              `)
+	log.Info(`~~~~~~~~~ Quiver SDK ~~~~~~~~~`)
+	log.Info("Developed by the people behind " + info.DevelopedBy + ".")
+	log.Info("Quiver and Quiver SDK is license under " + info.License + ".")
+	log.Info("Version: " 		+ info.Version)
+	log.Info("Maintainers: " 	+ info.Maintainers)
 	log.Info("")
 	log.Info("")
 }
