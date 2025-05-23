@@ -1,23 +1,23 @@
-# Watcher
+# Quiver
 
-Watcher is an open-source game server client designed to make managing dedicated servers incredibly easy. Think of it as Steam, but for servers! With Watcher, you don't have to worry about port forwarding or networking configurations—just click "Play" and you're good to go!
+Quiver is an open-source game server client designed to make managing dedicated servers incredibly easy. Think of it as Steam, but for servers! With Quiver, you don't have to worry about port forwarding or networking configurations—just click "Play" and you're good to go!
 
-## What is Watcher?
+## What is Quiver?
 
-Watcher is the base application that handles networking, publishes a REST API for server management, and (most importantly) downloads and loads packages. Each package corresponds to a specific server implementation. For example, you could have packages for CS2, Minecraft, L4D2, CSGO, and more—all managed within the same app.
+Quiver is the base application that handles networking, publishes a REST API for server management, and (most importantly) downloads and loads packages. Each package corresponds to a specific server implementation. For example, you could have packages for CS2, Minecraft, L4D2, CSGO, and more—all managed within the same app.
 
-However, Watcher itself cannot open any server without these packages. It acts as the foundation for server management, allowing users to easily install and run server implementations.
+However, Quiver itself cannot open any server without these packages. It acts as the foundation for server management, allowing users to easily install and run server implementations.
 
 ## Current Development Status
 
-Watcher is currently under heavy development, and we're aiming to deploy a demo by the end of **April 2025**. The demo will feature a simple real-time chat application, which will be released exclusively to our beta tester channels.
+Quiver is currently under heavy development, and we're aiming to deploy a demo by the end of **June 2025**. The demo will feature a simple real-time chat application, which will be released exclusively to our beta tester channels.
 
 ## Future Plans
 
 We are working on a comprehensive Wiki that will:
 
-- Explain the internal functions of Watcher.
-- Provide detailed instructions on how to create and upload Watcher packages.
+- Explain the internal functions of Quiver.
+- Provide detailed instructions on how to create and upload Quiver packages.
 - Serve as a resource for developers, similar to the NixOS package repository.
 
 Stay tuned for updates!
@@ -50,13 +50,13 @@ This recursive workflow ensures that we catch issues early and refine the produc
 
 ## Contributing
 
-Watcher is open-source, and we welcome contributions from the community! Whether you're interested in developing packages, improving the core app, or helping with documentation, we'd love to have you on board.
+Quiver is open-source, and we welcome contributions from the community! Whether you're interested in developing packages, improving the core app, or helping with documentation, we'd love to have you on board.
 
 ---
 
 ## License
 
-Watcher is licensed under the [GPL-3.0](LICENSE). Feel free to use, modify, and distribute it as you see fit.
+Quiver is licensed under the [GPL-3.0](LICENSE). Feel free to use, modify, and distribute it as you see fit.
 
 ---
 
