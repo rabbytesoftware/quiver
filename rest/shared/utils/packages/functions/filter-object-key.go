@@ -35,7 +35,7 @@ func FilterPackagesRuntimeKey(
 
 	pkg, err := GetPackage(pkgName)
 	if err != nil {
-		logger.It.Error("Error: %v", err)
+		logger.It.Error("api-packages-functions", "Error: %v", err)
 		return pc.PackageConfig{}, nil
 	}
 

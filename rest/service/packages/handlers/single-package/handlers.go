@@ -43,7 +43,7 @@ func GetSinglePackageHandler(w http.ResponseWriter, r *http.Request){
 	_, err := functions.GetPackage(pkgName)
 
 	if err != nil {
-		logger.It.Error("Error: %v", err)
+		logger.It.Error("api-package-handlers", "Error: %v", err)
     return
 	}
 
