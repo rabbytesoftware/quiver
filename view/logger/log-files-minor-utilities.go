@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"regexp"
 )
 
 func CopyFileContent(originalFile, newFile *os.File) error {
@@ -148,6 +149,96 @@ func GetFilename(f *os.File) string {
 
 	// Get last one (filename)
 	return pathParts[len(pathParts) - 1]
+}
+
+func CreateFolder(root, name string) error {
+	// Create folder if not exists
+	folderPath := fmt.Sprintf("%s/%s", root, name)
+	err := os.MkdirAll(folderPath, os.ModePerm)
+
+	if err != nil {
+		return fmt.Errorf("could not create folder: %w", err)
+	}
+	
+	return nil
+}
+
+func RepeatedSameFiles(path, name string) (bool, error) {
+	// List files in path
+	files, filesErr := ListFiles(path)
+
+	if filesErr != nil {
+		return false, filesErr
+	}
+
+	// Check if file exists
+	for _, file := range files {
+		// Separators
+		re := regexp.MustCompile(`[-_.]`)
+		splitFile := re.Split(file, -1)
+
+		if strings.EqualFold(splitFile[0], name) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func ListFiles(path string) ([]string, error) {
+	// List dir entries
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not read directory: %w", err)
+	}
+
+	var files []string
+
+	// Check if entry is a file
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			files = append(files, entry.Name())
+		}
+	}
+
+	return files, nil
+}
+
+func ListFolders(path string) ([]string, error) {
+	// List dir entries
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not read directory: %w", err)
+	}
+
+	var folders []string
+
+	// Check if entry is a folder
+	for _, entry := range entries {
+		if entry.IsDir() {
+			folders = append(folders, entry.Name())
+		}
+	}
+
+	return folders, nil
+}
+
+func CheckIfFolderExists(root, name string) (bool, error) {
+	// Get folders list
+	folders, foldersErr := ListFolders(root)
+
+	if foldersErr != nil {
+		return false, foldersErr
+	}
+
+	// Check if folder exists
+	for _, folderName := range folders {
+		if strings.EqualFold(folderName, name) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 

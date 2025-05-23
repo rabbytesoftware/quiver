@@ -20,7 +20,7 @@ func CreateLogFile(folderPath, level string, compressed bool) (*os.File, error){
 	// Compress and uncompress
 	// file's name are different
 	if compressed {
-		timestamp := time.Now().Format("2006-01-02_15-04-05.000")
+		timestamp := time.Now().Format("2006-01-02 15:04:05")
 		filePath = fmt.Sprintf("%s/%s-compressed-%s.txt.gz", folderPath, levelLower, timestamp)
 	} else {
 		filePath = fmt.Sprintf("%s/%s.txt", folderPath, levelLower)
@@ -59,7 +59,7 @@ func SaveLogToFile(folderPath string, l LogEntry) error {
 	levelLower := strings.ToLower(l.Level.String()) 
 	// Log message format:
 	// [Level] Service: Message - (Timestamp)
-	logLine := fmt.Sprintf("[%s] %s: %s - (%s)\n", levelLower, l.Service, l.Message, l.Timestamp)
+	logLine := fmt.Sprintf("[%s] %s: %s - (%s)\n", levelLower, l.Service, l.Message, l.Timestamp.Format("2006-01-02 15:04:05"))
 	filename := fmt.Sprintf("%s.txt", levelLower)
 	filePath := fmt.Sprintf("%s/%s", folderPath, filename)
 
