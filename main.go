@@ -3,55 +3,47 @@ package main
 import (
 	netbridge "github.com/rabbytesoftware/quiver/netbridge"
 	server "github.com/rabbytesoftware/quiver/packages/server"
+	api "github.com/rabbytesoftware/quiver/rest/api"
 
+	logger "github.com/rabbytesoftware/quiver/logger"
 	ui "github.com/rabbytesoftware/quiver/view"
-	logger "github.com/rabbytesoftware/quiver/view/logger"
 )
 
 func main() {
-	logger.It = logger.NewLogger()
+	logs := logger.NewLogger("init")
 
-	ui.Welcome(logger.It)
+	ui.Welcome()
 
-	logger.It.Load("Loading Netbridge...")
-  logger.It.Load("main", "Loading Netbridge...")
+  	logs.Load("Loading Netbridge...")
 	netbridge, err := netbridge.NewNetbridge()
 	if err != nil {
-		logger.It.Fatal("Failed to init Netbridge: %v", err)
+		logs.Fatal("Failed to init Netbridge: %v", err)
 		return
 	}
-	logger.It.Ok("Device registered with IP: %s", netbridge.PublicIP)
+	logs.Ok("Quiver instance registered with IP: %s", netbridge.PublicIP)
 
-	logger.It.Load("main", "Loading packages...")
+	logs.Load("Loading packages...")
 	packagesDir := "./pkgs"
 	pkgServer := server.NewPackagesServer(packagesDir)
 
 	if err := pkgServer.Discover(); err != nil {
-		logger.It.Fatal("api-main", "Failed to discover packages: %v", err)
-		return
+		logs.Warn("Failed to discover packages: %v", err)
 	}
 
 	if len(pkgServer.Packages) == 0 {
-		logger.It.Warn("api-main", "No packages found in %s", packagesDir)
+		logs.Warn("No packages found in %s", packagesDir)
 	}
 
 	packageNames := make([][]string, 0, len(pkgServer.Packages))
 	for _, pkg := range pkgServer.Packages {
 		packageNames = append(packageNames, []string{pkg.Name, pkg.Version, pkg.URL, pkg.BuildNumber})
 	}
-
 	ui.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
+	logs.Ok("Packages loaded successfully")
 
-	logger.It.Ok("api-main", "Packages loaded successfully")
-
-	// Server API
-	serverApi := api.CreateServerAPI(":8080")
-
-	// Assign to packages global variable
-	packages_global_variables.Packages = pkgServer.Packages 
-
-	// Return error if server fails
+	logs.Load("Loading API server...")
+	serverApi := api.CreateServerAPI(":8080", &pkgServer.Packages)
 	if err := serverApi.Run(); err != nil {
-		logger.It.Error("api-main", "Error running server.")
+		logs.Error("Error running API server")
 	}
 }

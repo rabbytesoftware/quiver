@@ -2,42 +2,54 @@ package packages_routes
 
 import (
 	"github.com/gorilla/mux"
-	multiple_packages_handlers "rounds.com.ar/watcher/rest/service/packages/handlers/multiple-packages"
-	single_package_handlers "rounds.com.ar/watcher/rest/service/packages/handlers/single-package"
+	logger "github.com/rabbytesoftware/quiver/logger"
+	packages "github.com/rabbytesoftware/quiver/packages"
+	mph "github.com/rabbytesoftware/quiver/rest/service/packages/handlers/multiple-packages"
+	sph "github.com/rabbytesoftware/quiver/rest/service/packages/handlers/single-package"
 )
 
-
-type Handler struct{
-
+type Handler struct {
+	logs	*logger.Logger
+	pkgs	*map[string]*packages.Package
 }
 
-func NewHandler() *Handler{
-	return &Handler{}
+func NewHandler(
+	logs *logger.Logger,
+	pkgs *map[string]*packages.Package,
+) *Handler{
+	return &Handler{
+		logs: logs,
+		pkgs: pkgs,
+	}
 }
 
-func (h *Handler) PackagesRoutes(router *mux.Router){
+func (h *Handler) PackagesRoutes(router *mux.Router) {
+	mph := mph.NewPackagesHandler(h.logs, h.pkgs)
+
 	// Get packages list 
-	router.HandleFunc("/package", multiple_packages_handlers.GetPackagesList).Methods("GET")
+	router.HandleFunc("/package", mph.GetPackagesList).Methods("GET")
 }
 
-func (h *Handler) SinglePackageRoutes(router *mux.Router){
+func (h *Handler) SinglePackageRoutes(router *mux.Router) {
+	sph := sph.NewPackageHandler(h.logs, h.pkgs)
+
 	// Get single package data 
-	router.HandleFunc("/package/{name}", single_package_handlers.GetSinglePackageHandler).Methods("GET")
+	router.HandleFunc("/package/{name}", sph.GetSinglePackageHandler).Methods("GET")
 
 	// Delete package 
-	router.HandleFunc("/package/{name}", single_package_handlers.DeletePackageHandler).Methods("DELETE")
+	router.HandleFunc("/package/{name}", sph.DeletePackageHandler).Methods("DELETE")
 
 	// Install specific package 
-	router.HandleFunc("/package/{name}", single_package_handlers.InstallPackageHandler).Methods("POST")
+	router.HandleFunc("/package/{name}", sph.InstallPackageHandler).Methods("POST")
 
 	// Run package 
-	router.HandleFunc("/package/{name}/run", single_package_handlers.RunPackageHandler).Methods("PATCH")
+	router.HandleFunc("/package/{name}/run", sph.RunPackageHandler).Methods("PATCH")
 
 	// Initialize package
-	router.HandleFunc("/package/{name}/init", single_package_handlers.InitPackageHandler)
+	router.HandleFunc("/package/{name}/init", sph.InitPackageHandler)
 
 	// Stop package process 
-	router.HandleFunc("/package/{name}/stop", single_package_handlers.ShutdownPackageHandler).Methods("PATCH")
+	router.HandleFunc("/package/{name}/stop", sph.ShutdownPackageHandler).Methods("PATCH")
 
 }
 

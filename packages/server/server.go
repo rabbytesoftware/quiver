@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	logger "github.com/rabbytesoftware/quiver/logger"
 	pkgs "github.com/rabbytesoftware/quiver/packages"
-	logger "github.com/rabbytesoftware/quiver/view/logger"
 )
 
 type PackagesServer struct {
@@ -17,11 +17,14 @@ type PackagesServer struct {
 	PackagesDir string
 	NextPort    int
 	mutex       sync.Mutex
+
+	logs *logger.Logger
 }
 
 func NewPackagesServer(packagesDir string) *PackagesServer {
 	return &PackagesServer{
 		PackagesDir:     packagesDir,
+		logs:            logger.NewLogger("PackagesServer"),
 		Packages:        make(map[string]*pkgs.Package),
 		NextPort:        50051, // TODO: With the NetBridge system, we can check if 
 								// TODO: the port is on use by another software, and
@@ -59,13 +62,13 @@ func (h *PackagesServer) Discover() error {
 
 			err := watcherPkg.Init()
 			if err != nil {
-				logger.It.Warn("Failed to extract watcher package %s: %v\n", filePath, err)
+				h.logs.Warn("Failed to extract watcher package %s: %v\n", filePath, err)
 				continue
 			}
 
 			err = watcherPkg.Shutdown()
 			if err != nil {
-				logger.It.Warn("Warning: Failed to remove watcher package %s: %v\n", filePath, err)
+				h.logs.Warn("Warning: Failed to remove watcher package %s: %v\n", filePath, err)
 				continue
 			}
 			

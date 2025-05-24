@@ -4,19 +4,27 @@ import (
 	"encoding/json"
 	"net/http"
 
-	functions "rounds.com.ar/watcher/rest/shared/utils/packages/functions"
-	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
+	logger "github.com/rabbytesoftware/quiver/logger"
+	packages "github.com/rabbytesoftware/quiver/packages"
 )
 
-func GetPackagesList(w http.ResponseWriter, r *http.Request) {
-	packages := packages_global_variables.Packages
+type PackagesHandler struct {
+	logs *logger.Logger
+	pkgs *map[string]*packages.Package
+}
 
-	// First argument: Packages
-	// Second argument: object key
-	// Third argument: specific object
-	_, filteredPackages := functions.FilterPackagesRuntimeKey(packages, "")
+func NewPackagesHandler(
+	logs *logger.Logger,
+	pkgs *map[string]*packages.Package,
+) *PackagesHandler {
+	return &PackagesHandler{
+		logs: logs,
+		pkgs: pkgs,
+	}
+}
 
+func (h *PackagesHandler) GetPackagesList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(filteredPackages)
+	w.WriteHeader( http.StatusOK )
+	json.NewEncoder(w).Encode( h.pkgs )
 }

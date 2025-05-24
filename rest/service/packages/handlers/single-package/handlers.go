@@ -2,22 +2,33 @@ package single_package_handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gorilla/mux"
-	functions "rounds.com.ar/watcher/rest/shared/utils/packages/functions"
-	packages_global_variables "rounds.com.ar/watcher/rest/shared/utils/packages/global-variables"
-	logger "rounds.com.ar/watcher/view/logger"
+	logger "github.com/rabbytesoftware/quiver/logger"
+	packages "github.com/rabbytesoftware/quiver/packages"
 )
 
+type PackageHandler struct {
+	logs *logger.Logger
+	pkgs *map[string]*packages.Package
+}
+
+func NewPackageHandler(
+	logs *logger.Logger,
+	pkgs *map[string]*packages.Package,
+) *PackageHandler {
+	return &PackageHandler{
+		logs: logs,
+		pkgs: pkgs,
+	}
+}
+
 // * Utils *
-
-
-func checkIfPackageNameIsValid(name string, w http.ResponseWriter) {
+func (h *PackageHandler) checkIfPackageNameIsValid(name string, w http.ResponseWriter) {
 	if len(name) == 0 {
-		http.Error(w,"Package name is required.", http.StatusBadRequest)
+		http.Error(w, "Package name is required.", http.StatusBadRequest)
 		return
 	}
 
@@ -29,37 +40,31 @@ func checkIfPackageNameIsValid(name string, w http.ResponseWriter) {
 			return
 		}
 	}
-
 }
 
 // * Handlers *
-
-func GetSinglePackageHandler(w http.ResponseWriter, r *http.Request){
+func (h *PackageHandler) GetSinglePackageHandler(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	pkgName := strings.ToLower(params["name"])
 
-	checkIfPackageNameIsValid(pkgName, w)
+	h.checkIfPackageNameIsValid(pkgName, w)
 
-	_, err := functions.GetPackage(pkgName)
-
-	if err != nil {
-		logger.It.Error("api-package-handlers", "Error: %v", err)
-    return
+	pkg := (*h.pkgs)[pkgName]
+	if pkg == nil {
+		http.Error(w, "Package not found.", http.StatusNotFound)
+		return
 	}
-
-	pkgs := packages_global_variables.Packages
-	filteredPkg, _ := functions.FilterPackagesRuntimeKey(pkgs, pkgName)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(filteredPkg)
+	json.NewEncoder(w).Encode(pkg)
 }
 
-func DeletePackageHandler(w http.ResponseWriter, r *http.Request){
+func (h *PackageHandler) DeletePackageHandler(w http.ResponseWriter, r *http.Request){
 	params := mux.Vars(r)
 	pkgName := strings.ToLower(params["name"])
 
-	checkIfPackageNameIsValid(pkgName, w)
+	h.checkIfPackageNameIsValid(pkgName, w)
 
 	// TODO
 	// pkg, err := getPackage(pkgName)
@@ -78,17 +83,16 @@ func DeletePackageHandler(w http.ResponseWriter, r *http.Request){
 	w.Write([]byte(""))
 }
 
-func InstallPackageHandler(w http.ResponseWriter, r *http.Request){
+func (h *PackageHandler) InstallPackageHandler(w http.ResponseWriter, r *http.Request){
 	params := mux.Vars(r)
 	pkgName := strings.ToLower(params["name"])
 
-	checkIfPackageNameIsValid(pkgName, w)
+	h.checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := functions.GetPackage(pkgName)
-
-	if err != nil {
-		fmt.Println("Error:", err)
-    return
+	pkg := (*h.pkgs)[pkgName]
+	if pkg == nil {
+		http.Error(w, "Package not found.", http.StatusNotFound)
+		return
 	}
 
 	if _, err := pkg.Install(); err != nil {
@@ -100,17 +104,16 @@ func InstallPackageHandler(w http.ResponseWriter, r *http.Request){
 	w.Write([]byte("The package has been successfully installed."))
 }
 
-func RunPackageHandler(w http.ResponseWriter, r *http.Request){
+func (h *PackageHandler) RunPackageHandler(w http.ResponseWriter, r *http.Request){
 	params := mux.Vars(r)
 	pkgName := strings.ToLower(params["name"])
 
-	checkIfPackageNameIsValid(pkgName, w)
+	h.checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := functions.GetPackage(pkgName)
-
-	if err != nil {
-		fmt.Println("Error:", err)
-    return
+	pkg := (*h.pkgs)[pkgName]
+	if pkg == nil {
+		http.Error(w, "Package not found.", http.StatusNotFound)
+		return
 	}
 
 	if _, err := pkg.Run(); err != nil {
@@ -122,18 +125,17 @@ func RunPackageHandler(w http.ResponseWriter, r *http.Request){
 	w.Write([]byte("Running package..."))
 }
 
-func ShutdownPackageHandler(w http.ResponseWriter, r *http.Request){
+func (h *PackageHandler) ShutdownPackageHandler(w http.ResponseWriter, r *http.Request){
 	params := mux.Vars(r)
 	pkgName := strings.ToLower(params["name"])
 
 
-	checkIfPackageNameIsValid(pkgName, w)
+	h.checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := functions.GetPackage(pkgName)
-
-	if err != nil {
-		fmt.Println("Error:", err)
-    return
+	pkg := (*h.pkgs)[pkgName]
+	if pkg == nil {
+		http.Error(w, "Package not found.", http.StatusNotFound)
+		return
 	}
 
 	if err := pkg.Shutdown(); err != nil {
@@ -145,17 +147,16 @@ func ShutdownPackageHandler(w http.ResponseWriter, r *http.Request){
 	w.Write([]byte("Shutting down package..."))
 }
 
-func InitPackageHandler(w http.ResponseWriter, r *http.Request){
+func (h *PackageHandler) InitPackageHandler(w http.ResponseWriter, r *http.Request){
 	params := mux.Vars(r)
 	pkgName := strings.ToLower(params["name"])
 
-	checkIfPackageNameIsValid(pkgName, w)
+	h.checkIfPackageNameIsValid(pkgName, w)
 
-	pkg, err := functions.GetPackage(pkgName)
-
-	if err != nil {
-		fmt.Println("Error:", err)
-    return
+	pkg := (*h.pkgs)[pkgName]
+	if pkg == nil {
+		http.Error(w, "Package not found.", http.StatusNotFound)
+		return
 	}
 
 	if err := pkg.Init(); err != nil {
