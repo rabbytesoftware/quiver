@@ -2,12 +2,13 @@ package server
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	pkgs "rounds.com.ar/watcher/packages"
+	logger "github.com/rabbytesoftware/quiver/logger"
+	pkgs "github.com/rabbytesoftware/quiver/packages"
 )
 
 type PackagesServer struct {
@@ -16,11 +17,14 @@ type PackagesServer struct {
 	PackagesDir string
 	NextPort    int
 	mutex       sync.Mutex
+
+	logs *logger.Logger
 }
 
 func NewPackagesServer(packagesDir string) *PackagesServer {
 	return &PackagesServer{
 		PackagesDir:     packagesDir,
+		logs:            logger.NewLogger("PackagesServer"),
 		Packages:        make(map[string]*pkgs.Package),
 		NextPort:        50051, // TODO: With the NetBridge system, we can check if 
 								// TODO: the port is on use by another software, and
@@ -33,7 +37,7 @@ func (h *PackagesServer) Discover() error {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	files, err := ioutil.ReadDir(h.PackagesDir)
+	files, err := os.ReadDir(h.PackagesDir)
 	if err != nil {
 		return fmt.Errorf("failed to read packages directory: %w", err)
 	}
@@ -56,15 +60,15 @@ func (h *PackagesServer) Discover() error {
 			watcherPkg.Runtime.BasePort = h.NextPort
 			h.NextPort++
 
-			err := watcherPkg.Start()
+			err := watcherPkg.Init()
 			if err != nil {
-				fmt.Printf("Warning: Failed to extract watcher package %s: %v\n", filePath, err)
+				h.logs.Warn("Failed to extract watcher package %s: %v\n", filePath, err)
 				continue
 			}
 
-			err = watcherPkg.Remove()
+			err = watcherPkg.Shutdown()
 			if err != nil {
-				fmt.Printf("Warning: Failed to remove watcher package %s: %v\n", filePath, err)
+				h.logs.Warn("Warning: Failed to remove watcher package %s: %v\n", filePath, err)
 				continue
 			}
 			
@@ -79,6 +83,6 @@ func (h *PackagesServer) Discover() error {
 // CloseAllPackages stops all packages and cleans up
 func (h *PackagesServer) CloseAll() {
 	for _, pkg := range h.Packages {
-		pkg.Remove()
+		pkg.Shutdown()
 	}
 }

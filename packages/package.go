@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	pc "rounds.com.ar/watcher/sdk/base/package-config"
-	pb "rounds.com.ar/watcher/sdk/package"
+	pc "github.com/rabbytesoftware/quiver.compiler/shared/base/package-config"
+	pb "github.com/rabbytesoftware/quiver.compiler/shared/package"
 )
 
 type Package struct {
@@ -15,13 +15,16 @@ type Package struct {
 	Runtime *PackageRuntime
 }
 
-func (pkg *Package) Start() error {
+/*
+ * Init the child process
+ */
+func (pkg *Package) Init() error {
 	err := pkg.extract()
 	if err != nil {
 		return err
 	}
 
-	err = pkg.Runtime.StartPackage()
+	err = pkg.Runtime.InitPackage()
 	if err != nil {
 		pkg.clean()
 		return err
@@ -30,10 +33,13 @@ func (pkg *Package) Start() error {
 	return nil
 }
 
-func (pkg *Package) Remove() error {
-	err := pkg.Exit()
+/*
+ * Stop the child process
+ */
+func (pkg *Package) Shutdown() error {
+	err := pkg.exit()
 	if err != nil {
-		fmt.Println("Error exiting the package:", err)
+		return fmt.Errorf("failed to exit the package: %w", err)
 	}
 
 	err = pkg.Runtime.StopPackage()
@@ -42,14 +48,9 @@ func (pkg *Package) Remove() error {
 	return err
 }
 
-func (pkg *Package) SetPorts(ports []int32) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
-	
-	_, err := pkg.Runtime.Client.SetPorts(ctx, &pb.SetPortsRequest{Ports: ports})
-	return err == nil
-}
-
+/*
+ * Install the package
+ */
 func (pkg *Package) Install() (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
@@ -61,6 +62,9 @@ func (pkg *Package) Install() (bool, error) {
 	return resp.Success, nil
 }
 
+/*
+ * Uninstall the package
+ */
 func (pkg *Package) Run() (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
@@ -72,10 +76,15 @@ func (pkg *Package) Run() (bool, error) {
 	return resp.Success, nil
 }
 
-func (pkg *Package) Exit() error {
+/*
+ * Set the ports for the package
+ * @param ports []int32
+ * @return bool
+ */
+func (pkg *Package) SetPorts(ports []int32) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
-			
-	_, err := pkg.Runtime.Client.Exit(ctx, &pb.Empty{})
-	return err
+	
+	_, err := pkg.Runtime.Client.SetPorts(ctx, &pb.SetPortsRequest{Ports: ports})
+	return err == nil
 }
