@@ -37,19 +37,19 @@ func GetFileSize(f *os.File, unit string) (int64, error) {
 func GetMaxFileSize() int {
 	// Get environment variable
 	// for logs file max size
-  val := os.Getenv("LOGS_MAX_SIZE")
-  if val == "" {
-    return 5 // default value
-  }
+	val := os.Getenv("LOGS_MAX_SIZE")
+	if val == "" {
+		return 100 // default value
+	}
 
-	// Convert string to to type int
-  size, err := strconv.Atoi(val)
-  if err != nil {
-    fmt.Println("Invalid LOGS_MAX_SIZE, using default 64")
-    return 64
-  }
+		// Convert string to to type int
+	size, err := strconv.Atoi(val)
+	if err != nil {
+		fmt.Println("Invalid LOGS_MAX_SIZE, using default 100")
+		return 100
+	}
 
-  return size
+	return size
 }
 
 func IsFileTooLarge(f *os.File) (bool, error) {
