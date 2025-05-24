@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	logs := logger.NewLogger("init")
+	logs := logger.NewLogger("ini")
 
 	ui.Welcome()
 

@@ -6,7 +6,7 @@ import (
 )
 
 func Welcome() {
-	log := logger.NewLogger("welcome")
+	log := logger.NewLogger("wel")
 
 	log.Info(` _____       _                `)
 	log.Info(`|  _  |     (_)               `)
@@ -15,7 +15,7 @@ func Welcome() {
 	log.Info(`\ \/' / |_| | |\ V /  __/ |   `)
 	log.Info(` \_/\_\\__,_|_| \_/ \___|_|   `)
 	log.Info(`                              `)
-	log.Info(`~~~~~~~~~ Quiver SDK ~~~~~~~~~`)
+	log.Info(`~~~~~~~~~~~ Quiver ~~~~~~~~~~`)
 	log.Info("Developed by the people behind %s.", info.DevelopedBy)
 	log.Info("Quiver and Quiver SDK is license under %s.", info.License)
 	log.Info("Version: %s", info.Version)
