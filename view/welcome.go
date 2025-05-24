@@ -2,12 +2,12 @@ package view
 
 import (
 	"github.com/rabbytesoftware/quiver/info"
-	"github.com/rabbytesoftware/quiver/view/logger"
+	"github.com/rabbytesoftware/quiver/logger"
 )
 
-func Welcome(
-	log *logger.Logger,
-) {
+func Welcome() {
+	log := logger.NewLogger("welcome")
+
 	log.Info(` _____       _                `)
 	log.Info(`|  _  |     (_)               `)
 	log.Info(`| | | |_   _ ___   _____ _ __ `)
@@ -16,10 +16,10 @@ func Welcome(
 	log.Info(` \_/\_\\__,_|_| \_/ \___|_|   `)
 	log.Info(`                              `)
 	log.Info(`~~~~~~~~~ Quiver SDK ~~~~~~~~~`)
-	log.Info("Developed by the people behind " + info.DevelopedBy + ".")
-	log.Info("Quiver and Quiver SDK is license under " + info.License + ".")
-	log.Info("Version: " 		+ info.Version)
-	log.Info("Maintainers: " 	+ info.Maintainers)
+	log.Info("Developed by the people behind %s.", info.DevelopedBy)
+	log.Info("Quiver and Quiver SDK is license under %s.", info.License)
+	log.Info("Version: %s", info.Version)
+	log.Info("Maintainers: %s", info.Maintainers)
 	log.Info("")
 	log.Info("")
 }

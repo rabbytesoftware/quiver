@@ -4,28 +4,36 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	packages_routes "rounds.com.ar/watcher/rest/service/packages"
-	logger "rounds.com.ar/watcher/view/logger"
+	logger "github.com/rabbytesoftware/quiver/logger"
+	packages "github.com/rabbytesoftware/quiver/packages"
+	packagesRoutes "github.com/rabbytesoftware/quiver/rest/service/packages"
 )
 
 type ApiServer struct{
-	addr string;
+	addr string
+	logs *logger.Logger
+	pkgs *map[string]*packages.Package
 }
 
-func CreateServerAPI(addr string) (*ApiServer){
+func CreateServerAPI(
+	addr string,
+	pkgs *map[string]*packages.Package,
+) (*ApiServer){
 	return &ApiServer{
-			addr: addr,
-		}
+		addr: addr,
+		logs: logger.NewLogger("API"),
+		pkgs: pkgs,
+	}
 }
 
 func (s *ApiServer) Run() error{
 	router := mux.NewRouter()
 	subrouter := router.PathPrefix("/api/v1").Subrouter()
 
-	packages_routes.NewHandler().PackagesRoutes(subrouter)
-	packages_routes.NewHandler().SinglePackageRoutes(subrouter)
+	packagesRoutes.NewHandler(s.logs, s.pkgs).PackagesRoutes(subrouter)
+	packagesRoutes.NewHandler(s.logs, s.pkgs).SinglePackageRoutes(subrouter)
 
-	logger.It.Info("server-api", "Server listening on port %s", s.addr)
+	s.logs.Info("Server listening on port %s", s.addr)
 
 	return http.ListenAndServe(s.addr, router)
 }
