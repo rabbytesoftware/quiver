@@ -1,34 +1,49 @@
 package main
 
 import (
-	"log"
+	netbridge "github.com/rabbytesoftware/quiver/netbridge"
+	server "github.com/rabbytesoftware/quiver/packages/server"
+	api "github.com/rabbytesoftware/quiver/rest/api"
 
-	server "rounds.com.ar/watcher/packages/server"
-	view "rounds.com.ar/watcher/view"
+	logger "github.com/rabbytesoftware/quiver/logger"
+	ui "github.com/rabbytesoftware/quiver/view"
 )
 
 func main() {
-	view.Init()
+	logs := logger.NewLogger("init")
 
-	// Create package host
+	ui.Welcome()
+
+  	logs.Load("Loading Netbridge...")
+	netbridge, err := netbridge.NewNetbridge()
+	if err != nil {
+		logs.Fatal("Failed to init Netbridge: %v", err)
+		return
+	}
+	logs.Ok("Quiver instance registered with IP: %s", netbridge.PublicIP)
+
+	logs.Load("Loading packages...")
 	packagesDir := "./pkgs"
 	pkgServer := server.NewPackagesServer(packagesDir)
 
-	// Discover packages
 	if err := pkgServer.Discover(); err != nil {
-		log.Fatalf("Failed to discover packages: %v", err)
+		logs.Warn("Failed to discover packages: %v", err)
 	}
 
 	if len(pkgServer.Packages) == 0 {
-		log.Printf("No packages found in %s", packagesDir)
-		return
+		logs.Warn("No packages found in %s", packagesDir)
 	}
 
-	// Display loaded packages
 	packageNames := make([][]string, 0, len(pkgServer.Packages))
 	for _, pkg := range pkgServer.Packages {
 		packageNames = append(packageNames, []string{pkg.Name, pkg.Version, pkg.URL, pkg.BuildNumber})
 	}
+	ui.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
+	logs.Ok("Packages loaded successfully")
 
-	view.Table("Packages", []string{"Name", "Version", "URL", "Build Number"}, packageNames)
+	logs.Load("Loading API server...")
+	serverApi := api.CreateServerAPI(":8080", &pkgServer.Packages)
+	if err := serverApi.Run(); err != nil {
+		logs.Error("Error running API server")
+	}
 }

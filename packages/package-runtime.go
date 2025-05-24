@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	pb "rounds.com.ar/watcher/sdk/package"
+	pb "github.com/rabbytesoftware/quiver.compiler/shared/package"
 )
 
 type PackageRuntime struct {
@@ -26,7 +26,7 @@ type PackageRuntime struct {
 }
 
 // startPackage launches a package process and connects to it
-func (pkg *PackageRuntime) StartPackage() error {
+func (pkg *PackageRuntime) InitPackage() error {
 	// Launch the package with the port as an argument
 	cmd := exec.Command(
 		pkg.RuntimePath, 
@@ -48,7 +48,7 @@ func (pkg *PackageRuntime) StartPackage() error {
 	
 	// Connect to the package
 	addr := fmt.Sprintf("localhost:%d", pkg.BasePort)
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithTimeout(5*time.Second))
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithTimeout(5*time.Second)) // TODO...
 	if err != nil {
 		return fmt.Errorf("failed to connect to package: %w", err)
 	}
