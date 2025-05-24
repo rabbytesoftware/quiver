@@ -21,7 +21,7 @@ func CreateServerAPI(
 ) (*ApiServer){
 	return &ApiServer{
 		addr: addr,
-		logs: logger.NewLogger("API"),
+		logs: logger.NewLogger("api"),
 		pkgs: pkgs,
 	}
 }
