@@ -1,8 +1,8 @@
-version: "1.0" # ? Which Arrow version this template is compatible with
+version: "0.1" # ? Which Arrow version this template is compatible with
 
 metadata:
-  name: "Counter-Strike 2 - Template Implementation"
-  description: "Counter-Strike 2 dedicated server implementation"
+  name: "Counter-Strike 2 SRCDS"
+  description: "A basic Counter-Strike 2 Dedicated Server"
   mainteiners:
     - "https://char2cs.net"
   credits:
@@ -11,7 +11,7 @@ metadata:
   license: "MIT"
   repository: "https://github.com/rabbytesoftware/arrow.cs2"
   documentation: "https://github.com/rabbytesoftware/arrow.cs2"
-  version: "1.0.0" # ? Arrow's own versioning
+  version: "0.0.1" # ? Arrow's own versioning
 
 requirements:
   minimum:
