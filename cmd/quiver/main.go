@@ -10,9 +10,9 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/config"
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/metadata"
+	"github.com/rabbytesoftware/quiver/internal/packages"
 	"github.com/rabbytesoftware/quiver/internal/server"
 	"github.com/rabbytesoftware/quiver/internal/ui"
-	"github.com/rabbytesoftware/quiver/packages"
 )
 
 func main() {
@@ -49,11 +49,9 @@ func main() {
 	// Initialize package manager
 	logger.Info("Initializing package manager...")
 	pkgManager := packages.NewArrowsServer(cfg.Packages.Repository, logger.WithService("pkgsServer"))
-	// if err := pkgManager.Initialize(ctx); err != nil {
-	// 	logger.Fatal("Failed to initialize package manager: %v", err)
-	// }
-	
-	pkgManager.Load("./template/cs2.yaml")
+	if err := pkgManager.Initialize(ctx); err != nil {
+		logger.Fatal("Failed to initialize package manager: %v", err)
+	}
 
 	// Initialize and start server
 	logger.Info("Starting Quiver server...")

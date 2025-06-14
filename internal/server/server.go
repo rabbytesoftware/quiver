@@ -9,8 +9,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rabbytesoftware/quiver/internal/config"
 	"github.com/rabbytesoftware/quiver/internal/logger"
+	"github.com/rabbytesoftware/quiver/internal/packages"
 	"github.com/rabbytesoftware/quiver/internal/ui"
-	"github.com/rabbytesoftware/quiver/packages"
 )
 
 // Server represents the HTTP server

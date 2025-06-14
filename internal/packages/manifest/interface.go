@@ -1,7 +1,7 @@
 package manifest
 
 import (
-	v0_1 "github.com/rabbytesoftware/quiver/packages/manifest/v0.1"
+	v0_1 "github.com/rabbytesoftware/quiver/internal/packages/manifest/v0.1"
 )
 
 type ArrowInterface interface {

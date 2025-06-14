@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 
 	"github.com/rabbytesoftware/quiver/internal/logger"
-	"github.com/rabbytesoftware/quiver/packages/manifest"
+	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
 
-	v0_1 "github.com/rabbytesoftware/quiver/packages/manifest/v0.1"
+	v0_1 "github.com/rabbytesoftware/quiver/internal/packages/manifest/v0.1"
 	yaml "gopkg.in/yaml.v3"
 )
 

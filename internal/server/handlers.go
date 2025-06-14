@@ -6,7 +6,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/rabbytesoftware/quiver/internal/logger"
-	"github.com/rabbytesoftware/quiver/packages"
+	"github.com/rabbytesoftware/quiver/internal/packages"
 )
 
 // Handlers contains all HTTP handlers
