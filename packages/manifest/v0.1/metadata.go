@@ -1,44 +1,44 @@
-package v1_0
+package v0_1
 
-type metadata struct {
-	name          string
-	description   string
-	maintainers   []string
-	credits       []string
-	license       string
-	repository    string
-	documentation string
-	version       string
+type Metadata struct {
+	Name          string   `yaml:"name"`
+	Description   string   `yaml:"description"`
+	Maintainers   []string `yaml:"mainteiners"`
+	Credits       []string `yaml:"credits"`
+	License       string   `yaml:"license"`
+	Repository    string   `yaml:"repository"`
+	Documentation string   `yaml:"documentation"`
+	Version       string   `yaml:"version"`
 }
 
-func (m *metadata) Name() *string {
-	return &m.name
+func (m *Metadata) GetName() string {
+	return m.Name
 }
 
-func (m *metadata) Description() *string {
-	return &m.description
+func (m *Metadata) GetDescription() string {
+	return m.Description
 }
 
-func (m *metadata) Maintainers() *[]string {
-	return &m.maintainers
+func (m *Metadata) GetMaintainers() []string {
+	return m.Maintainers
 }
 
-func (m *metadata) Credits() *[]string {
-	return &m.credits
+func (m *Metadata) GetCredits() []string {
+	return m.Credits
 }
 
-func (m *metadata) License() *string {
-	return &m.license
+func (m *Metadata) GetLicense() string {
+	return m.License
 }
 
-func (m *metadata) Repository() *string {
-	return &m.repository
+func (m *Metadata) GetRepository() string {
+	return m.Repository
 }
 
-func (m *metadata) Documentation() *string {
-	return &m.documentation
+func (m *Metadata) GetDocumentation() string {
+	return m.Documentation
 }
 
-func (m *metadata) Version() *string {
-	return &m.version
+func (m *Metadata) GetVersion() string {
+	return m.Version
 }

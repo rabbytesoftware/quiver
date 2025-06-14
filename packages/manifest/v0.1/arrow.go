@@ -1,49 +1,71 @@
-package v1_0
-
-import (
-	port "github.com/rabbytesoftware/quiver/netbridge/port"
-)
+package v0_1
 
 type Arrow struct {
-	manifest 		string 			`yaml:"version"`
-	metadata 		metadata 		`yaml:"metadata"`
-	requirements 	struct{
-		minimum 	requirement 	`yaml:"minimum"`
-		recommended	requirement 	`yaml:"recommended"`
-	}
-	dependencies 	[]string 		`yaml:"dependencies"`
-	netbridge 		[]port.Port 	`yaml:"netbridge"`
-	variables 		[]variable		`yaml:"variables"`
-	methods 		methods 		`yaml:"methods"`
+	Version      string       `yaml:"version"`
+	Metadata     Metadata     `yaml:"metadata"`
+	Requirements Requirements `yaml:"requirements"`
+	Dependencies []string     `yaml:"dependencies"`
+	Netbridge    []Port 	  `yaml:"netbridge"`
+	Variables    []Variable   `yaml:"variables"`
+	Methods      Methods      `yaml:"methods"`
 }
 
 func (a *Arrow) Manifest() string {
-	return a.manifest
+	return a.Version
 }
 
-func (a *Arrow) Metadata() *metadata {
-	return &a.metadata
+func (a *Arrow) Name() string {
+	return a.Metadata.Name
 }
 
-func (a *Arrow) Requirements() *struct{
-	minimum 	requirement 	`yaml:"minimum"`
-	recommended	requirement 	`yaml:"recommended"`
-} {
-	return &a.requirements
+func (a *Arrow) Description() string {
+	return a.Metadata.Description
 }
 
-func (a *Arrow) Dependencies() *[]string {
-	return &a.dependencies
+func (a *Arrow) Mainteiners() []string {
+	return a.Metadata.Maintainers
 }
 
-func (a *Arrow) Netbridge() *[]port.Port {
-	return &a.netbridge
+func (a *Arrow) Credits() string {
+	return ""
 }
 
-func (a *Arrow) Variables() *[]variable {
-	return &a.variables
+func (a *Arrow) License() string {
+	return a.Metadata.License
 }
 
-func (a *Arrow) Methods() *methods {
-	return &a.methods
+func (a *Arrow) Repository() string {
+	return a.Metadata.Repository
+}
+
+func (a *Arrow) Documentation() string {
+	return a.Metadata.Documentation
+}
+
+func (a *Arrow) ArrowVersion() string {
+	return a.Metadata.Version
+}
+
+func (a *Arrow) GetMetadata() *Metadata {
+	return &a.Metadata
+}
+
+func (a *Arrow) GetRequirements() Requirements {
+	return a.Requirements
+}
+
+func (a *Arrow) GetDependencies() []string {
+	return a.Dependencies
+}
+
+func (a *Arrow) GetNetbridge() []Port {
+	return a.Netbridge
+}
+
+func (a *Arrow) GetVariables() []Variable {
+	return a.Variables
+}
+
+func (a *Arrow) GetMethods() Methods {
+	return a.Methods
 }

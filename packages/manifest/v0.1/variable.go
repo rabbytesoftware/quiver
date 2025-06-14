@@ -1,34 +1,34 @@
-package v1_0
+package v0_1
 
-type variable struct {
-	name      	string      `yaml:"name"`
-	_default   	interface{} `yaml:"default"`
-	values    	[]string    `yaml:"values,omitempty"`
-	min       	*int        `yaml:"min,omitempty"`
-	max       	*int        `yaml:"max,omitempty"`
-	sensitive 	bool        `yaml:"sensitive,omitempty"`
+type Variable struct {
+	Name      string      `yaml:"name"`
+	Default   interface{} `yaml:"default"`
+	Values    []string    `yaml:"values,omitempty"`
+	Min       *int        `yaml:"min,omitempty"`
+	Max       *int        `yaml:"max,omitempty"`
+	Sensitive bool        `yaml:"sensitive,omitempty"`
 }
 
-func (v *variable) Name() *string {
-	return &v.name
+func (v *Variable) GetName() string {
+	return v.Name
 }
 
-func (v *variable) Default() *interface{} {
-	return &v._default
+func (v *Variable) GetDefault() interface{} {
+	return v.Default
 }
 
-func (v *variable) Values() *[]string {
-	return &v.values
+func (v *Variable) GetValues() []string {
+	return v.Values
 }
 
-func (v *variable) Min() *int {
-	return v.min
+func (v *Variable) GetMin() *int {
+	return v.Min
 }
 
-func (v *variable) Max() *int {
-	return v.max
+func (v *Variable) GetMax() *int {
+	return v.Max
 }
 
-func (v *variable) Sensitive() *bool {
-	return &v.sensitive
+func (v *Variable) GetSensitive() bool {
+	return v.Sensitive
 }

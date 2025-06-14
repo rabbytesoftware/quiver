@@ -1,24 +1,24 @@
-package v1_0
+package v0_1
 
-type requirement struct {
-	cpuCores   		int 	`yaml:"cpu_cores"`
-	ramGb   		int 	`yaml:"ram_gb"`
-	diskGb   		int 	`yaml:"disk_gb"`
-	networkMbps 	int 	`yaml:"network_mbps"`
+type Requirement struct {
+	CpuCores    int `yaml:"cpu_cores"`
+	RamGB       int `yaml:"ram_gb"`
+	DiskGB      int `yaml:"disk_gb"`
+	NetworkMbps int `yaml:"network_mbps"`
 }
 
-func (r *requirement) GetCpuCores() *int {
-	return &r.cpuCores
+func (r *Requirement) GetCpuCores() int {
+	return r.CpuCores
 }
 
-func (r *requirement) GetRamGb() *int {
-	return &r.ramGb
+func (r *Requirement) GetRamGB() int {
+	return r.RamGB
 }
 
-func (r *requirement) GetDiskGb() *int {
-	return &r.diskGb
+func (r *Requirement) GetDiskGB() int {
+	return r.DiskGB
 }
 
-func (r *requirement) GetNetworkMbps() *int {
-	return &r.networkMbps
+func (r *Requirement) GetNetworkMbps() int {
+	return r.NetworkMbps
 }
