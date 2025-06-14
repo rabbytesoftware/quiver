@@ -116,16 +116,16 @@ func (m *UPnPManager) ForwardPort(port port.Port) error {
 	defer m.mu.Unlock()
 
 	// Port mapping parameters
-	externalPort := port.Port
-	internalPort := port.Port
+	externalPort := port.Port()
+	internalPort := port.Port()
 	description := fmt.Sprintf("Watcher|%s:%d (%s)", port.Host, port.Port, port.Protocol)
 	duration := uint32(86400) // 24 hours in seconds
 
 	// Try all clients with a single loop
 	for _, client := range m.clients {
 		err := client.AddPortMapping(
-			"", externalPort, port.Protocol, internalPort,
-			port.Host, true, description, duration,
+			"", externalPort, port.Protocol(), internalPort,
+			port.Host(), true, description, duration,
 		)
 		if err == nil {
 			return nil
@@ -144,11 +144,11 @@ func (m *UPnPManager) ClosePort(port port.Port) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	externalPort := uint16(port.Port)
+	externalPort := uint16(port.Port())
 	
 	// Try all clients with a single loop
 	for _, client := range m.clients {
-		err := client.DeletePortMapping("", externalPort, port.Protocol)
+		err := client.DeletePortMapping("", externalPort, port.Protocol())
 		if err == nil {
 			return nil
 		}
