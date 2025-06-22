@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/rabbytesoftware/quiver/internal/cli"
 	"github.com/rabbytesoftware/quiver/internal/config"
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/metadata"
@@ -27,6 +28,34 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	// Check if we have command line arguments
+	args := os.Args[1:] // Skip program name
+
+	if len(args) > 0 {
+		// CLI mode - execute command against running server
+		runCLIMode(cfg, args)
+	} else {
+		// Server mode - start and run the server
+		runServerMode(cfg)
+	}
+}
+
+// runCLIMode executes a CLI command against an already running server
+func runCLIMode(cfg *config.Config, args []string) {
+	// Initialize logger for CLI (minimal logging)
+	logger := logger.New(cfg.Logger)
+	
+	// Create CLI instance
+	cliInstance := cli.New(cfg, logger)
+
+	// Execute CLI command directly against running server
+	if err := cliInstance.Execute(args); err != nil {
+		log.Fatalf("CLI command failed: %v", err)
+	}
+}
+
+// runServerMode starts and runs the server continuously
+func runServerMode(cfg *config.Config) {
 	// Initialize logger
 	logger := logger.New(cfg.Logger)
 
@@ -49,9 +78,6 @@ func main() {
 	// Initialize package manager
 	logger.Info("Initializing package manager...")
 	pkgManager := packages.NewArrowsServer(cfg.Packages.Repository, logger.WithService("pkgsServer"))
-	if err := pkgManager.Initialize(ctx); err != nil {
-		logger.Fatal("Failed to initialize package manager: %v", err)
-	}
 
 	// Initialize and start server
 	logger.Info("Starting Quiver server...")
