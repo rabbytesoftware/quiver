@@ -84,7 +84,17 @@ func runServerMode(cfg *config.Config) {
 
 	// Initialize package manager
 	logger.Info("Initializing package manager...")
-	pkgManager := packages.NewArrowsServer(cfg.Packages.Repository, logger.WithService("pkgsServer"))
+	pkgManager := packages.NewArrowsServer(
+		cfg.Packages.Repositories,
+		cfg.Packages.InstallDir,
+		cfg.Packages.DatabasePath,
+		logger.WithService("pkgsServer"),
+	)
+	
+	// Initialize package manager
+	if err := pkgManager.Initialize(); err != nil {
+		logger.Fatal("Failed to initialize package manager: %v", err)
+	}
 
 	// Initialize and start server
 	logger.Info("Starting Quiver server...")

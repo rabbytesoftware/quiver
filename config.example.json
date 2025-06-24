@@ -15,7 +15,8 @@
 	},
 	
 	"packages": {
-		"directory": "./pkgs",
-		"template_dir": "./template"
+		"repositories": ["./pkgs"],
+		"install_dir": "./pkgs",
+		"database_path": "./pkgs/packages.db"
 	}
 }

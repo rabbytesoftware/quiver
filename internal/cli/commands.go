@@ -74,4 +74,112 @@ var CommandRegistry = map[string]Command{
 		ParamTypes:  []ParamType{},
 		Example:     "./quiver server-status",
 	},
+	// Arrow package management commands
+	"search": {
+		Name:        "search",
+		Description: "Search for arrows in repositories",
+		Method:      "GET",
+		Endpoint:    "/api/v1/arrows/search",
+		ParamTypes: []ParamType{
+			{Name: "query", Type: "string", Required: false, Position: 0, URLParam: false},
+		},
+		Example: "./quiver search minecraft",
+	},
+	"install": {
+		Name:        "install",
+		Description: "Install an arrow",
+		Method:      "POST",
+		Endpoint:    "/api/v1/arrows/{name}/install",
+		ParamTypes: []ParamType{
+			{Name: "name", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver install cs2",
+	},
+	"execute": {
+		Name:        "execute",
+		Description: "Execute an installed arrow",
+		Method:      "POST",
+		Endpoint:    "/api/v1/arrows/{name}/execute",
+		ParamTypes: []ParamType{
+			{Name: "name", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver execute cs2",
+	},
+	"uninstall": {
+		Name:        "uninstall",
+		Description: "Uninstall an arrow",
+		Method:      "DELETE",
+		Endpoint:    "/api/v1/arrows/{name}/uninstall",
+		ParamTypes: []ParamType{
+			{Name: "name", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver uninstall cs2",
+	},
+	"update": {
+		Name:        "update",
+		Description: "Update an arrow to the latest version",
+		Method:      "PUT",
+		Endpoint:    "/api/v1/arrows/{name}/update",
+		ParamTypes: []ParamType{
+			{Name: "name", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver update cs2",
+	},
+	"validate": {
+		Name:        "validate",
+		Description: "Validate an arrow installation",
+		Method:      "POST",
+		Endpoint:    "/api/v1/arrows/{name}/validate",
+		ParamTypes: []ParamType{
+			{Name: "name", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver validate cs2",
+	},
+	"installed": {
+		Name:        "installed",
+		Description: "List all installed arrows",
+		Method:      "GET",
+		Endpoint:    "/api/v1/arrows/installed",
+		ParamTypes:  []ParamType{},
+		Example:     "./quiver installed",
+	},
+	"arrow-status": {
+		Name:        "arrow-status",
+		Description: "Get arrow installation status",
+		Method:      "GET",
+		Endpoint:    "/api/v1/arrows/{name}/status",
+		ParamTypes: []ParamType{
+			{Name: "name", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver arrow-status cs2",
+	},
+	// Repository management commands
+	"repo-list": {
+		Name:        "repo-list",
+		Description: "List all repositories",
+		Method:      "GET",
+		Endpoint:    "/api/v1/repositories",
+		ParamTypes:  []ParamType{},
+		Example:     "./quiver repo-list",
+	},
+	"repo-add": {
+		Name:        "repo-add",
+		Description: "Add a new repository",
+		Method:      "POST",
+		Endpoint:    "/api/v1/repositories",
+		ParamTypes: []ParamType{
+			{Name: "repository", Type: "string", Required: true, Position: 0, URLParam: false},
+		},
+		Example: "./quiver repo-add https://github.com/example/arrows",
+	},
+	"repo-remove": {
+		Name:        "repo-remove",
+		Description: "Remove a repository",
+		Method:      "DELETE",
+		Endpoint:    "/api/v1/repositories",
+		ParamTypes: []ParamType{
+			{Name: "repository", Type: "string", Required: true, Position: 0, URLParam: false},
+		},
+		Example: "./quiver repo-remove https://github.com/example/arrows",
+	},
 }

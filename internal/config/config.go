@@ -38,8 +38,9 @@ type LoggerConfig struct {
 
 // PackagesConfig holds package-specific configuration
 type PackagesConfig struct {
-	Repository    string   `json:"repository"`
-	TemplateDir  string   `json:"template_dir"`
+	Repositories []string `json:"repositories"`  // List of repositories (URLs or local directories)
+	InstallDir   string   `json:"install_dir"`   // Directory to install packages	
+	DatabasePath string   `json:"database_path"` // Local package database path
 }
 
 // Default returns a default configuration
@@ -59,8 +60,9 @@ func Default() *Config {
 			Compress: true,
 		},
 		Packages: PackagesConfig{
-			Repository:    "./pkgs",
-			TemplateDir:  "./template",
+			Repositories: []string{"./pkgs"},
+			InstallDir:   "./pkgs",
+			DatabasePath: "./pkgs/packages.db",
 		},
 	}
 }
@@ -85,19 +87,6 @@ func loadFromEmbedded(cfg *Config) error {
 	return json.Unmarshal(embeddedConfig, cfg)
 }
 
-// getConfigPath returns the configuration file path (kept for backward compatibility)
-func getConfigPath() string {
-	if path := os.Getenv("QUIVER_CONFIG"); path != "" {
-		return path
-	}
-	return "./config.json"
-}
-
-// loadFromFile loads configuration from a JSON file (deprecated, kept for testing)
-func loadFromFile(cfg *Config, path string) error {
-	return fmt.Errorf("loadFromFile is deprecated, configuration is now embedded at compile time")
-}
-
 // loadFromEnv loads configuration from environment variables
 func loadFromEnv(cfg *Config) {
 	if port := os.Getenv("QUIVER_PORT"); port != "" {
@@ -116,10 +105,6 @@ func loadFromEnv(cfg *Config) {
 
 	if logDir := os.Getenv("QUIVER_LOG_DIR"); logDir != "" {
 		cfg.Logger.LogDir = logDir
-	}
-
-	if pkgDir := os.Getenv("QUIVER_PACKAGES_DIR"); pkgDir != "" {
-		cfg.Packages.Repository = pkgDir
 	}
 }
 

@@ -13,18 +13,36 @@ import (
 )
 
 type ArrowsServer struct {
-	Packages   map[string]manifest.ArrowInterface
-	Repository string
+	Packages      map[string]manifest.ArrowInterface
+	PackageManager *PackageManager
 	
 	logs *logger.Logger
 }
 
-func NewArrowsServer(Repository string, logger *logger.Logger) *ArrowsServer {
+func NewArrowsServer(repositories []string, installDir, dbPath string, logger *logger.Logger) *ArrowsServer {
+	pm := NewPackageManager(repositories, installDir, dbPath, logger)
+	
 	return &ArrowsServer{
-		Repository: Repository,
-		Packages:   make(map[string]manifest.ArrowInterface),
-		logs:       logger, 
+		Packages:       make(map[string]manifest.ArrowInterface),
+		PackageManager: pm,
+		logs:          logger, 
 	}
+}
+
+// Initialize initializes the arrows server
+func (as *ArrowsServer) Initialize() error {
+	if err := as.PackageManager.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize package manager: %w", err)
+	}
+
+	// Load template arrows for backward compatibility
+	for _, repo := range as.PackageManager.GetRepositories() {
+		if err := as.LoadDirectory(repo); err != nil {
+			as.logs.Warn("Failed to load templates from %s: %v", repo, err)
+		}
+	}
+
+	return nil
 }
 
 func (as *ArrowsServer) Load(path string) error {

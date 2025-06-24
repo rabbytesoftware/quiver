@@ -138,19 +138,50 @@ func (c *CLI) validateParamType(param ParamType, value string) error {
 func (c *CLI) executeHTTPRequest(command Command, args []string) error {
 	// Build URL by replacing URL parameters
 	url := c.baseURL + command.Endpoint
+	var queryParams []string
+	
 	for _, param := range command.ParamTypes {
 		if param.URLParam && param.Position < len(args) {
+			// Handle URL parameters
 			placeholder := "{" + param.Name + "}"
 			if strings.Contains(url, "{id}") && param.Name == "package_id" {
 				url = strings.Replace(url, "{id}", args[param.Position], 1)
+			} else if strings.Contains(url, "{name}") && param.Name == "name" {
+				url = strings.Replace(url, "{name}", args[param.Position], 1)
 			} else {
 				url = strings.Replace(url, placeholder, args[param.Position], 1)
 			}
+		} else if !param.URLParam && param.Position < len(args) {
+			// Handle query parameters
+			if param.Name == "query" {
+				queryParams = append(queryParams, fmt.Sprintf("q=%s", args[param.Position]))
+			} else {
+				queryParams = append(queryParams, fmt.Sprintf("%s=%s", param.Name, args[param.Position]))
+			}
 		}
 	}
+	
+	// Add query parameters to URL
+	if len(queryParams) > 0 {
+		url += "?" + strings.Join(queryParams, "&")
+	}
 
-	// Create request
+	// Create request body for POST/PUT/DELETE requests
 	var body io.Reader
+	if command.Method == "POST" || command.Method == "PUT" || command.Method == "DELETE" {
+		// For repository management commands, create appropriate JSON body
+		if strings.Contains(command.Endpoint, "/repositories") && len(args) > 0 {
+			bodyData := map[string]string{
+				"repository": args[0],
+			}
+			jsonData, err := json.Marshal(bodyData)
+			if err != nil {
+				return fmt.Errorf("failed to marshal request body: %v", err)
+			}
+			body = bytes.NewReader(jsonData)
+		}
+	}
+	
 	req, err := http.NewRequest(command.Method, url, body)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %v", err)
