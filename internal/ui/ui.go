@@ -116,9 +116,9 @@ func prepareInfoLines(username, hostname, version, description, author, license 
 // ShowWelcome displays the welcome message in neofetch style
 func ShowWelcome() {
 	// Clear screen first
-	ClearScreen()
+	// ClearScreen()
 	
-	// Quiver ASCII Art (provided by user)
+	// Quiver ASCII Art
 	quiverArt := []string{
 		"         ;;;;;;;;;;;;;;;;;",
 		"         ;;;;;;;;;;;;;;;;;",
@@ -176,9 +176,9 @@ func ShowWelcome() {
 	infoLines := prepareInfoLines(username, hostname, version, description, author, license, maintainers, maxTextWidth)
 	
 	// Style configuration
-	artStyle := pterm.NewStyle(pterm.FgCyan, pterm.Bold)
+	artStyle := pterm.NewStyle(pterm.FgRed, pterm.Bold)
 	infoStyle := pterm.NewStyle(pterm.FgWhite, pterm.Bold)
-	labelStyle := pterm.NewStyle(pterm.FgCyan, pterm.Bold)
+	labelStyle := pterm.NewStyle(pterm.FgRed, pterm.Bold)
 	
 	// Display ASCII art and info side by side
 	maxLines := len(quiverArt)
