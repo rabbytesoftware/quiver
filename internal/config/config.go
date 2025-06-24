@@ -1,12 +1,16 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+//go:embed config.json
+var embeddedConfig []byte
 
 // Config represents the application configuration
 type Config struct {
@@ -61,16 +65,13 @@ func Default() *Config {
 	}
 }
 
-// Load loads configuration from file or environment variables
+// Load loads configuration from embedded data or environment variables
 func Load() (*Config, error) {
 	cfg := Default()
 
-	// Try to load from config file
-	configPath := getConfigPath()
-	if _, err := os.Stat(configPath); err == nil {
-		if err := loadFromFile(cfg, configPath); err != nil {
-			return nil, fmt.Errorf("failed to load config from file: %w", err)
-		}
+	// Load from embedded config first
+	if err := loadFromEmbedded(cfg); err != nil {
+		return nil, fmt.Errorf("failed to load embedded config: %w", err)
 	}
 
 	// Override with environment variables
@@ -79,7 +80,12 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// getConfigPath returns the configuration file path
+// loadFromEmbedded loads configuration from embedded JSON data
+func loadFromEmbedded(cfg *Config) error {
+	return json.Unmarshal(embeddedConfig, cfg)
+}
+
+// getConfigPath returns the configuration file path (kept for backward compatibility)
 func getConfigPath() string {
 	if path := os.Getenv("QUIVER_CONFIG"); path != "" {
 		return path
@@ -87,14 +93,9 @@ func getConfigPath() string {
 	return "./config.json"
 }
 
-// loadFromFile loads configuration from a JSON file
+// loadFromFile loads configuration from a JSON file (deprecated, kept for testing)
 func loadFromFile(cfg *Config, path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal(data, cfg)
+	return fmt.Errorf("loadFromFile is deprecated, configuration is now embedded at compile time")
 }
 
 // loadFromEnv loads configuration from environment variables

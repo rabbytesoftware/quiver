@@ -16,6 +16,13 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/ui"
 )
 
+// Build-time variables (set via ldflags)
+var (
+	version   = "dev"
+	buildTime = "unknown"
+	gitCommit = "unknown"
+)
+
 func main() {
 	// Initialize metadata
 	if err := metadata.Load(); err != nil {

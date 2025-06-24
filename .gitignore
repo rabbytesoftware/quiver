@@ -27,6 +27,10 @@ go.work
 config.json
 !config.example.json
 
+# Embedded files (copied during build)
+internal/config/config.json
+internal/metadata/metadata.json
+
 # Logs
 logs/
 *.log

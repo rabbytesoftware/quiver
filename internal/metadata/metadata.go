@@ -1,11 +1,13 @@
 package metadata
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 )
+
+//go:embed metadata.json
+var embeddedMetadata []byte
 
 // Maintainer represents a project maintainer
 type Maintainer struct {
@@ -30,34 +32,24 @@ var (
 	Project *Metadata
 )
 
-// Load reads the metadata.json file and parses it into the Project variable
+// Load reads the embedded metadata and parses it into the Project variable
 func Load() error {
-	return LoadFromPath("metadata.json")
-}
-
-// LoadFromPath reads a metadata.json file from the specified path
-func LoadFromPath(path string) error {
-	// Get absolute path
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute path for %s: %w", path, err)
-	}
-
-	// Read the file
-	data, err := os.ReadFile(absPath)
-	if err != nil {
-		return fmt.Errorf("failed to read metadata file %s: %w", absPath, err)
-	}
-
-	// Parse JSON
+	// Parse embedded JSON
 	var metadata Metadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return fmt.Errorf("failed to parse metadata JSON: %w", err)
+	if err := json.Unmarshal(embeddedMetadata, &metadata); err != nil {
+		return fmt.Errorf("failed to parse embedded metadata JSON: %w", err)
 	}
 
 	// Set the global Project variable
 	Project = &metadata
 	return nil
+}
+
+// LoadFromPath reads a metadata.json file from the specified path (for testing)
+func LoadFromPath(path string) error {
+	// This function is kept for backward compatibility and testing
+	// but the main Load() function now uses embedded data
+	return fmt.Errorf("LoadFromPath is deprecated, use Load() which uses embedded metadata")
 }
 
 // GetVersion returns the project version
