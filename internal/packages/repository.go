@@ -145,9 +145,9 @@ func (rm *RepositoryManager) getArrowFromLocalRepository(dirPath, name string) (
 			if err != nil {
 				continue
 			}
-			if arrow.Name() == name {
-				return arrow, path, nil
-			}
+			// Use filename-based matching instead of metadata name
+			// This ensures consistency with search behavior
+			return arrow, path, nil
 		}
 	}
 
@@ -185,9 +185,9 @@ func (rm *RepositoryManager) getArrowFromRemoteRepository(repoURL, name string) 
 			continue
 		}
 
-		if arrow.Name() == name {
-			return arrow, url, nil
-		}
+		// Use URL-based matching instead of metadata name
+		// This ensures consistency with search behavior
+		return arrow, url, nil
 	}
 
 	return nil, "", fmt.Errorf("arrow %s not found in remote repository %s", name, repoURL)
