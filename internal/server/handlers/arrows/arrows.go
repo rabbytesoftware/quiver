@@ -47,9 +47,10 @@ func (h *Handler) InstallArrowHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	name := vars["name"]
 
-	// Parse request body for variables
+	// Parse request body for variables and optional repository
 	var requestBody struct {
-		Variables map[string]string `json:"variables"`
+		Variables  map[string]string `json:"variables"`
+		Repository string            `json:"repository,omitempty"`
 	}
 	
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -57,15 +58,27 @@ func (h *Handler) InstallArrowHandler(w http.ResponseWriter, r *http.Request) {
 		requestBody.Variables = make(map[string]string)
 	}
 
-	err := h.pkgManager.PackageManager.InstallArrow(name, requestBody.Variables)
+	// Check for repository specification in query parameter
+	if repo := r.URL.Query().Get("repository"); repo != "" {
+		requestBody.Repository = repo
+	}
+
+	// Build full package specification
+	fullName := name
+	if requestBody.Repository != "" {
+		fullName = requestBody.Repository + "@" + name
+	}
+
+	err := h.pkgManager.PackageManager.InstallArrow(fullName, requestBody.Variables)
 	if err != nil {
 		response.WriteError(w, http.StatusBadRequest, "Failed to install arrow: "+err.Error())
 		return
 	}
 
 	responseData := map[string]string{
-		"message": "Arrow installed successfully",
-		"arrow":   name,
+		"message":    "Arrow installed successfully",
+		"arrow":      name,
+		"repository": requestBody.Repository,
 	}
 	response.WriteJSON(w, http.StatusOK, responseData)
 }
@@ -121,15 +134,36 @@ func (h *Handler) UpdateArrowHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	name := vars["name"]
 
-	err := h.pkgManager.PackageManager.UpdateArrow(name)
+	// Parse request body for optional repository
+	var requestBody struct {
+		Repository string `json:"repository,omitempty"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		// Repository is optional, so ignore decode errors
+	}
+
+	// Check for repository specification in query parameter
+	if repo := r.URL.Query().Get("repository"); repo != "" {
+		requestBody.Repository = repo
+	}
+
+	// Build full package specification
+	fullName := name
+	if requestBody.Repository != "" {
+		fullName = requestBody.Repository + "@" + name
+	}
+
+	err := h.pkgManager.PackageManager.UpdateArrow(fullName)
 	if err != nil {
 		response.WriteError(w, http.StatusBadRequest, "Failed to update arrow: "+err.Error())
 		return
 	}
 
 	responseData := map[string]string{
-		"message": "Arrow updated successfully",
-		"arrow":   name,
+		"message":    "Arrow updated successfully",
+		"arrow":      name,
+		"repository": requestBody.Repository,
 	}
 	response.WriteJSON(w, http.StatusOK, responseData)
 }

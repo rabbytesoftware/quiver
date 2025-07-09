@@ -17,9 +17,10 @@ import (
 
 // ArrowInfo represents information about an available arrow
 type ArrowInfo struct {
-	Name       string `json:"name"`
-	Repository string `json:"repository"`
-	Path       string `json:"path"` // Local path or URL
+	Name           string `json:"name"`           // Package name without extension (e.g., "cs2")
+	PackageName    string `json:"packagename"`    // Package name with extension (e.g., "cs2.yaml")
+	RepositoryPath string `json:"repositorypath"` // Repository path where the package was found
+	Path           string `json:"path"`           // Full path or URL to the package file
 }
 
 // RepositoryManager handles repository operations
@@ -44,6 +45,36 @@ func NewRepositoryManager(repositories []string, logger *logger.Logger) *Reposit
 func (rm *RepositoryManager) SearchArrows(query string) ([]*ArrowInfo, error) {
 	var allArrows []*ArrowInfo
 
+	// Check if query contains repository specification (repo@package)
+	if strings.Contains(query, "@") {
+		parts := strings.SplitN(query, "@", 2)
+		if len(parts) == 2 {
+			repoPath := parts[0]
+			packageName := parts[1]
+			
+			// Find the specified repository
+			var targetRepo string
+			for _, repo := range rm.repositories {
+				if strings.Contains(repo, repoPath) || repo == repoPath {
+					targetRepo = repo
+					break
+				}
+			}
+			
+			if targetRepo == "" {
+				return nil, fmt.Errorf("repository %s not found", repoPath)
+			}
+			
+			// Search only in the specified repository
+			arrows, err := rm.searchInRepository(targetRepo, packageName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to search in repository %s: %v", targetRepo, err)
+			}
+			return arrows, nil
+		}
+	}
+
+	// Search in all repositories
 	for _, repo := range rm.repositories {
 		arrows, err := rm.searchInRepository(repo, query)
 		if err != nil {
@@ -68,48 +99,123 @@ func (rm *RepositoryManager) searchInRepository(repo, query string) ([]*ArrowInf
 func (rm *RepositoryManager) searchLocalRepository(dirPath, query string) ([]*ArrowInfo, error) {
 	var arrows []*ArrowInfo
 
-	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Continue walking even if there's an error
-		}
+	// Try different file patterns for the query
+	patterns := []string{
+		filepath.Join(dirPath, query+".yaml"),
+		filepath.Join(dirPath, query+".yml"),
+		filepath.Join(dirPath, query, "arrow.yaml"),
+		filepath.Join(dirPath, query, "arrow.yml"),
+	}
 
-		// Check if it's a YAML file
-		if info.IsDir() || (!strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml")) {
-			return nil
-		}
+	for _, path := range patterns {
+		if _, err := os.Stat(path); err == nil {
+			// File exists, verify it's a valid arrow by trying to parse it
+			_, err := rm.loadArrowFromFile(path)
+			if err != nil {
+				rm.logger.Debug("Invalid arrow manifest at %s: %v", path, err)
+				continue
+			}
 
-		// Extract filename without extension for matching
-		filename := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		
-		// Apply search filter based on filename only
-		if query == "" || rm.matchesFilename(filename, query) {
+			// Create ArrowInfo for the found arrow
 			arrowInfo := &ArrowInfo{
-				Name:       filename, // Use filename as name for search results
-				Repository: dirPath,
-				Path:       path,
+				Name:           query,
+				PackageName:    filepath.Base(path),
+				RepositoryPath: dirPath,
+				Path:           path,
 			}
 			arrows = append(arrows, arrowInfo)
+			rm.logger.Debug("Found arrow %s in local repository %s", query, dirPath)
+			break // Found the file, no need to try other patterns
 		}
+	}
 
-		return nil
-	})
-
-	return arrows, err
+	return arrows, nil
 }
 
 // searchRemoteRepository searches for arrows in a remote repository
 func (rm *RepositoryManager) searchRemoteRepository(repoURL, query string) ([]*ArrowInfo, error) {
-	// For remote repositories, we would need to implement a discovery mechanism
-	// This is a simplified implementation that assumes a known structure
-	
-	// TODO: Implement proper remote repository discovery
-	// For now, we'll return an empty list
-	rm.logger.Warn("Remote repository search not fully implemented for %s", repoURL)
-	return []*ArrowInfo{}, nil
+	// For remote repositories, we try to directly fetch the specific yaml file
+	// Try different URL patterns for the query
+	patterns := []string{
+		fmt.Sprintf("%s/%s.yaml", repoURL, query),
+		fmt.Sprintf("%s/%s.yml", repoURL, query),
+		fmt.Sprintf("%s/%s/arrow.yaml", repoURL, query),
+		fmt.Sprintf("%s/%s/arrow.yml", repoURL, query),
+	}
+
+	var arrows []*ArrowInfo
+
+	for _, url := range patterns {
+		resp, err := rm.httpClient.Get(url)
+		if err != nil {
+			rm.logger.Debug("Failed to fetch %s: %v", url, err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			// File exists, verify it's a valid arrow by trying to parse it
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				rm.logger.Debug("Failed to read response from %s: %v", url, err)
+				continue
+			}
+
+			// Try to parse it as a valid arrow manifest
+			_, err = rm.loadArrowFromData(data)
+			if err != nil {
+				rm.logger.Debug("Invalid arrow manifest at %s: %v", url, err)
+				continue
+			}
+
+			// Create ArrowInfo for the found arrow
+			arrowInfo := &ArrowInfo{
+				Name:           query,
+				PackageName:    filepath.Base(url),
+				RepositoryPath: repoURL,
+				Path:           url,
+			}
+			arrows = append(arrows, arrowInfo)
+			rm.logger.Debug("Found arrow %s in remote repository %s", query, repoURL)
+			break // Found the file, no need to try other patterns
+		}
+	}
+
+	return arrows, nil
 }
 
 // GetArrow fetches an arrow by name from repositories
 func (rm *RepositoryManager) GetArrow(name string) (manifest.ArrowInterface, string, error) {
+	// Check if name contains repository specification (repo@package)
+	if strings.Contains(name, "@") {
+		parts := strings.SplitN(name, "@", 2)
+		if len(parts) == 2 {
+			repoPath := parts[0]
+			packageName := parts[1]
+			
+			// Find the specified repository
+			var targetRepo string
+			for _, repo := range rm.repositories {
+				if strings.Contains(repo, repoPath) || repo == repoPath {
+					targetRepo = repo
+					break
+				}
+			}
+			
+			if targetRepo == "" {
+				return nil, "", fmt.Errorf("repository %s not found", repoPath)
+			}
+			
+			// Get arrow from the specified repository
+			arrow, path, err := rm.getArrowFromRepository(targetRepo, packageName)
+			if err != nil {
+				return nil, "", fmt.Errorf("arrow %s not found in repository %s: %v", packageName, targetRepo, err)
+			}
+			return arrow, path, nil
+		}
+	}
+
+	// Original behavior: search all repositories
 	for _, repo := range rm.repositories {
 		arrow, path, err := rm.getArrowFromRepository(repo, name)
 		if err == nil {
@@ -349,4 +455,25 @@ func (rm *RepositoryManager) matchesFilename(filename, query string) bool {
 	}
 	
 	return false
+} 
+
+// parseRepositorySpec parses repository specification syntax
+func (rm *RepositoryManager) parseRepositorySpec(spec string) (repositoryPath, packageName string, hasRepoSpec bool) {
+	if strings.Contains(spec, "@") {
+		parts := strings.SplitN(spec, "@", 2)
+		if len(parts) == 2 {
+			return parts[0], parts[1], true
+		}
+	}
+	return "", spec, false
+}
+
+// findRepository finds a repository by path or partial match
+func (rm *RepositoryManager) findRepository(repoPath string) string {
+	for _, repo := range rm.repositories {
+		if strings.Contains(repo, repoPath) || repo == repoPath {
+			return repo
+		}
+	}
+	return ""
 } 

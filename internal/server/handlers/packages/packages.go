@@ -2,6 +2,8 @@ package packages
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/rabbytesoftware/quiver/internal/logger"
@@ -25,10 +27,36 @@ func NewHandler(pkgManager *packages.ArrowsServer, logger *logger.Logger) *Handl
 
 // ListPackagesHandler handles listing all packages
 func (h *Handler) ListPackagesHandler(w http.ResponseWriter, r *http.Request) {
-	packages := h.pkgManager.Packages
+	var allFiles []string
+	
+	// Get repository directories from package manager
+	repositories := h.pkgManager.PackageManager.GetRepositories()
+	
+	// Read each repository directory directly
+	for _, repoPath := range repositories {
+		files, err := os.ReadDir(repoPath)
+		if err != nil {
+			h.logger.Warn("Failed to read repository directory %s: %v", repoPath, err)
+			continue
+		}
+		
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+			
+			// Check if it's a YAML file and remove extension
+			filename := file.Name()
+			if strings.HasSuffix(filename, ".yaml") || strings.HasSuffix(filename, ".yml") {
+				nameWithoutExt := strings.TrimSuffix(strings.TrimSuffix(filename, ".yaml"), ".yml")
+				allFiles = append(allFiles, nameWithoutExt)
+			}
+		}
+	}
+	
 	responseData := map[string]interface{}{
-		"packages": packages,
-		"count":    len(packages),
+		"packages": allFiles,
+		"count":    len(allFiles),
 	}
 	response.WriteJSON(w, http.StatusOK, responseData)
 }

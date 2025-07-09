@@ -30,6 +30,7 @@ type Command struct {
 	Endpoint    string
 	ParamTypes  []ParamType
 	Example     string
+	Subcommands map[string]Command // Declarative subcommands
 }
 
 // ParamType represents parameter type and validation
@@ -75,13 +76,137 @@ func (c *CLI) Execute(args []string) error {
 		return fmt.Errorf("unknown command: %s\nUse './quiver help' to see available commands", commandName)
 	}
 
-	// Validate arguments
+	// Handle subcommands if they exist
+	if len(command.Subcommands) > 0 {
+		return c.handleSubcommands(command, commandArgs)
+	}
+
+	// Validate arguments for regular commands
 	if err := c.validateArgs(command, commandArgs); err != nil {
 		return fmt.Errorf("invalid arguments for command '%s': %v\nExample: %s", commandName, err, command.Example)
 	}
 
 	// Build and execute HTTP request
 	return c.executeHTTPRequest(command, commandArgs)
+}
+
+// handleSubcommands handles commands that have subcommands declaratively
+func (c *CLI) handleSubcommands(parentCommand Command, args []string) error {
+	if len(args) == 0 {
+		// No subcommand provided, execute parent command if it has an endpoint
+		if parentCommand.Endpoint != "" {
+			return c.executeHTTPRequest(parentCommand, []string{})
+		}
+		// Otherwise show subcommand help
+		return c.showSubcommandHelp(parentCommand)
+	}
+
+	subcommandName := args[0]
+	subcommandArgs := args[1:]
+
+	// Look up subcommand
+	subcommand, exists := parentCommand.Subcommands[subcommandName]
+	if !exists {
+		return fmt.Errorf("unknown subcommand: %s %s\nUse './quiver help' to see available commands", parentCommand.Name, subcommandName)
+	}
+
+	// Handle dynamic endpoints and validation for subcommands
+	return c.executeSubcommand(subcommand, subcommandArgs)
+}
+
+// executeSubcommand handles the execution of a subcommand with potential dynamic logic
+func (c *CLI) executeSubcommand(command Command, args []string) error {
+	// Handle special cases for netbridge commands that need dynamic endpoint construction
+	if strings.Contains(command.Endpoint, "{protocol}") || strings.Contains(command.Endpoint, "{port}") {
+		return c.handleDynamicEndpoint(command, args)
+	}
+
+	// Standard subcommand execution
+	if err := c.validateArgs(command, args); err != nil {
+		return fmt.Errorf("invalid arguments: %v\nExample: %s", err, command.Example)
+	}
+
+	return c.executeHTTPRequest(command, args)
+}
+
+// handleDynamicEndpoint handles commands that need dynamic endpoint construction (like netbridge)
+func (c *CLI) handleDynamicEndpoint(command Command, args []string) error {
+	// Handle open command with auto-discovery
+	if strings.Contains(command.Endpoint, "open") && len(args) >= 1 {
+		// Check if first argument is a protocol (auto-discovery mode)
+		if isProtocol(args[0]) {
+			protocol := args[0]
+			dynamicCommand := Command{
+				Method:   command.Method,
+				Endpoint: fmt.Sprintf("/api/v1/netbridge/open-auto/%s", strings.ReplaceAll(protocol, "/", "%2F")),
+			}
+			return c.executeHTTPRequest(dynamicCommand, []string{})
+		}
+		
+		// Normal port + protocol mode
+		if len(args) < 1 {
+			return fmt.Errorf("open requires either port number or protocol\nExamples:\n  ./quiver netbridge open 443 tcp\n  ./quiver netbridge open tcp")
+		}
+		
+		port := args[0]
+		protocol := "tcp" // default
+		if len(args) > 1 {
+			protocol = args[1]
+		}
+
+		// Validate port
+		if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+			return fmt.Errorf("invalid port number: %s", port)
+		}
+
+		dynamicCommand := Command{
+			Method:   command.Method,
+			Endpoint: fmt.Sprintf("/api/v1/netbridge/open/%s/%s", port, strings.ReplaceAll(protocol, "/", "%2F")),
+		}
+		return c.executeHTTPRequest(dynamicCommand, []string{})
+	}
+
+	// Handle close command
+	if strings.Contains(command.Endpoint, "close") && len(args) >= 1 {
+		if len(args) < 1 {
+			return fmt.Errorf("close requires port number\nExample: ./quiver netbridge close 443 tcp")
+		}
+		
+		port := args[0]
+		protocol := "tcp" // default
+		if len(args) > 1 {
+			protocol = args[1]
+		}
+
+		// Validate port
+		if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+			return fmt.Errorf("invalid port number: %s", port)
+		}
+
+		dynamicCommand := Command{
+			Method:   command.Method,
+			Endpoint: fmt.Sprintf("/api/v1/netbridge/close/%s/%s", port, strings.ReplaceAll(protocol, "/", "%2F")),
+		}
+		return c.executeHTTPRequest(dynamicCommand, []string{})
+	}
+
+	// Fallback to normal execution
+	return c.executeHTTPRequest(command, args)
+}
+
+// showSubcommandHelp shows help for commands with subcommands
+func (c *CLI) showSubcommandHelp(command Command) error {
+	fmt.Printf("%s - %s\n\n", command.Name, command.Description)
+	fmt.Printf("Available subcommands:\n")
+	
+	for name, subcommand := range command.Subcommands {
+		fmt.Printf("  %-12s %s\n", name, subcommand.Description)
+		if subcommand.Example != "" {
+			fmt.Printf("               Example: %s\n", subcommand.Example)
+		}
+	}
+	
+	return nil
 }
 
 // validateArgs validates command arguments against parameter types
@@ -125,6 +250,10 @@ func (c *CLI) validateParamType(param ParamType, value string) error {
 	case "int":
 		if _, err := strconv.Atoi(value); err != nil {
 			return fmt.Errorf("expected integer, got %s", value)
+		}
+	case "uint16":
+		if val, err := strconv.ParseUint(value, 10, 16); err != nil || val == 0 || val > 65535 {
+			return fmt.Errorf("expected port number (1-65535), got %s", value)
 		}
 	case "bool":
 		if _, err := strconv.ParseBool(value); err != nil {
@@ -238,7 +367,19 @@ func (c *CLI) showHelp() error {
 
 	for _, command := range CommandRegistry {
 		fmt.Printf("  %-15s %s\n", command.Name, command.Description)
-		fmt.Printf("  %18s Example: %s\n", "", command.Example)
+		
+		// Show subcommands if they exist
+		if len(command.Subcommands) > 0 {
+			fmt.Printf("  %18s Subcommands:\n", "")
+			for subName, subcommand := range command.Subcommands {
+				fmt.Printf("  %18s   %-12s %s\n", "", subName, subcommand.Description)
+				if subcommand.Example != "" {
+					fmt.Printf("  %18s     Example: %s\n", "", subcommand.Example)
+				}
+			}
+		} else {
+			fmt.Printf("  %18s Example: %s\n", "", command.Example)
+		}
 		fmt.Println()
 	}
 
@@ -246,4 +387,15 @@ func (c *CLI) showHelp() error {
 	fmt.Println("\nFor more information, visit: https://github.com/rabbytesoftware/quiver")
 
 	return nil
+} 
+
+// isProtocol checks if a string represents a protocol (tcp, udp, tcp/udp) rather than a port number
+func isProtocol(s string) bool {
+	s = strings.ToLower(s)
+	switch s {
+	case "tcp", "udp", "tcp/udp", "udp/tcp":
+		return true
+	default:
+		return false
+	}
 } 

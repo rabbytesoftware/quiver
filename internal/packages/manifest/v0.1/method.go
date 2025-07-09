@@ -1,45 +1,65 @@
 package v0_1
 
+// Methods now represents platform -> method -> commands structure
+// e.g., methods: { windows: { install: [...], execute: [...] }, linux: { install: [...] } }
 type Methods map[string]map[string][]string
 
 func (m Methods) GetInstall() map[string][]string {
-	if install, exists := m["install"]; exists {
-		return install
+	result := make(map[string][]string)
+	for platform, methods := range m {
+		if install, exists := methods["install"]; exists {
+			result[platform] = install
+		}
 	}
-	return nil
+	return result
 }
 
 func (m Methods) GetExecute() map[string][]string {
-	if execute, exists := m["execute"]; exists {
-		return execute
+	result := make(map[string][]string)
+	for platform, methods := range m {
+		if execute, exists := methods["execute"]; exists {
+			result[platform] = execute
+		}
 	}
-	return nil
+	return result
 }
 
 func (m Methods) GetUninstall() map[string][]string {
-	if uninstall, exists := m["uninstall"]; exists {
-		return uninstall
+	result := make(map[string][]string)
+	for platform, methods := range m {
+		if uninstall, exists := methods["uninstall"]; exists {
+			result[platform] = uninstall
+		}
 	}
-	return nil
+	return result
 }
 
 func (m Methods) GetUpdate() map[string][]string {
-	if update, exists := m["update"]; exists {
-		return update
+	result := make(map[string][]string)
+	for platform, methods := range m {
+		if update, exists := methods["update"]; exists {
+			result[platform] = update
+		}
 	}
-	return nil
+	return result
 }
 
 func (m Methods) GetValidate() map[string][]string {
-	if validate, exists := m["validate"]; exists {
-		return validate
+	result := make(map[string][]string)
+	for platform, methods := range m {
+		if validate, exists := methods["validate"]; exists {
+			result[platform] = validate
+		}
 	}
-	return nil
+	return result
 }
 
 func (m Methods) GetMethod(methodName string) map[string][]string {
-	if method, exists := m[methodName]; exists {
-		return method
+	result := make(map[string][]string)
+	for platform, methods := range m {
+		if method, exists := methods[methodName]; exists {
+			result[platform] = method
+		}
 	}
-	return nil
+	return result
 }

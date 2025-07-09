@@ -23,6 +23,9 @@ func (s *Server) setupRoutes() {
 
 	// Server management routes
 	s.setupServerRoutes(api)
+
+	// Netbridge management routes
+	s.setupNetbridgeRoutes(api)
 }
 
 // setupPackageRoutes sets up package-related routes
@@ -74,4 +77,24 @@ func (s *Server) setupServerRoutes(api *mux.Router) {
 
 	serverRouter.HandleFunc("/info", s.handlers.Server.ServerInfoHandler).Methods("GET")
 	serverRouter.HandleFunc("/status", s.handlers.Server.ServerStatusHandler).Methods("GET")
+}
+
+// setupNetbridgeRoutes sets up netbridge management routes
+func (s *Server) setupNetbridgeRoutes(api *mux.Router) {
+	netbridgeRouter := api.PathPrefix("/netbridge").Subrouter()
+
+	// Port management routes
+	netbridgeRouter.HandleFunc("/open", s.handlers.Netbridge.OpenPortHandler).Methods("POST")
+	netbridgeRouter.HandleFunc("/close", s.handlers.Netbridge.ClosePortHandler).Methods("POST")
+	netbridgeRouter.HandleFunc("/open/{port}/{protocol}", s.handlers.Netbridge.OpenPortByURLHandler).Methods("POST")
+	netbridgeRouter.HandleFunc("/close/{port}/{protocol}", s.handlers.Netbridge.ClosePortByURLHandler).Methods("POST")
+	
+	// Automatic port discovery routes
+	netbridgeRouter.HandleFunc("/open-auto", s.handlers.Netbridge.OpenPortAutoHandler).Methods("POST")
+	netbridgeRouter.HandleFunc("/open-auto/{protocol}", s.handlers.Netbridge.OpenPortAutoByURLHandler).Methods("POST")
+	
+	// Status and information routes
+	netbridgeRouter.HandleFunc("/ports", s.handlers.Netbridge.ListOpenPortsHandler).Methods("GET")
+	netbridgeRouter.HandleFunc("/status", s.handlers.Netbridge.GetStatusHandler).Methods("GET")
+	netbridgeRouter.HandleFunc("/refresh-ip", s.handlers.Netbridge.RefreshPublicIPHandler).Methods("POST")
 } 

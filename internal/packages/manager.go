@@ -58,9 +58,17 @@ func (pm *PackageManager) SearchArrows(query string) ([]*ArrowInfo, error) {
 func (pm *PackageManager) InstallArrow(name string, variables map[string]string) error {
 	pm.logger.Info("Installing arrow: %s", name)
 
-	// Check if already installed
-	if pm.database.IsInstalled(name) {
-		return fmt.Errorf("arrow %s is already installed", name)
+	// Parse repository specification if present
+	repoPath, packageName, hasRepoSpec := pm.parseRepositorySpec(name)
+	displayName := name
+	if hasRepoSpec {
+		pm.logger.Info("Installing arrow %s from repository %s", packageName, repoPath)
+		displayName = packageName
+	}
+
+	// Check if already installed (use package name only for installed check)
+	if pm.database.IsInstalled(displayName) {
+		return fmt.Errorf("arrow %s is already installed", displayName)
 	}
 
 	// Get arrow from repository
@@ -78,19 +86,19 @@ func (pm *PackageManager) InstallArrow(name string, variables map[string]string)
 				return fmt.Errorf("failed to install dependency %s: %w", dep, err)
 			}
 		}
-		// Add dependency relationship
-		if err := pm.database.AddDependency(name, dep); err != nil {
+		// Add dependency relationship (use display name for database)
+		if err := pm.database.AddDependency(displayName, dep); err != nil {
 			pm.logger.Warn("Failed to add dependency relationship: %v", err)
 		}
 	}
 
-	// Create install path
-	arrowInstallPath := filepath.Join(pm.installDir, name)
+	// Create install path (use display name for path)
+	arrowInstallPath := filepath.Join(pm.installDir, displayName)
 	arrowFile := filepath.Join(arrowInstallPath, "arrow.yaml")
 
 	// Download/copy arrow
 	arrowInfo := &ArrowInfo{
-		Name: name,
+		Name: displayName,
 		Path: sourcePath,
 	}
 	if err := pm.repository.DownloadArrow(arrowInfo, arrowFile); err != nil {
@@ -104,9 +112,9 @@ func (pm *PackageManager) InstallArrow(name string, variables map[string]string)
 		return fmt.Errorf("failed to execute install method: %w", err)
 	}
 
-	// Add to database
+	// Add to database (use display name for database)
 	installedPkg := &InstalledPackage{
-		Name:         name,
+		Name:         displayName,
 		Version:      arrow.ArrowVersion(),
 		Repository:   sourcePath,
 		InstallPath:  arrowInstallPath,
@@ -121,7 +129,7 @@ func (pm *PackageManager) InstallArrow(name string, variables map[string]string)
 		return fmt.Errorf("failed to add package to database: %w", err)
 	}
 
-	pm.logger.Info("Successfully installed arrow: %s", name)
+	pm.logger.Info("Successfully installed arrow: %s", displayName)
 	return nil
 }
 
@@ -223,13 +231,21 @@ func (pm *PackageManager) ExecuteArrow(name string, variables map[string]string)
 func (pm *PackageManager) UpdateArrow(name string) error {
 	pm.logger.Info("Updating arrow: %s", name)
 
-	// Check if installed
-	pkg, exists := pm.database.GetPackage(name)
-	if !exists {
-		return fmt.Errorf("arrow %s is not installed", name)
+	// Parse repository specification if present
+	repoPath, packageName, hasRepoSpec := pm.parseRepositorySpec(name)
+	displayName := name
+	if hasRepoSpec {
+		pm.logger.Info("Updating arrow %s from repository %s", packageName, repoPath)
+		displayName = packageName
 	}
 
-	// Get latest version from repository
+	// Check if installed (use display name for installed check)
+	pkg, exists := pm.database.GetPackage(displayName)
+	if !exists {
+		return fmt.Errorf("arrow %s is not installed", displayName)
+	}
+
+	// Get latest version from repository (use full specification if provided)
 	arrow, sourcePath, err := pm.repository.GetArrow(name)
 	if err != nil {
 		return fmt.Errorf("failed to get arrow %s: %w", name, err)
@@ -237,7 +253,7 @@ func (pm *PackageManager) UpdateArrow(name string) error {
 
 	// Check if update is needed
 	if arrow.ArrowVersion() == pkg.Version {
-		pm.logger.Info("Arrow %s is already up to date", name)
+		pm.logger.Info("Arrow %s is already up to date", displayName)
 		return nil
 	}
 
@@ -249,7 +265,7 @@ func (pm *PackageManager) UpdateArrow(name string) error {
 	// Update arrow file
 	arrowFile := filepath.Join(pkg.InstallPath, "arrow.yaml")
 	arrowInfo := &ArrowInfo{
-		Name: name,
+		Name: displayName,
 		Path: sourcePath,
 	}
 	if err := pm.repository.DownloadArrow(arrowInfo, arrowFile); err != nil {
@@ -264,7 +280,7 @@ func (pm *PackageManager) UpdateArrow(name string) error {
 		return fmt.Errorf("failed to update package in database: %w", err)
 	}
 
-	pm.logger.Info("Successfully updated arrow: %s to version %s", name, arrow.ArrowVersion())
+	pm.logger.Info("Successfully updated arrow: %s to version %s", displayName, arrow.ArrowVersion())
 	return nil
 }
 
@@ -315,6 +331,11 @@ func (pm *PackageManager) RemoveRepository(repo string) {
 // GetRepositories returns all repositories
 func (pm *PackageManager) GetRepositories() []string {
 	return pm.repository.GetRepositories()
+}
+
+// parseRepositorySpec parses repository specification syntax
+func (pm *PackageManager) parseRepositorySpec(spec string) (repositoryPath, packageName string, hasRepoSpec bool) {
+	return pm.repository.parseRepositorySpec(spec)
 }
 
 // Private methods

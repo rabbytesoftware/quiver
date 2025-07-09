@@ -19,6 +19,8 @@ vendor/
 # Go workspace file
 go.work
 
+quiver
+
 # Environment variables
 .env
 .env.local

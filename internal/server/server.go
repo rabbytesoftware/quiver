@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rabbytesoftware/quiver/internal/config"
 	"github.com/rabbytesoftware/quiver/internal/logger"
+	"github.com/rabbytesoftware/quiver/internal/netbridge"
 	"github.com/rabbytesoftware/quiver/internal/packages"
 	"github.com/rabbytesoftware/quiver/internal/ui"
 )
@@ -18,6 +19,7 @@ type Server struct {
 	config     config.ServerConfig
 	logger     *logger.Logger
 	pkgManager *packages.ArrowsServer
+	netbridge  *netbridge.Netbridge
 	httpServer *http.Server
 	router     *mux.Router
 	handlers   *Handlers
@@ -29,15 +31,23 @@ func New(
 	pkgManager *packages.ArrowsServer,
 	logger *logger.Logger,
 ) *Server {
+	// Initialize netbridge
+	netbridgeInstance, err := netbridge.NewNetbridge()
+	if err != nil {
+		logger.Warn("Failed to initialize netbridge: %v (port forwarding will be disabled)", err)
+		netbridgeInstance = nil
+	}
+
 	s := &Server{
 		config:     cfg,
 		logger:     logger.WithService("server"),
 		pkgManager: pkgManager,
+		netbridge:  netbridgeInstance,
 		router:     mux.NewRouter(),
 	}
 
 	// Initialize handlers
-	s.handlers = NewHandlers(s.pkgManager, s.logger)
+	s.handlers = NewHandlers(s.pkgManager, s.netbridge, s.logger)
 
 	// Setup server components
 	s.setupMiddleware()

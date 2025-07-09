@@ -66,3 +66,64 @@ Follow us for updates and announcements:
 
 - [Rabbyte GitHub](https://github.com/rabbytesoftware)
 - [char2cs' X](https://x.com/char2cs)
+
+## API Usage
+
+### Arrow Management
+
+#### Search Arrows
+```bash
+# Search all repositories
+GET /arrows/search?q=cs2
+
+# Search specific repository
+GET /arrows/search?q=arrows/@cs2
+```
+
+#### Install Arrow
+```bash
+# Install from any repository
+POST /arrows/cs2/install
+{
+  "variables": {"key": "value"}
+}
+
+# Install from specific repository (via query parameter)
+POST /arrows/cs2/install?repository=github.com/repo
+{
+  "variables": {"key": "value"}
+}
+
+# Install from specific repository (via request body)
+POST /arrows/cs2/install
+{
+  "repository": "github.com/repo",
+  "variables": {"key": "value"}
+}
+```
+
+#### Update Arrow
+```bash
+# Update from any repository
+PUT /arrows/cs2/update
+
+# Update from specific repository
+PUT /arrows/cs2/update?repository=github.com/repo
+{
+  "repository": "github.com/repo"
+}
+```
+
+### Repository Specification Syntax
+
+Quiver supports specifying which repository to use for package operations using the `repository@package` syntax:
+
+- **Search**: `arrows/@cs2` - searches for "cs2" only in repositories containing "arrows/"
+- **Install**: `github.com/repo@cs2` - installs "cs2" from "github.com/repo" repository
+- **Update**: `arrows/@cs2` - updates "cs2" from repositories containing "arrows/"
+
+For HTTP API calls, you can specify the repository via:
+1. Query parameter: `?repository=github.com/repo`
+2. Request body: `{"repository": "github.com/repo"}`
+
+If no repository is specified, Quiver searches all configured repositories.
