@@ -7,13 +7,15 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/pterm/pterm"
 	"github.com/rabbytesoftware/quiver/internal/config"
 )
 
 // Logger represents the application logger
 type Logger struct {
-	*slog.Logger
-	config config.LoggerConfig
+	fileLogger *slog.Logger
+	config     config.LoggerConfig
+	service    string
 }
 
 // Level represents log levels
@@ -75,11 +77,11 @@ func New(cfg config.LoggerConfig) *Logger {
 		level = slog.LevelInfo
 	}
 
-	// Create handler options
+	// Create handler options for file logging (JSON)
 	opts := &slog.HandlerOptions{
 		Level: level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Customize timestamp format
+			// Customize timestamp format for JSON
 			if a.Key == slog.TimeKey {
 				return slog.Attr{
 					Key:   slog.TimeKey,
@@ -90,21 +92,23 @@ func New(cfg config.LoggerConfig) *Logger {
 		},
 	}
 
-	// Create structured logger
-	handler := slog.NewJSONHandler(file, opts)
-	logger := slog.New(handler)
+	// Create file logger with JSON format
+	fileHandler := slog.NewJSONHandler(file, opts)
+	fileLogger := slog.New(fileHandler)
 
 	return &Logger{
-		Logger: logger,
-		config: cfg,
+		fileLogger: fileLogger,
+		config:     cfg,
+		service:    "",
 	}
 }
 
 // WithService returns a logger with service context
 func (l *Logger) WithService(service string) *Logger {
 	return &Logger{
-		Logger: l.Logger.With("service", service),
-		config: l.config,
+		fileLogger: l.fileLogger.With("service", service),
+		config:     l.config,
+		service:    service,
 	}
 }
 
@@ -115,43 +119,113 @@ func (l *Logger) WithContext(ctx map[string]interface{}) *Logger {
 		args = append(args, k, v)
 	}
 	return &Logger{
-		Logger: l.Logger.With(args...),
-		config: l.config,
+		fileLogger: l.fileLogger.With(args...),
+		config:     l.config,
+		service:    l.service,
 	}
+}
+
+// logToFile logs to the file using JSON format
+func (l *Logger) logToFile(level slog.Level, msg string) {
+	switch level {
+	case slog.LevelDebug:
+		l.fileLogger.Debug(msg)
+	case slog.LevelInfo:
+		l.fileLogger.Info(msg)
+	case slog.LevelWarn:
+		l.fileLogger.Warn(msg)
+	case slog.LevelError:
+		l.fileLogger.Error(msg)
+	}
+}
+
+// logToCLI logs to the CLI using pretty format with colors
+func (l *Logger) logToCLI(level slog.Level, msg string) {
+	if !l.config.Show {
+		return
+	}
+
+	timestamp := time.Now().Format("15:04:05")
+	service := l.service
+	if service == "" {
+		service = "main"
+	}
+
+	var levelStr string
+	var coloredLevel string
+
+	switch level {
+	case slog.LevelDebug:
+		levelStr = " DEBUG"
+		coloredLevel = pterm.FgGray.Sprint(levelStr)
+	case slog.LevelInfo:
+		levelStr = " INFO "
+		coloredLevel = pterm.FgCyan.Sprint(levelStr)
+	case slog.LevelWarn:
+		levelStr = " WARN"
+		coloredLevel = pterm.FgYellow.Sprint(levelStr)
+	case slog.LevelError:
+		levelStr = "ERROR"
+		coloredLevel = pterm.FgRed.Sprint(levelStr)
+	default:
+		levelStr = "UNKNOWN"
+		coloredLevel = pterm.FgDefault.Sprint(levelStr)
+	}
+
+	// Format: timestamp [ STATE ] - Service - Log Message
+	formattedMsg := fmt.Sprintf("%s [%s] - %s - %s",
+		pterm.FgLightBlue.Sprint(timestamp),
+		coloredLevel,
+		pterm.FgMagenta.Sprint(service),
+		msg,
+	)
+
+	fmt.Println(formattedMsg)
+}
+
+// log handles logging to both file and CLI
+func (l *Logger) log(level slog.Level, msg string, args ...interface{}) {
+	formattedMsg := fmt.Sprintf(msg, args...)
+	
+	// Always log to file
+	l.logToFile(level, formattedMsg)
+	
+	// Log to CLI if enabled
+	l.logToCLI(level, formattedMsg)
 }
 
 // Debug logs a debug message
 func (l *Logger) Debug(msg string, args ...interface{}) {
-	l.Logger.Debug(fmt.Sprintf(msg, args...))
+	l.log(slog.LevelDebug, msg, args...)
 }
 
 // Info logs an info message
 func (l *Logger) Info(msg string, args ...interface{}) {
-	l.Logger.Info(fmt.Sprintf(msg, args...))
+	l.log(slog.LevelInfo, msg, args...)
 }
 
 // Warn logs a warning message
 func (l *Logger) Warn(msg string, args ...interface{}) {
-	l.Logger.Warn(fmt.Sprintf(msg, args...))
+	l.log(slog.LevelWarn, msg, args...)
 }
 
 // Error logs an error message
 func (l *Logger) Error(msg string, args ...interface{}) {
-	l.Logger.Error(fmt.Sprintf(msg, args...))
+	l.log(slog.LevelError, msg, args...)
 }
 
 // Fatal logs a fatal message and exits
 func (l *Logger) Fatal(msg string, args ...interface{}) {
-	l.Logger.Error(fmt.Sprintf(msg, args...))
+	l.log(slog.LevelError, msg, args...)
 	os.Exit(1)
 }
 
 // Load logs a loading message (alias for Info with specific formatting)
 func (l *Logger) Load(msg string, args ...interface{}) {
-	l.Logger.Info(fmt.Sprintf("🔄 "+msg, args...))
+	l.log(slog.LevelInfo, "🔄 "+msg, args...)
 }
 
 // Ok logs a success message (alias for Info with specific formatting)
 func (l *Logger) Ok(msg string, args ...interface{}) {
-	l.Logger.Info(fmt.Sprintf("✅ "+msg, args...))
+	l.log(slog.LevelInfo, "✅ "+msg, args...)
 } 

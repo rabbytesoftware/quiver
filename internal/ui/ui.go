@@ -119,31 +119,32 @@ func ShowWelcome() {
 	// ClearScreen()
 	
 	// Quiver ASCII Art
-	quiverArt := []string{
-		"         ;;;;;;;;;;;;;;;;;",
-		"         ;;;;;;;;;;;;;;;;;",
-		"         ;;;;;;;;;;;;;;;;;", 
-		"         ;;;;;;;;;;;;;;;;;",
-		"                          ",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;          ;;;;;;;;",
-		";;;;;;;;;;;;;;;;;         ",
-		";;;;;;;;;;;;;;;;;         ",
-		";;;;;;;;;;;;;;;;;         ",
-		";;;;;;;;;;;;;;;;;         ",
-		"                          ",
-		"         ;;;;;;;;;;;;;;;;;",
-		"         ;;;;;;;;;;;;;;;;;",
-		"         ;;;;;;;;;;;;;;;;;",
-		"         ;;;;;;;;;;;;;;;;;",
-	}
+	// quiverArt := []string{
+	// 	"         ;;;;;;;;;;;;;;;;;",
+	// 	"         ;;;;;;;;;;;;;;;;;",
+	// 	"         ;;;;;;;;;;;;;;;;;", 
+	// 	"         ;;;;;;;;;;;;;;;;;",
+	// 	"                          ",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;          ;;;;;;;;",
+	// 	";;;;;;;;;;;;;;;;;         ",
+	// 	";;;;;;;;;;;;;;;;;         ",
+	// 	";;;;;;;;;;;;;;;;;         ",
+	// 	";;;;;;;;;;;;;;;;;         ",
+	// 	"                          ",
+	// 	"         ;;;;;;;;;;;;;;;;;",
+	// 	"         ;;;;;;;;;;;;;;;;;",
+	// 	"         ;;;;;;;;;;;;;;;;;",
+	// 	"         ;;;;;;;;;;;;;;;;;",
+	// }
+	quiverArt := []string{}
 
 	// Get system information
 	hostname, _ := os.Hostname()
@@ -160,7 +161,7 @@ func ShowWelcome() {
 	maintainers := metadata.GetMaintainers()
 	
 	// Calculate available width for text dynamically
-	const asciiWidth = 57
+	const asciiWidth = 0
 	const spacing = 4 // A bit more spacing for safety
 	terminalWidth := getTerminalWidth()
 	maxTextWidth := terminalWidth - asciiWidth - spacing
@@ -225,9 +226,6 @@ func ShowWelcome() {
 	}
 	
 	fmt.Println()
-	
-	// Print status
-	pterm.DefaultSection.WithLevel(2).Println("Initializing Quiver...")
 }
 
 // ShowTable displays a formatted table
@@ -296,26 +294,13 @@ func GetInput(prompt string) string {
 	return result
 }
 
-// ShowServerInfo displays server information
-func ShowServerInfo(host string, port int) {
-	info := fmt.Sprintf(`
-Server Configuration:
-• Host: %s
-• Port: %d
-• API Endpoint: http://%s:%d/api/v1
-• Health Check: http://%s:%d/health
-`, host, port, host, port, host, port)
-
-	pterm.DefaultBox.WithTitle("Server Info").WithTitleTopCenter().Println(info)
-}
-
 // ShowShutdown displays shutdown message
 func ShowShutdown() {
 	pterm.DefaultCenter.Println(
 		pterm.DefaultHeader.WithFullWidth().
 			WithBackgroundStyle(pterm.NewStyle(pterm.BgRed)).
 			WithTextStyle(pterm.NewStyle(pterm.FgWhite)).
-			Sprint("Quiver Server Shutdown"),
+			Sprint("Quiver Shutdown"),
 	)
 }
 

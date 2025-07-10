@@ -1,58 +1,154 @@
 package response
 
 import (
-	"encoding/json"
 	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
-// WriteJSON writes a JSON response with the given status code and data
-func WriteJSON(w http.ResponseWriter, statusCode int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
+// StandardResponse represents the standard API response structure
+type StandardResponse struct {
+	Success   bool        `json:"success"`
+	Message   string      `json:"message,omitempty"`
+	Data      interface{} `json:"data,omitempty"`
+	Error     *ErrorInfo  `json:"error,omitempty"`
+	Timestamp string      `json:"timestamp"`
+}
 
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+// ErrorInfo contains detailed error information
+type ErrorInfo struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
+}
+
+// JSON writes a standardized JSON response
+func JSON(c *gin.Context, statusCode int, data interface{}) {
+	response := StandardResponse{
+		Success:   statusCode >= 200 && statusCode < 300,
+		Data:      data,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
+
+	c.JSON(statusCode, response)
 }
 
-// WriteError writes an error response with the given status code and message
-func WriteError(w http.ResponseWriter, statusCode int, message string) {
-	errorResponse := map[string]string{
-		"error": message,
+// Success writes a success response with data
+func Success(c *gin.Context, message string, data interface{}) {
+	response := StandardResponse{
+		Success:   true,
+		Message:   message,
+		Data:      data,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	WriteJSON(w, statusCode, errorResponse)
+
+	c.JSON(http.StatusOK, response)
 }
 
-// WriteSuccess writes a success response with the given message
-func WriteSuccess(w http.ResponseWriter, message string) {
-	successResponse := map[string]string{
-		"message": message,
-		"status":  "success",
+// Created writes a 201 created response
+func Created(c *gin.Context, message string, data interface{}) {
+	response := StandardResponse{
+		Success:   true,
+		Message:   message,
+		Data:      data,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	WriteJSON(w, http.StatusOK, successResponse)
+
+	c.JSON(http.StatusCreated, response)
 }
 
-// WriteNotFound writes a 404 not found response
-func WriteNotFound(w http.ResponseWriter, resource string) {
-	WriteError(w, http.StatusNotFound, resource+" not found")
+// Error writes an error response with detailed information
+func Error(c *gin.Context, statusCode int, code, message string, details ...string) {
+	errorInfo := &ErrorInfo{
+		Code:    code,
+		Message: message,
+	}
+
+	if len(details) > 0 {
+		errorInfo.Details = details[0]
+	}
+
+	response := StandardResponse{
+		Success:   false,
+		Error:     errorInfo,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	c.JSON(statusCode, response)
 }
 
-// WriteBadRequest writes a 400 bad request response
-func WriteBadRequest(w http.ResponseWriter, message string) {
-	WriteError(w, http.StatusBadRequest, message)
+// BadRequest writes a 400 bad request response
+func BadRequest(c *gin.Context, message string, details ...string) {
+	Error(c, http.StatusBadRequest, "BAD_REQUEST", message, details...)
 }
 
-// WriteInternalServerError writes a 500 internal server error response
-func WriteInternalServerError(w http.ResponseWriter, message string) {
-	WriteError(w, http.StatusInternalServerError, message)
+// NotFound writes a 404 not found response
+func NotFound(c *gin.Context, resource string) {
+	Error(c, http.StatusNotFound, "NOT_FOUND", resource+" not found")
 }
 
-// WriteUnauthorized writes a 401 unauthorized response
-func WriteUnauthorized(w http.ResponseWriter, message string) {
-	WriteError(w, http.StatusUnauthorized, message)
+// InternalServerError writes a 500 internal server error response
+func InternalServerError(c *gin.Context, message string, details ...string) {
+	Error(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", message, details...)
 }
 
-// WriteForbidden writes a 403 forbidden response
-func WriteForbidden(w http.ResponseWriter, message string) {
-	WriteError(w, http.StatusForbidden, message)
+// Unauthorized writes a 401 unauthorized response
+func Unauthorized(c *gin.Context, message string) {
+	Error(c, http.StatusUnauthorized, "UNAUTHORIZED", message)
+}
+
+// Forbidden writes a 403 forbidden response
+func Forbidden(c *gin.Context, message string) {
+	Error(c, http.StatusForbidden, "FORBIDDEN", message)
+}
+
+// Conflict writes a 409 conflict response
+func Conflict(c *gin.Context, message string) {
+	Error(c, http.StatusConflict, "CONFLICT", message)
+}
+
+// HealthCheck writes a health check response
+func HealthCheck(c *gin.Context, service, version string) {
+	healthData := gin.H{
+		"status":  "ok",
+		"service": service,
+		"version": version,
+	}
+
+	Success(c, "Service is healthy", healthData)
+}
+
+// Pagination contains pagination metadata
+type Pagination struct {
+	Page     int `json:"page"`
+	Limit    int `json:"limit"`
+	Total    int `json:"total"`
+	HasNext  bool `json:"has_next"`
+	HasPrev  bool `json:"has_prev"`
+}
+
+// PaginatedResponse writes a paginated response
+func PaginatedResponse(c *gin.Context, data interface{}, pagination Pagination) {
+	responseData := gin.H{
+		"items":      data,
+		"pagination": pagination,
+	}
+
+	Success(c, "Data retrieved successfully", responseData)
+}
+
+// ValidationError writes a validation error response
+func ValidationError(c *gin.Context, errors map[string]string) {
+	response := StandardResponse{
+		Success:   false,
+		Error: &ErrorInfo{
+			Code:    "VALIDATION_ERROR",
+			Message: "Validation failed",
+		},
+		Data:      gin.H{"validation_errors": errors},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	c.JSON(http.StatusUnprocessableEntity, response)
 } 

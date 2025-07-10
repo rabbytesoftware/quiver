@@ -1,65 +1,57 @@
 package server
 
 import (
-	"net/http"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
-// loggingMiddleware logs HTTP requests
-func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// loggingMiddleware logs HTTP requests for Gin
+func (s *Server) loggingMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		start := time.Now()
-		
-		// Create a custom response writer to capture status code
-		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		
-		next.ServeHTTP(lrw, r)
-		
-		duration := time.Since(start)
-		s.logger.Info("%s %s %d %v %s", r.Method, r.URL.Path, lrw.statusCode, duration, r.RemoteAddr)
-	})
+		path := c.Request.URL.Path
+		raw := c.Request.URL.RawQuery
+
+		// Process request
+		c.Next()
+
+		// Calculate latency
+		latency := time.Since(start)
+
+		// Get status and size
+		status := c.Writer.Status()
+		size := c.Writer.Size()
+
+		// Build full path
+		if raw != "" {
+			path = path + "?" + raw
+		}
+
+		// Log the request
+		s.logger.Info("[%s] %s %s %d %v %dB",
+			c.Request.Method,
+			path,
+			c.ClientIP(),
+			status,
+			latency,
+			size,
+		)
+	}
 }
 
-// corsMiddleware handles CORS headers
-func (s *Server) corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
-		// Handle preflight requests
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
+// corsMiddleware handles CORS headers for Gin
+func (s *Server) corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
 			return
 		}
-		
-		next.ServeHTTP(w, r)
-	})
-}
 
-// recoveryMiddleware handles panics
-func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				s.logger.Error("Panic in HTTP handler: %v", err)
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			}
-		}()
-		
-		next.ServeHTTP(w, r)
-	})
+		c.Next()
+	}
 }
-
-// loggingResponseWriter wraps http.ResponseWriter to capture status code
-type loggingResponseWriter struct {
-	http.ResponseWriter
-	statusCode int
-}
-
-// WriteHeader captures the status code
-func (lrw *loggingResponseWriter) WriteHeader(code int) {
-	lrw.statusCode = code
-	lrw.ResponseWriter.WriteHeader(code)
-} 

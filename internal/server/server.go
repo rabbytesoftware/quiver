@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	"github.com/rabbytesoftware/quiver/internal/config"
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/netbridge"
@@ -14,23 +14,26 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/ui"
 )
 
-// Server represents the HTTP server
+// Server represents the HTTP server (now using Gin)
 type Server struct {
 	config     config.ServerConfig
 	logger     *logger.Logger
 	pkgManager *packages.ArrowsServer
 	netbridge  *netbridge.Netbridge
 	httpServer *http.Server
-	router     *mux.Router
+	gin        *gin.Engine
 	handlers   *Handlers
 }
 
-// New creates a new server instance
+// New creates a new server instance using Gin
 func New(
 	cfg config.ServerConfig,
 	pkgManager *packages.ArrowsServer,
 	logger *logger.Logger,
 ) *Server {
+	// Set Gin to release mode by default
+	gin.SetMode(gin.ReleaseMode)
+
 	// Initialize netbridge
 	netbridgeInstance, err := netbridge.NewNetbridge()
 	if err != nil {
@@ -43,7 +46,7 @@ func New(
 		logger:     logger.WithService("server"),
 		pkgManager: pkgManager,
 		netbridge:  netbridgeInstance,
-		router:     mux.NewRouter(),
+		gin:        gin.New(),
 	}
 
 	// Initialize handlers
@@ -55,7 +58,7 @@ func New(
 
 	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Handler:      s.router,
+		Handler:      s.gin,
 		ReadTimeout:  time.Duration(cfg.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(cfg.WriteTimeout) * time.Second,
 	}
@@ -65,12 +68,9 @@ func New(
 
 // Start starts the HTTP server
 func (s *Server) Start(ctx context.Context) error {
-	// Display server info
-	ui.ShowServerInfo(s.config.Host, s.config.Port)
-
 	// Start server in goroutine
 	go func() {
-		s.logger.Info("Starting HTTP server on %s:%d", s.config.Host, s.config.Port)
+		s.logger.Info("Starting API server on %s:%d", s.config.Host, s.config.Port)
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			s.logger.Error("Failed to start HTTP server: %v", err)
 		}
@@ -85,7 +85,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown() error {
-	s.logger.Info("Shutting down HTTP server...")
+	s.logger.Info("Shutting down API server...")
 	ui.ShowShutdown()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -94,9 +94,9 @@ func (s *Server) Shutdown() error {
 	return s.httpServer.Shutdown(ctx)
 }
 
-// GetRouter returns the server's router for testing purposes
-func (s *Server) GetRouter() *mux.Router {
-	return s.router
+// GetRouter returns the server's Gin engine (renamed for compatibility)
+func (s *Server) GetRouter() *gin.Engine {
+	return s.gin
 }
 
 // GetConfig returns the server's configuration
@@ -106,12 +106,12 @@ func (s *Server) GetConfig() config.ServerConfig {
 
 // setupMiddleware sets up HTTP middleware
 func (s *Server) setupMiddleware() {
-	// Logging middleware
-	s.router.Use(s.loggingMiddleware)
-	
-	// CORS middleware
-	s.router.Use(s.corsMiddleware)
-	
 	// Recovery middleware
-	s.router.Use(s.recoveryMiddleware)
-} 
+	s.gin.Use(gin.Recovery())
+
+	// CORS middleware
+	s.gin.Use(s.corsMiddleware())
+
+	// Custom logging middleware
+	s.gin.Use(s.loggingMiddleware())
+}

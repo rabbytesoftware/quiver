@@ -1,7 +1,7 @@
 package health
 
 import (
-	"net/http"
+	"github.com/gin-gonic/gin"
 
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/metadata"
@@ -20,11 +20,36 @@ func NewHandler(logger *logger.Logger) *Handler {
 	}
 }
 
-// HealthHandler handles health check requests
-func (h *Handler) HealthHandler(w http.ResponseWriter, r *http.Request) {
-	responseData := map[string]interface{}{
-		"status":  "ok",
-		"version": metadata.Project.Version,
+// HealthCheck handles health check requests
+func (h *Handler) HealthCheck(c *gin.Context) {
+	h.logger.Debug("Health check requested")
+	response.HealthCheck(c, "Quiver", metadata.Project.Version)
+}
+
+// ReadinessProbe handles readiness probe requests
+func (h *Handler) ReadinessProbe(c *gin.Context) {
+	h.logger.Debug("Readiness probe requested")
+	
+	// TODO: Add actual readiness checks (database, external services, etc.)
+	readinessData := gin.H{
+		"status": "ready",
+		"checks": gin.H{
+			"database": "ok",
+			"packages": "ok",
+		},
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+	
+	response.Success(c, "Service is ready", readinessData)
+}
+
+// LivenessProbe handles liveness probe requests
+func (h *Handler) LivenessProbe(c *gin.Context) {
+	h.logger.Debug("Liveness probe requested")
+	
+	livenessData := gin.H{
+		"status": "alive",
+		"uptime": "unknown", // TODO: Add actual uptime calculation
+	}
+	
+	response.Success(c, "Service is alive", livenessData)
 } 

@@ -1,17 +1,17 @@
 package packages
 
 import (
-	"net/http"
 	"os"
 	"strings"
 
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/packages"
+	"github.com/rabbytesoftware/quiver/internal/packages/types"
 	"github.com/rabbytesoftware/quiver/internal/server/response"
 )
 
-// Handler handles package-related HTTP requests
+// Handler handles package-related HTTP requests (legacy compatibility)
 type Handler struct {
 	pkgManager *packages.ArrowsServer
 	logger     *logger.Logger
@@ -25,12 +25,12 @@ func NewHandler(pkgManager *packages.ArrowsServer, logger *logger.Logger) *Handl
 	}
 }
 
-// ListPackagesHandler handles listing all packages
-func (h *Handler) ListPackagesHandler(w http.ResponseWriter, r *http.Request) {
+// ListPackages handles listing all available packages from repositories
+func (h *Handler) ListPackages(c *gin.Context) {
 	var allFiles []string
 	
 	// Get repository directories from package manager
-	repositories := h.pkgManager.PackageManager.GetRepositories()
+	repositories := h.pkgManager.GetRepositories()
 	
 	// Read each repository directory directly
 	for _, repoPath := range repositories {
@@ -54,80 +54,179 @@ func (h *Handler) ListPackagesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
-	responseData := map[string]interface{}{
+	responseData := gin.H{
 		"packages": allFiles,
 		"count":    len(allFiles),
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	response.Success(c, "Available packages retrieved successfully", responseData)
 }
 
-// GetPackageHandler handles getting a specific package
-func (h *Handler) GetPackageHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-
-	pkg, exists := h.pkgManager.Packages[id]
-	if !exists {
-		response.WriteError(w, http.StatusNotFound, "Package not found")
+// GetPackage handles getting a specific package information
+func (h *Handler) GetPackage(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.BadRequest(c, "Package ID is required")
 		return
 	}
 
-	response.WriteJSON(w, http.StatusOK, pkg)
+	// Check if package is installed
+	installed := h.pkgManager.GetInstalledArrows()
+	pkg, exists := installed[id]
+	if !exists {
+		response.NotFound(c, "Package")
+		return
+	}
+
+	response.Success(c, "Package information retrieved successfully", pkg)
 }
 
-// StartPackageHandler handles starting a package
-func (h *Handler) StartPackageHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
+// StartPackage handles starting a package (arrow execution)
+func (h *Handler) StartPackage(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.BadRequest(c, "Package ID is required")
+		return
+	}
 
-	// TODO: Implement package starting logic
-	_, exists := h.pkgManager.Packages[id]
+	// Check if package is installed
+	installed := h.pkgManager.GetInstalledArrows()
+	_, exists := installed[id]
 	if !exists {
-		response.WriteError(w, http.StatusNotFound, "Package not found")
+		response.NotFound(c, "Package")
 		return
 	}
 
 	h.logger.Info("Starting package: %s", id)
-	responseData := map[string]string{
-		"message": "Package started successfully",
+
+	// Execute the arrow (equivalent to starting the package)
+	err := h.pkgManager.ExecuteArrow(id, nil)
+	if err != nil {
+		h.logger.Error("Failed to start package %s: %v", id, err)
+		response.BadRequest(c, "Failed to start package", err.Error())
+		return
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	responseData := gin.H{
+		"package": id,
+		"action":  "started",
+	}
+
+	response.Success(c, "Package started successfully", responseData)
 }
 
-// StopPackageHandler handles stopping a package
-func (h *Handler) StopPackageHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
+// StopPackage handles stopping a package
+func (h *Handler) StopPackage(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.BadRequest(c, "Package ID is required")
+		return
+	}
 
-	// TODO: Implement package stopping logic
-	_, exists := h.pkgManager.Packages[id]
+	// Check if package is installed
+	installed := h.pkgManager.GetInstalledArrows()
+	_, exists := installed[id]
 	if !exists {
-		response.WriteError(w, http.StatusNotFound, "Package not found")
+		response.NotFound(c, "Package")
 		return
 	}
 
 	h.logger.Info("Stopping package: %s", id)
-	responseData := map[string]string{
-		"message": "Package stopped successfully",
-	}
-	response.WriteJSON(w, http.StatusOK, responseData)
-}
 
-// PackageStatusHandler handles getting package status
-func (h *Handler) PackageStatusHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-
-	_, exists := h.pkgManager.Packages[id]
-	if !exists {
-		response.WriteError(w, http.StatusNotFound, "Package not found")
+	// Update status to stopped (there's no direct stop method in the new architecture)
+	// This is a legacy endpoint, so we'll just update the status
+	status, err := h.pkgManager.GetArrowStatus(id)
+	if err != nil {
+		h.logger.Error("Failed to get package status %s: %v", id, err)
+		response.InternalServerError(c, "Failed to get package status", err.Error())
 		return
 	}
 
-	// TODO: Implement proper status checking
-	status := map[string]interface{}{
-		"id":     id,
-		"status": "stopped", // Default status
+	responseData := gin.H{
+		"package":        id,
+		"action":         "stopped",
+		"previous_status": status,
 	}
-	response.WriteJSON(w, http.StatusOK, status)
+
+	// Note: In the new architecture, there's no explicit stop method for arrows
+	// This endpoint exists for backward compatibility but doesn't perform actual stopping
+	response.Success(c, "Package stop requested (note: actual stopping depends on arrow implementation)", responseData)
+}
+
+// GetPackageStatus handles getting package status
+func (h *Handler) GetPackageStatus(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.BadRequest(c, "Package ID is required")
+		return
+	}
+
+	status, err := h.pkgManager.GetArrowStatus(id)
+	if err != nil {
+		h.logger.Error("Failed to get package status %s: %v", id, err)
+		response.NotFound(c, "Package")
+		return
+	}
+
+	responseData := gin.H{
+		"id":     id,
+		"status": status,
+	}
+
+	response.Success(c, "Package status retrieved successfully", responseData)
+}
+
+// GetInstalledPackages handles listing all installed packages
+func (h *Handler) GetInstalledPackages(c *gin.Context) {
+	installed := h.pkgManager.GetInstalledArrows()
+
+	responseData := gin.H{
+		"packages": installed,
+		"count":    len(installed),
+	}
+
+	response.Success(c, "Installed packages retrieved successfully", responseData)
+}
+
+// GetPackagesByStatus handles getting packages filtered by status
+func (h *Handler) GetPackagesByStatus(c *gin.Context) {
+	statusParam := c.Query("status")
+	if statusParam == "" {
+		response.BadRequest(c, "Status query parameter is required")
+		return
+	}
+
+	status := types.PackageStatus(statusParam)
+	packages := h.pkgManager.GetArrowsByStatus(status)
+
+	responseData := gin.H{
+		"packages": packages,
+		"count":    len(packages),
+		"status":   status,
+	}
+
+	response.Success(c, "Packages filtered by status retrieved successfully", responseData)
+}
+
+// GetAllPackageStatuses handles listing all package statuses
+func (h *Handler) GetAllPackageStatuses(c *gin.Context) {
+	installed := h.pkgManager.GetInstalledArrows()
+	statuses := make(map[string]types.PackageStatus)
+
+	for name := range installed {
+		status, err := h.pkgManager.GetArrowStatus(name)
+		if err != nil {
+			h.logger.Warn("Failed to get status for package %s: %v", name, err)
+			statuses[name] = types.StatusError
+		} else {
+			statuses[name] = status
+		}
+	}
+
+	responseData := gin.H{
+		"statuses": statuses,
+		"count":    len(statuses),
+	}
+
+	response.Success(c, "Package statuses retrieved successfully", responseData)
 } 

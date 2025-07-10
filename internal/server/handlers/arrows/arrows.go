@@ -1,12 +1,11 @@
 package arrows
 
 import (
-	"encoding/json"
-	"net/http"
+	"github.com/gin-gonic/gin"
 
-	"github.com/gorilla/mux"
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/packages"
+	"github.com/rabbytesoftware/quiver/internal/packages/types"
 	"github.com/rabbytesoftware/quiver/internal/server/response"
 )
 
@@ -24,193 +23,301 @@ func NewHandler(pkgManager *packages.ArrowsServer, logger *logger.Logger) *Handl
 	}
 }
 
-// SearchArrowsHandler handles searching for arrows across repositories
-func (h *Handler) SearchArrowsHandler(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
-	
-	arrows, err := h.pkgManager.PackageManager.SearchArrows(query)
-	if err != nil {
-		response.WriteError(w, http.StatusInternalServerError, "Failed to search arrows: "+err.Error())
+// InstallArrowRequest represents the request payload for arrow installation
+type InstallArrowRequest struct {
+	Variables  map[string]string `json:"variables,omitempty"`
+	Repository string            `json:"repository,omitempty"`
+}
+
+// ExecuteArrowRequest represents the request payload for arrow execution
+type ExecuteArrowRequest struct {
+	Variables map[string]string `json:"variables,omitempty"`
+}
+
+// UpdateArrowRequest represents the request payload for arrow updates
+type UpdateArrowRequest struct {
+	Repository string `json:"repository,omitempty"`
+}
+
+// SearchArrows handles searching for arrows across repositories
+func (h *Handler) SearchArrows(c *gin.Context) {
+	query := c.Query("q")
+	if query == "" {
+		response.BadRequest(c, "Query parameter 'q' is required")
 		return
 	}
 
-	responseData := map[string]interface{}{
+	arrows, err := h.pkgManager.SearchArrows(query)
+	if err != nil {
+		h.logger.Error("Failed to search arrows: %v", err)
+		response.InternalServerError(c, "Failed to search arrows", err.Error())
+		return
+	}
+
+	responseData := gin.H{
 		"arrows": arrows,
 		"count":  len(arrows),
 		"query":  query,
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	response.Success(c, "Search completed successfully", responseData)
 }
 
-// InstallArrowHandler handles arrow installation
-func (h *Handler) InstallArrowHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
-
-	// Parse request body for variables and optional repository
-	var requestBody struct {
-		Variables  map[string]string `json:"variables"`
-		Repository string            `json:"repository,omitempty"`
-	}
-	
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		// Variables are optional, so ignore decode errors
-		requestBody.Variables = make(map[string]string)
+// InstallArrow handles arrow installation
+func (h *Handler) InstallArrow(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
+		return
 	}
 
-	// Check for repository specification in query parameter
-	if repo := r.URL.Query().Get("repository"); repo != "" {
-		requestBody.Repository = repo
+	var req InstallArrowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Variables are optional, so we'll ignore binding errors
+		req.Variables = make(map[string]string)
+	}
+
+	// Check for repository specification in query parameter (backwards compatibility)
+	if repo := c.Query("repository"); repo != "" {
+		req.Repository = repo
 	}
 
 	// Build full package specification
 	fullName := name
-	if requestBody.Repository != "" {
-		fullName = requestBody.Repository + "@" + name
+	if req.Repository != "" {
+		fullName = req.Repository + "@" + name
 	}
 
-	err := h.pkgManager.PackageManager.InstallArrow(fullName, requestBody.Variables)
+	h.logger.Info("Installing arrow: %s (full name: %s)", name, fullName)
+
+	err := h.pkgManager.InstallArrow(fullName, req.Variables)
 	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, "Failed to install arrow: "+err.Error())
+		h.logger.Error("Failed to install arrow %s: %v", fullName, err)
+		response.BadRequest(c, "Failed to install arrow", err.Error())
 		return
 	}
 
-	responseData := map[string]string{
-		"message":    "Arrow installed successfully",
+	responseData := gin.H{
 		"arrow":      name,
-		"repository": requestBody.Repository,
+		"repository": req.Repository,
+		"variables":  req.Variables,
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	response.Created(c, "Arrow installed successfully", responseData)
 }
 
-// ExecuteArrowHandler handles arrow execution
-func (h *Handler) ExecuteArrowHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
-
-	// Parse request body for variables
-	var requestBody struct {
-		Variables map[string]string `json:"variables"`
-	}
-	
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		// Variables are optional, so ignore decode errors
-		requestBody.Variables = make(map[string]string)
-	}
-
-	err := h.pkgManager.PackageManager.ExecuteArrow(name, requestBody.Variables)
-	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, "Failed to execute arrow: "+err.Error())
+// ExecuteArrow handles arrow execution
+func (h *Handler) ExecuteArrow(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
 		return
 	}
 
-	responseData := map[string]string{
-		"message": "Arrow executed successfully",
-		"arrow":   name,
+	var req ExecuteArrowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Variables are optional, so we'll ignore binding errors
+		req.Variables = make(map[string]string)
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
-}
 
-// UninstallArrowHandler handles arrow uninstallation
-func (h *Handler) UninstallArrowHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
+	h.logger.Info("Executing arrow: %s", name)
 
-	err := h.pkgManager.PackageManager.UninstallArrow(name)
+	err := h.pkgManager.ExecuteArrow(name, req.Variables)
 	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, "Failed to uninstall arrow: "+err.Error())
+		h.logger.Error("Failed to execute arrow %s: %v", name, err)
+		response.BadRequest(c, "Failed to execute arrow", err.Error())
 		return
 	}
 
-	responseData := map[string]string{
-		"message": "Arrow uninstalled successfully",
-		"arrow":   name,
+	responseData := gin.H{
+		"arrow":     name,
+		"variables": req.Variables,
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	response.Success(c, "Arrow executed successfully", responseData)
 }
 
-// UpdateArrowHandler handles arrow updates
-func (h *Handler) UpdateArrowHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
-
-	// Parse request body for optional repository
-	var requestBody struct {
-		Repository string `json:"repository,omitempty"`
-	}
-	
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		// Repository is optional, so ignore decode errors
+// UninstallArrow handles arrow uninstallation
+func (h *Handler) UninstallArrow(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
+		return
 	}
 
-	// Check for repository specification in query parameter
-	if repo := r.URL.Query().Get("repository"); repo != "" {
-		requestBody.Repository = repo
+	h.logger.Info("Uninstalling arrow: %s", name)
+
+	err := h.pkgManager.UninstallArrow(name)
+	if err != nil {
+		h.logger.Error("Failed to uninstall arrow %s: %v", name, err)
+		response.BadRequest(c, "Failed to uninstall arrow", err.Error())
+		return
+	}
+
+	responseData := gin.H{
+		"arrow": name,
+	}
+
+	response.Success(c, "Arrow uninstalled successfully", responseData)
+}
+
+// UpdateArrow handles arrow updates
+func (h *Handler) UpdateArrow(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
+		return
+	}
+
+	var req UpdateArrowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Repository is optional, so we'll ignore binding errors
+	}
+
+	// Check for repository specification in query parameter (backwards compatibility)
+	if repo := c.Query("repository"); repo != "" {
+		req.Repository = repo
 	}
 
 	// Build full package specification
 	fullName := name
-	if requestBody.Repository != "" {
-		fullName = requestBody.Repository + "@" + name
+	if req.Repository != "" {
+		fullName = req.Repository + "@" + name
 	}
 
-	err := h.pkgManager.PackageManager.UpdateArrow(fullName)
+	h.logger.Info("Updating arrow: %s (full name: %s)", name, fullName)
+
+	err := h.pkgManager.UpdateArrow(fullName)
 	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, "Failed to update arrow: "+err.Error())
+		h.logger.Error("Failed to update arrow %s: %v", fullName, err)
+		response.BadRequest(c, "Failed to update arrow", err.Error())
 		return
 	}
 
-	responseData := map[string]string{
-		"message":    "Arrow updated successfully",
+	responseData := gin.H{
 		"arrow":      name,
-		"repository": requestBody.Repository,
+		"repository": req.Repository,
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	response.Success(c, "Arrow updated successfully", responseData)
 }
 
-// ValidateArrowHandler handles arrow validation
-func (h *Handler) ValidateArrowHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
-
-	err := h.pkgManager.PackageManager.ValidateArrow(name)
-	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, "Failed to validate arrow: "+err.Error())
+// ValidateArrow handles arrow validation
+func (h *Handler) ValidateArrow(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
 		return
 	}
 
-	responseData := map[string]string{
-		"message": "Arrow validation completed successfully",
-		"arrow":   name,
+	h.logger.Info("Validating arrow: %s", name)
+
+	err := h.pkgManager.ValidateArrow(name)
+	if err != nil {
+		h.logger.Error("Failed to validate arrow %s: %v", name, err)
+		response.BadRequest(c, "Arrow validation failed", err.Error())
+		return
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	responseData := gin.H{
+		"arrow": name,
+	}
+
+	response.Success(c, "Arrow validation completed successfully", responseData)
 }
 
-// GetInstalledArrowsHandler handles listing installed arrows
-func (h *Handler) GetInstalledArrowsHandler(w http.ResponseWriter, r *http.Request) {
-	installed := h.pkgManager.PackageManager.GetInstalledArrows()
+// GetInstalledArrows handles listing installed arrows
+func (h *Handler) GetInstalledArrows(c *gin.Context) {
+	installed := h.pkgManager.GetInstalledArrows()
 
-	responseData := map[string]interface{}{
+	responseData := gin.H{
 		"installed": installed,
 		"count":     len(installed),
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	response.Success(c, "Installed arrows retrieved successfully", responseData)
 }
 
-// GetArrowStatusHandler handles getting arrow status
-func (h *Handler) GetArrowStatusHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
-
-	status, err := h.pkgManager.PackageManager.GetArrowStatus(name)
-	if err != nil {
-		response.WriteError(w, http.StatusNotFound, "Arrow not found: "+err.Error())
+// GetArrowStatus handles getting arrow status
+func (h *Handler) GetArrowStatus(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
 		return
 	}
 
-	responseData := map[string]interface{}{
+	status, err := h.pkgManager.GetArrowStatus(name)
+	if err != nil {
+		h.logger.Error("Failed to get arrow status %s: %v", name, err)
+		response.NotFound(c, "Arrow")
+		return
+	}
+
+	responseData := gin.H{
 		"arrow":  name,
 		"status": status,
 	}
-	response.WriteJSON(w, http.StatusOK, responseData)
+
+	response.Success(c, "Arrow status retrieved successfully", responseData)
+}
+
+// GetArrowsByStatus handles getting arrows filtered by status
+func (h *Handler) GetArrowsByStatus(c *gin.Context) {
+	statusParam := c.Query("status")
+	if statusParam == "" {
+		response.BadRequest(c, "Status query parameter is required")
+		return
+	}
+
+	status := types.PackageStatus(statusParam)
+	arrows := h.pkgManager.GetArrowsByStatus(status)
+
+	responseData := gin.H{
+		"arrows": arrows,
+		"count":  len(arrows),
+		"status": status,
+	}
+
+	response.Success(c, "Arrows filtered by status retrieved successfully", responseData)
+}
+
+// GetArrowInfo handles getting detailed arrow information
+func (h *Handler) GetArrowInfo(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
+		return
+	}
+
+	installed := h.pkgManager.GetInstalledArrows()
+	arrow, exists := installed[name]
+	if !exists {
+		response.NotFound(c, "Arrow")
+		return
+	}
+
+	response.Success(c, "Arrow information retrieved successfully", arrow)
+}
+
+// ListArrowStatuses handles listing all arrow statuses
+func (h *Handler) ListArrowStatuses(c *gin.Context) {
+	installed := h.pkgManager.GetInstalledArrows()
+	statuses := make(map[string]types.PackageStatus)
+
+	for name := range installed {
+		status, err := h.pkgManager.GetArrowStatus(name)
+		if err != nil {
+			h.logger.Warn("Failed to get status for arrow %s: %v", name, err)
+			statuses[name] = types.StatusError
+		} else {
+			statuses[name] = status
+		}
+	}
+
+	responseData := gin.H{
+		"statuses": statuses,
+		"count":    len(statuses),
+	}
+
+	response.Success(c, "Arrow statuses retrieved successfully", responseData)
 } 

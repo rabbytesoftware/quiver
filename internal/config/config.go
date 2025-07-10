@@ -29,6 +29,7 @@ type ServerConfig struct {
 
 // LoggerConfig holds logger-specific configuration
 type LoggerConfig struct {
+	Show      bool   `json:"show"`       // Whether to show logs on CLI
 	Level     string `json:"level"`
 	LogDir    string `json:"log_dir"`
 	MaxSize   int    `json:"max_size"`
@@ -53,6 +54,7 @@ func Default() *Config {
 			WriteTimeout: 30,
 		},
 		Logger: LoggerConfig{
+			Show:     false,
 			Level:    "info",
 			LogDir:   "./logs",
 			MaxSize:  100, // megabytes

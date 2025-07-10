@@ -7,6 +7,7 @@
 	},
 
 	"logger": {
+		"show": false,
 		"level": "info",
 		"log_dir": "./logs",
 		"max_size": 100,
