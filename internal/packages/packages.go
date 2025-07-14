@@ -2,13 +2,13 @@ package packages
 
 import (
 	"github.com/rabbytesoftware/quiver/internal/logger"
-	"github.com/rabbytesoftware/quiver/internal/packages/server"
+	"github.com/rabbytesoftware/quiver/internal/packages/core"
 )
 
-// ArrowsServer is an alias for the new server.ArrowsServer for backward compatibility
-type ArrowsServer = server.ArrowsServer
+// ArrowsServer is an alias for the core.Manager for backward compatibility
+type ArrowsServer = core.Manager
 
-// NewArrowsServer creates a new arrows server using the new architecture
+// NewArrowsServer creates a new arrows server using the core manager directly
 func NewArrowsServer(repositories []string, installDir, dbPath string, logger *logger.Logger) *ArrowsServer {
-	return server.NewArrowsServer(repositories, installDir, dbPath, logger)
+	return core.NewManager(repositories, installDir, dbPath, logger)
 }

@@ -207,19 +207,19 @@ variables:
 methods:
   install:
     linux:
-      - "${steamcmd.execute} +login anonymous +force_install_dir ${INSTALL_PATH} +app_update 730 validate +quit"
+      - "${steamcmd.execute} +login anonymous +force_install_dir ${INSTALL_DIR} +app_update 730 validate +quit"
   execute:
     linux:
-      - "${INSTALL_PATH}/cs2 -dedicated -console +hostname ${SERVER_HOSTNAME} +maxplayers ${MAX_PLAYERS}"
+      - "${INSTALL_DIR}/cs2 -dedicated -console +hostname ${SERVER_HOSTNAME} +maxplayers ${MAX_PLAYERS}"
   uninstall:
     linux:
-      - "rm -rf ${INSTALL_PATH}"
+      - "rm -rf ${INSTALL_DIR}"
   update:
     linux:
-      - "${steamcmd.execute} +login anonymous +force_install_dir ${INSTALL_PATH} +app_update 730 validate +quit"
+      - "${steamcmd.execute} +login anonymous +force_install_dir ${INSTALL_DIR} +app_update 730 validate +quit"
   validate:
     linux:
-      - "test -f ${INSTALL_PATH}/cs2"
+      - "test -f ${INSTALL_DIR}/cs2"
 ```
 
 ## Dependency Management
@@ -240,6 +240,13 @@ Variables can be defined in arrows and customized during installation:
 - **Sensitive variables**: Marked as sensitive (passwords, API keys)
 - **Type validation**: Support for strings, integers, and booleans
 - **Value constraints**: Min/max values and predefined options
+
+### System Variables
+
+Quiver automatically provides system variables that arrows can reference:
+
+- **`INSTALL_DIR`**: The directory where the arrow's files are installed (e.g., `./pkgs/chat/` for `chat.yaml`)
+- **`INSTALL_PATH`**: Deprecated alias for `INSTALL_DIR` (maintained for backward compatibility)
 
 ## Package States
 

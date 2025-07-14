@@ -38,7 +38,7 @@ netbridge:
 variables:
   - name: "QUIVER_CHAT_HOSTNAME"
     default: "chat.quiver.ar"
-    sensitive: true
+    sensitive: false
 
 methods:
   windows:
@@ -47,16 +47,16 @@ methods:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/v1.0.0-2f4cc69/quiver-chat-windows-amd64.zip"
         - UNCOMPRESS: "quiver-chat-windows-amd64.zip"
         - MOVE: "quiver-chat-windows-amd64.exe"
-          to: "C:\Program Files\Quiver Chat\quiver-chat.exe"
+          to: "${INSTALL_DIR}\quiver-chat.exe"
       execute:
-        - "C:\Program Files\Quiver Chat\quiver-chat.exe --port ${CHAT_PORT}"
+        - "${INSTALL_DIR}\quiver-chat.exe --port ${CHAT_PORT}"
       uninstall:
-        - REMOVE: "C:\Program Files\Quiver Chat"
+        - REMOVE: "${INSTALL_DIR}"
       update:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-windows-amd64.zip"
         - UNCOMPRESS: "quiver-chat-windows-amd64.zip"
         - MOVE: "quiver-chat-windows-amd64.exe"
-          to: "C:\Program Files\Quiver Chat\quiver-chat.exe"
+          to: "${INSTALL_DIR}\quiver-chat.exe"
       validate:
         - "echo 'Quiver Chat is installed and running.'"
     arm64:
@@ -64,49 +64,54 @@ methods:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-windows-arm64.zip"
         - UNCOMPRESS: "quiver-chat-windows-arm64.zip"
         - MOVE: "quiver-chat-windows-arm64.exe"
-          to: "C:\Program Files\Quiver Chat\quiver-chat.exe"
+          to: "${INSTALL_DIR}\quiver-chat.exe"
       execute:
-        - "C:\Program Files\Quiver Chat\quiver-chat.exe --port ${CHAT_PORT}"
+        - "${INSTALL_DIR}\quiver-chat.exe --port ${CHAT_PORT}"
       uninstall:
-        - REMOVE: "C:\Program Files\Quiver Chat"
+        - REMOVE: "${INSTALL_DIR}"
       update:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-windows-arm64.zip"
         - UNCOMPRESS: "quiver-chat-windows-arm64.zip"
         - MOVE: "quiver-chat-windows-arm64.exe"
-          to: "C:\Program Files\Quiver Chat\quiver-chat.exe"
-    
+          to: "${INSTALL_DIR}\quiver-chat.exe"
+      validate:
+        - "echo 'Quiver Chat is installed and running.'"
+
   linux:
     amd64:
       install:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-linux-amd64.zip"
-      - UNCOMPRESS: "quiver-chat-linux-amd64.zip"
-      - MOVE: "quiver-chat-linux-amd64"
-        to: "/usr/local/bin/quiver-chat"
-    execute:
-      - "/usr/local/bin/quiver-chat --port ${CHAT_PORT}"
-    uninstall:
-      - REMOVE: "/usr/local/bin/quiver-chat"
-    update:
-      - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-linux-amd64.zip"
-      - UNCOMPRESS: "quiver-chat-linux-amd64.zip"
-      - MOVE: "quiver-chat-linux-amd64"
-        to: "/usr/local/bin/quiver-chat"
-    validate:
-      - "echo 'Quiver Chat is installed and running.'"
+        - UNCOMPRESS: "quiver-chat-linux-amd64.zip"
+        - MOVE: "quiver-chat-linux-amd64"
+          to: "${INSTALL_DIR}/quiver-chat"
+      execute:
+        - "${INSTALL_DIR}/quiver-chat --port ${CHAT_PORT}"
+      uninstall:
+        - REMOVE: "${INSTALL_DIR}"
+      update:
+        - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-linux-amd64.zip"
+        - UNCOMPRESS: "quiver-chat-linux-amd64.zip"
+        - MOVE: "quiver-chat-linux-amd64"
+          to: "${INSTALL_DIR}/quiver-chat"
+      validate:
+        - "echo 'Quiver Chat is installed and running.'"
     arm64:
       install:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-linux-arm64.zip"
         - UNCOMPRESS: "quiver-chat-linux-arm64.zip"
         - MOVE: "quiver-chat-linux-arm64"
-          to: "/usr/local/bin/quiver-chat"
+          to: "${INSTALL_DIR}/quiver-chat"
       execute: 
-        - "/usr/local/bin/quiver-chat --port ${CHAT_PORT}"
+        - "${INSTALL_DIR}/quiver-chat --port ${CHAT_PORT}"
       uninstall:
-        - REMOVE: "/usr/local/bin/quiver-chat"
+        - REMOVE: "${INSTALL_DIR}"
       update:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-linux-arm64.zip"
         - UNCOMPRESS: "quiver-chat-linux-arm64.zip"
         - MOVE: "quiver-chat-linux-arm64"
+          to: "${INSTALL_DIR}/quiver-chat"
+      validate:
+        - "echo 'Validating Quiver Chat...'"
   
   darwin:
     amd64:
@@ -114,16 +119,16 @@ methods:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-darwin-amd64.zip"
         - UNCOMPRESS: "quiver-chat-darwin-amd64.zip"
         - MOVE: "quiver-chat-darwin-amd64"
-          to: "/usr/local/bin/quiver-chat"
+          to: "${INSTALL_DIR}/quiver-chat"
       execute:
-        - "/usr/local/bin/quiver-chat --port ${CHAT_PORT}"
+        - "${INSTALL_DIR}/quiver-chat --port ${CHAT_PORT}"
       uninstall:
-        - REMOVE: "/usr/local/bin/quiver-chat"
+        - REMOVE: "${INSTALL_DIR}"
       update:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-darwin-amd64.zip"
         - UNCOMPRESS: "quiver-chat-darwin-amd64.zip"
         - MOVE: "quiver-chat-darwin-amd64"
-          to: "/usr/local/bin/quiver-chat"
+          to: "${INSTALL_DIR}/quiver-chat"
       validate:
         - "echo 'Validating Quiver Chat...'"
     arm64:
@@ -131,15 +136,15 @@ methods:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-darwin-arm64.zip"
         - UNCOMPRESS: "quiver-chat-darwin-arm64.zip"
         - MOVE: "quiver-chat-darwin-arm64"
-          to: "/usr/local/bin/quiver-chat"
+          to: "${INSTALL_DIR}/quiver-chat"
       execute: 
-        - "/usr/local/bin/quiver-chat --port ${CHAT_PORT}"
+        - "${INSTALL_DIR}/quiver-chat --port ${CHAT_PORT}"
       uninstall:
-        - REMOVE: "/usr/local/bin/quiver-chat"
+        - REMOVE: "${INSTALL_DIR}"
       update:
         - GET: "https://github.com/rabbytesoftware/quiver.chat/releases/download/latest/quiver-chat-darwin-arm64.zip"
         - UNCOMPRESS: "quiver-chat-darwin-arm64.zip"
         - MOVE: "quiver-chat-darwin-arm64"
-          to: "/usr/local/bin/quiver-chat"
+          to: "${INSTALL_DIR}/quiver-chat"
       validate:
         - "echo 'Validating Quiver Chat...'"

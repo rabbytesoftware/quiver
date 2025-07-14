@@ -1,30 +1,30 @@
-package arrow
+package manifest
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/rabbytesoftware/quiver/internal/logger"
-	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
-	v0_1 "github.com/rabbytesoftware/quiver/internal/packages/manifest/v0.1"
-	"gopkg.in/yaml.v3"
 )
 
 // Processor handles arrow loading and processing operations
 type Processor struct {
 	logger *logger.Logger
+	registry *VersionRegistry
 }
 
 // NewProcessor creates a new arrow processor
 func NewProcessor(logger *logger.Logger) *Processor {
 	return &Processor{
-		logger: logger.WithService("arrow-processor"),
+		logger: logger.WithService("manifest-processor"),
+		registry: DefaultRegistry,
 	}
 }
 
 // LoadFromFile loads an arrow manifest from a file
-func (p *Processor) LoadFromFile(path string) (manifest.ArrowInterface, error) {
+func (p *Processor) LoadFromFile(path string) (ArrowInterface, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read arrow file: %w", err)
@@ -34,35 +34,12 @@ func (p *Processor) LoadFromFile(path string) (manifest.ArrowInterface, error) {
 }
 
 // LoadFromData loads an arrow manifest from data
-func (p *Processor) LoadFromData(data []byte) (manifest.ArrowInterface, error) {
-	// Parse version first
-	var versionInfo struct {
-		Version string `yaml:"version"`
-	}
-
-	if err := yaml.Unmarshal(data, &versionInfo); err != nil {
-		return nil, fmt.Errorf("failed to parse version: %w", err)
-	}
-
-	if versionInfo.Version == "" {
-		return nil, fmt.Errorf("version field is required in arrow manifest")
-	}
-
-	// Load based on version
-	switch versionInfo.Version {
-	case "0.1":
-		var arrow v0_1.Arrow
-		if err := yaml.Unmarshal(data, &arrow); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal v0.1 arrow: %w", err)
-		}
-		return &arrow, nil
-	default:
-		return nil, fmt.Errorf("unsupported arrow version: %s", versionInfo.Version)
-	}
+func (p *Processor) LoadFromData(data []byte) (ArrowInterface, error) {
+	return p.registry.LoadFromData(data)
 }
 
 // LoadFromInstallation loads an arrow from its installation directory
-func (p *Processor) LoadFromInstallation(installPath string) (manifest.ArrowInterface, error) {
+func (p *Processor) LoadFromInstallation(installPath string) (ArrowInterface, error) {
 	arrowFile := filepath.Join(installPath, "arrow.yaml")
 	
 	// Check if arrow.yaml exists
@@ -78,7 +55,7 @@ func (p *Processor) LoadFromInstallation(installPath string) (manifest.ArrowInte
 }
 
 // ValidateArrow validates an arrow manifest
-func (p *Processor) ValidateArrow(arrow manifest.ArrowInterface) error {
+func (p *Processor) ValidateArrow(arrow ArrowInterface) error {
 	// Basic validation
 	if arrow.Name() == "" {
 		return fmt.Errorf("arrow name is required")
@@ -94,13 +71,41 @@ func (p *Processor) ValidateArrow(arrow manifest.ArrowInterface) error {
 		return fmt.Errorf("arrow methods are required")
 	}
 
-	// Check if at least install and execute methods exist
-	if methods.GetInstall() == nil {
-		return fmt.Errorf("install method is required")
+	osStr := runtime.GOOS
+	archStr := runtime.GOARCH
+
+	// Check install method for current platform
+	install := methods.GetInstall()
+	if install == nil || install[osStr] == nil || install[osStr][archStr] == nil || len(install[osStr][archStr]) == 0 {
+		return fmt.Errorf("no install method defined for %s/%s", osStr, archStr)
 	}
 
-	if methods.GetExecute() == nil {
-		return fmt.Errorf("execute method is required")
+	// Check execute method for current platform
+	execute := methods.GetExecute()
+	if execute == nil || execute[osStr] == nil || execute[osStr][archStr] == nil || len(execute[osStr][archStr]) == 0 {
+		return fmt.Errorf("no execute method defined for %s/%s", osStr, archStr)
+	}
+
+	// Check compatible requirements
+	requirements := arrow.GetRequirements()
+	if requirements != nil {
+		compatible := requirements.GetCompatible()
+		if len(compatible) > 0 {
+			archs, ok := compatible[osStr]
+			if !ok {
+				return fmt.Errorf("os %s not in compatible list", osStr)
+			}
+			found := false
+			for _, a := range archs {
+				if a == archStr {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("arch %s not in compatible list for %s", archStr, osStr)
+			}
+		}
 	}
 
 	// Validate variables if present
@@ -131,25 +136,17 @@ func (p *Processor) GetArrowInfo(path string) (*ArrowBasicInfo, error) {
 		return nil, fmt.Errorf("failed to read arrow file: %w", err)
 	}
 
-	// Parse basic info only
-	var basicInfo struct {
-		Version  string `yaml:"version"`
-		Metadata struct {
-			Name        string `yaml:"name"`
-			Description string `yaml:"description"`
-			Version     string `yaml:"version"`
-		} `yaml:"metadata"`
-	}
-
-	if err := yaml.Unmarshal(data, &basicInfo); err != nil {
-		return nil, fmt.Errorf("failed to parse arrow basic info: %w", err)
+	// Load the arrow to get info
+	arrow, err := p.LoadFromData(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load arrow: %w", err)
 	}
 
 	return &ArrowBasicInfo{
-		Name:        basicInfo.Metadata.Name,
-		Description: basicInfo.Metadata.Description,
-		Version:     basicInfo.Metadata.Version,
-		ManifestVersion: basicInfo.Version,
+		Name:        arrow.Name(),
+		Description: arrow.Description(),
+		Version:     arrow.ArrowVersion(),
+		ManifestVersion: arrow.Manifest(),
 		Path:        path,
 	}, nil
 }
@@ -176,7 +173,12 @@ func (p *Processor) IsValidArrowFile(path string) bool {
 	return err == nil
 }
 
-// SupportedVersions returns a list of supported arrow manifest versions
-func (p *Processor) SupportedVersions() []string {
-	return []string{"0.1"}
+// GetSupportedVersions returns all supported manifest versions
+func (p *Processor) GetSupportedVersions() []string {
+	return p.registry.GetSupportedVersions()
+}
+
+// HasVersion checks if a version is supported
+func (p *Processor) HasVersion(version string) bool {
+	return p.registry.HasVersion(version)
 } 

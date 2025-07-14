@@ -46,26 +46,26 @@ variables:
 methods:
   install: 
     windows: 
-      - "echo Installing application on Windows to ${INSTALL_PATH}"
+      - "echo Installing application on Windows to ${INSTALL_DIR}"
     linux:
-      - "echo Installing application on Linux to ${INSTALL_PATH}"
+      - "echo Installing application on Linux to ${INSTALL_DIR}"
   execute:
     windows:
-      - "${INSTALL_PATH}\\app.exe --name ${APP_NAME} --version ${APP_VERSION} --port ${APP_PORT}"
+      - "${INSTALL_DIR}\\app.exe --name ${APP_NAME} --version ${APP_VERSION} --port ${APP_PORT}"
     linux:
-      - "${INSTALL_PATH}/app --name ${APP_NAME} --version ${APP_VERSION} --port ${APP_PORT}"
+      - "${INSTALL_DIR}/app --name ${APP_NAME} --version ${APP_VERSION} --port ${APP_PORT}"
   uninstall:
     windows:
-      - "echo Uninstalling application from ${INSTALL_PATH}"
+      - "echo Uninstalling application from ${INSTALL_DIR}"
     linux:
-      - "echo Uninstalling application from ${INSTALL_PATH}"
+      - "echo Uninstalling application from ${INSTALL_DIR}"
   update:
     windows:
-      - "echo Updating application in ${INSTALL_PATH}"
+      - "echo Updating application in ${INSTALL_DIR}"
     linux:
-      - "echo Updating application in ${INSTALL_PATH}"
+      - "echo Updating application in ${INSTALL_DIR}"
   validate:
     windows:
-      - "echo Validating application in ${INSTALL_PATH}"
+      - "echo Validating application in ${INSTALL_DIR}"
     linux:
-      - "echo Validating application in ${INSTALL_PATH}"
+      - "echo Validating application in ${INSTALL_DIR}"

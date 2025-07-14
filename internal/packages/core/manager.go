@@ -6,20 +6,20 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/rabbytesoftware/quiver/internal/database"
 	"github.com/rabbytesoftware/quiver/internal/logger"
-	"github.com/rabbytesoftware/quiver/internal/packages/arrow"
-	"github.com/rabbytesoftware/quiver/internal/packages/database"
 	"github.com/rabbytesoftware/quiver/internal/packages/execution"
+	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
 	"github.com/rabbytesoftware/quiver/internal/packages/repository"
 	"github.com/rabbytesoftware/quiver/internal/packages/types"
 )
 
 // Manager is the main package manager that orchestrates all package operations
 type Manager struct {
-	database      *database.Manager
+	database      database.Database
 	repository    *repository.Manager
 	execution     *execution.Engine
-	arrowProcessor *arrow.Processor
+	arrowProcessor *manifest.Processor
 	installDir    string
 	logger        *logger.Logger
 }
@@ -27,10 +27,10 @@ type Manager struct {
 // NewManager creates a new package manager
 func NewManager(repositories []string, installDir, dbPath string, logger *logger.Logger) *Manager {
 	return &Manager{
-		database:      database.NewManager(dbPath, logger),
+		database:      database.NewDefaultDatabase(dbPath, logger),
 		repository:    repository.NewManager(repositories, logger),
 		execution:     execution.NewEngine(logger),
-		arrowProcessor: arrow.NewProcessor(logger),
+		arrowProcessor: manifest.NewProcessor(logger),
 		installDir:    installDir,
 		logger:        logger.WithService("package-manager"),
 	}
@@ -343,6 +343,20 @@ func (m *Manager) GetInstalledArrows() map[string]*types.InstalledPackage {
 // GetArrowStatus returns the status of an arrow
 func (m *Manager) GetArrowStatus(name string) (types.PackageStatus, error) {
 	return m.database.GetPackageStatus(name)
+}
+
+// GetArrowsByStatus returns arrows with a specific status
+func (m *Manager) GetArrowsByStatus(status types.PackageStatus) []*types.InstalledPackage {
+	installed := m.database.GetAllPackages()
+	var filtered []*types.InstalledPackage
+	
+	for _, pkg := range installed {
+		if types.PackageStatus(pkg.Status) == status {
+			filtered = append(filtered, pkg)
+		}
+	}
+	
+	return filtered
 }
 
 // Repository Management

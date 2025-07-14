@@ -3,6 +3,7 @@ package netbridge
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	natpmp "github.com/rabbytesoftware/quiver/internal/netbridge/natpmp"
@@ -378,4 +379,117 @@ func (n *Netbridge) getLocalIP() string {
 
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP.String()
+}
+
+// AssignPortVariable handles port assignment for arrow variables
+// It checks for user-specified ports, validates them, and falls back to auto-assignment
+func (n *Netbridge) AssignPortVariable(userPortValue string, protocol string) (*PortForwardingResult, error) {
+	// Normalize protocol
+	protocol = strings.ToLower(protocol)
+	
+	// Check if user provided a specific port value
+	if userPortValue != "" {
+		if portNum, err := strconv.ParseUint(userPortValue, 10, 16); err == nil && portNum > 0 && portNum <= 65535 {
+			// User specified a valid port, try to open it
+			result, err := n.OpenPort(uint16(portNum), protocol)
+			if err != nil {
+				// Failed to open user-specified port, but still assign the port number
+				return &PortForwardingResult{
+					Port:    port.NewPort(fmt.Sprintf("port-%d", portNum), uint16(portNum), "", protocol),
+					Method:  MethodManual,
+					Success: false,
+					Error:   fmt.Sprintf("Failed to open user-specified port: %v", err),
+				}, nil
+			}
+			return result, nil
+		}
+		// Invalid port value provided, fall back to auto-assignment
+	}
+	
+	// Auto-assign port
+	result, err := n.OpenPortAuto(protocol)
+	if err != nil {
+		// Auto-assignment failed, find an available port without opening
+		if availablePort, findErr := n.findAvailablePort(); findErr == nil {
+			return &PortForwardingResult{
+				Port:    port.NewPort(fmt.Sprintf("port-%d", availablePort), availablePort, "", protocol),
+				Method:  MethodManual,
+				Success: false,
+				Error:   fmt.Sprintf("Auto-assignment failed: %v", err),
+			}, nil
+		}
+		// Even finding an available port failed, use default fallback
+		return &PortForwardingResult{
+			Port:    port.NewPort("port-8080", 8080, "", protocol),
+			Method:  MethodManual,
+			Success: false,
+			Error:   fmt.Sprintf("Auto-assignment failed and no available port found: %v", err),
+		}, nil
+	}
+	
+	return result, nil
+}
+
+// AssignPortVariableWithFallback handles port assignment with a fallback port when netbridge is unavailable
+func (n *Netbridge) AssignPortVariableWithFallback(userPortValue string, protocol string) *PortForwardingResult {
+	if n == nil {
+		// Netbridge not available, find an available port without opening
+		if userPortValue != "" {
+			if portNum, err := strconv.ParseUint(userPortValue, 10, 16); err == nil && portNum > 0 && portNum <= 65535 {
+				return &PortForwardingResult{
+					Port:    port.NewPort(fmt.Sprintf("port-%d", portNum), uint16(portNum), "", protocol),
+					Method:  MethodManual,
+					Success: false,
+					Error:   "Netbridge not available",
+				}
+			}
+		}
+		
+		// Find available port or use default
+		if availablePort := findAvailablePortStatic(); availablePort > 0 {
+			return &PortForwardingResult{
+				Port:    port.NewPort(fmt.Sprintf("port-%d", availablePort), availablePort, "", protocol),
+				Method:  MethodManual,
+				Success: false,
+				Error:   "Netbridge not available",
+			}
+		}
+		
+		return &PortForwardingResult{
+			Port:    port.NewPort("port-8080", 8080, "", protocol),
+			Method:  MethodManual,
+			Success: false,
+			Error:   "Netbridge not available",
+		}
+	}
+	
+	result, _ := n.AssignPortVariable(userPortValue, protocol)
+	return result
+}
+
+// findAvailablePortStatic finds an available port without requiring a Netbridge instance
+func findAvailablePortStatic() uint16 {
+	startPort := uint16(8000)
+	endPort := uint16(9000)
+	
+	for port := startPort; port <= endPort; port++ {
+		if isPortAvailableStatic(port) {
+			return port
+		}
+	}
+	
+	return 0
+}
+
+// isPortAvailableStatic checks if a port is available without requiring a Netbridge instance
+func isPortAvailableStatic(port uint16) bool {
+	addr := fmt.Sprintf(":%d", port)
+	
+	// Test TCP
+	if listener, err := net.Listen("tcp", addr); err == nil {
+		listener.Close()
+		return true
+	}
+	
+	return false
 }

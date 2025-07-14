@@ -1,5 +1,7 @@
 package v0_1
 
+import "github.com/rabbytesoftware/quiver/internal/packages/manifest"
+
 type Arrow struct {
 	Version      string       `yaml:"version"`
 	Metadata     Metadata     `yaml:"metadata"`
@@ -22,7 +24,7 @@ func (a *Arrow) Description() string {
 	return a.Metadata.Description
 }
 
-func (a *Arrow) Mainteiners() []string {
+func (a *Arrow) Maintainers() []string {
 	return a.Metadata.Maintainers
 }
 
@@ -46,26 +48,38 @@ func (a *Arrow) ArrowVersion() string {
 	return a.Metadata.Version
 }
 
-func (a *Arrow) GetMetadata() *Metadata {
+func (a *Arrow) GetMetadata() manifest.Metadata {
 	return &a.Metadata
 }
 
-func (a *Arrow) GetRequirements() Requirements {
-	return a.Requirements
+func (a *Arrow) GetRequirements() manifest.Requirements {
+	return &a.Requirements
 }
 
 func (a *Arrow) GetDependencies() []string {
 	return a.Dependencies
 }
 
-func (a *Arrow) GetNetbridge() []Port {
-	return a.Netbridge
+func (a *Arrow) GetNetbridge() []manifest.Netbridge {
+	bridges := make([]manifest.Netbridge, len(a.Netbridge))
+	for i, port := range a.Netbridge {
+		bridges[i] = &port
+	}
+	return bridges
 }
 
-func (a *Arrow) GetVariables() []Variable {
-	return a.Variables
+func (a *Arrow) GetVariables() []manifest.Variable {
+	vars := make([]manifest.Variable, len(a.Variables))
+	for i, variable := range a.Variables {
+		vars[i] = &variable
+	}
+	return vars
 }
 
-func (a *Arrow) GetMethods() Methods {
-	return a.Methods
+func (a *Arrow) GetMethods() manifest.Methods {
+	return &a.Methods
+}
+
+func (a *Arrow) GetSupportedArchs(os string) []string {
+	return a.Requirements.Compatible[os]
 }

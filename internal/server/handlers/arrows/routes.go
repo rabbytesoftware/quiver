@@ -14,6 +14,10 @@ func (h *Handler) SetupRoutes(router *gin.RouterGroup) {
 		arrows.PUT("/:name/update", h.UpdateArrow)
 		arrows.POST("/:name/validate", h.ValidateArrow)
 		
+		// Method initialization with netbridge processing
+		arrows.POST("/:name/initialize/:method", h.InitializeArrowMethod)
+		arrows.GET("/:name/netbridge", h.GetArrowNetbridgeStatus)
+		
 		// Arrow information and status
 		arrows.GET("/installed", h.GetInstalledArrows)
 		arrows.GET("/:name/status", h.GetArrowStatus)

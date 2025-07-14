@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/rabbytesoftware/quiver/internal/logger"
-	"github.com/rabbytesoftware/quiver/internal/packages/arrow"
 	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
 	"github.com/rabbytesoftware/quiver/internal/packages/types"
 )
@@ -17,7 +16,7 @@ import (
 // Searcher handles search operations in repositories
 type Searcher struct {
 	httpClient *http.Client
-	processor  *arrow.Processor
+	processor  *manifest.Processor
 	logger     *logger.Logger
 }
 
@@ -25,7 +24,7 @@ type Searcher struct {
 func NewSearcher(httpClient *http.Client, logger *logger.Logger) *Searcher {
 	return &Searcher{
 		httpClient: httpClient,
-		processor:  arrow.NewProcessor(logger),
+		processor:  manifest.NewProcessor(logger),
 		logger:     logger.WithService("repository-searcher"),
 	}
 }

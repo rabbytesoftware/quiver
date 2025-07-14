@@ -1,10 +1,15 @@
 package arrows
 
 import (
+	"fmt"
+	"runtime"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/packages"
+	"github.com/rabbytesoftware/quiver/internal/packages/execution"
+	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
 	"github.com/rabbytesoftware/quiver/internal/packages/types"
 	"github.com/rabbytesoftware/quiver/internal/server/response"
 )
@@ -106,7 +111,7 @@ func (h *Handler) InstallArrow(c *gin.Context) {
 	response.Created(c, "Arrow installed successfully", responseData)
 }
 
-// ExecuteArrow handles arrow execution
+// ExecuteArrow handles executing an arrow's execute method
 func (h *Handler) ExecuteArrow(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
@@ -114,27 +119,178 @@ func (h *Handler) ExecuteArrow(c *gin.Context) {
 		return
 	}
 
-	var req ExecuteArrowRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		// Variables are optional, so we'll ignore binding errors
-		req.Variables = make(map[string]string)
-	}
-
 	h.logger.Info("Executing arrow: %s", name)
+
+	// Get optional variables from request
+	var req struct {
+		Variables map[string]string `json:"variables,omitempty"`
+	}
+	c.ShouldBindJSON(&req)
 
 	err := h.pkgManager.ExecuteArrow(name, req.Variables)
 	if err != nil {
 		h.logger.Error("Failed to execute arrow %s: %v", name, err)
-		response.BadRequest(c, "Failed to execute arrow", err.Error())
+		response.BadRequest(c, "Arrow execution failed", err.Error())
 		return
 	}
 
 	responseData := gin.H{
-		"arrow":     name,
-		"variables": req.Variables,
+		"arrow": name,
 	}
 
-	response.Success(c, "Arrow executed successfully", responseData)
+	response.Success(c, "Arrow execution started successfully", responseData)
+}
+
+// InitializeArrowMethod handles initializing an arrow method with netbridge processing
+func (h *Handler) InitializeArrowMethod(c *gin.Context) {
+	name := c.Param("name")
+	method := c.Param("method")
+	
+	if name == "" || method == "" {
+		response.BadRequest(c, "Arrow name and method are required")
+		return
+	}
+
+	h.logger.Info("Initializing method %s for arrow: %s", method, name)
+
+	// Get optional variables from request
+	var req struct {
+		Variables map[string]string `json:"variables,omitempty"`
+	}
+	c.ShouldBindJSON(&req)
+
+	// Check if arrow is installed
+	installed := h.pkgManager.GetInstalledArrows()
+	pkg, exists := installed[name]
+	if !exists {
+		response.NotFound(c, "Arrow")
+		return
+	}
+
+	// Load arrow manifest
+	arrow, err := h.getArrowFromInstallation(pkg.InstallPath)
+	if err != nil {
+		h.logger.Error("Failed to load arrow %s: %v", name, err)
+		response.InternalServerError(c, "Failed to load arrow", err.Error())
+		return
+	}
+
+	// Prepare execution context
+	finalVariables := make(map[string]string)
+	for k, v := range pkg.Variables {
+		finalVariables[k] = v
+	}
+	for k, v := range req.Variables {
+		finalVariables[k] = v
+	}
+
+	ctx := &types.ExecutionContext{
+		InstallPath: pkg.InstallPath,
+		Variables:   finalVariables,
+	}
+
+	// Get netbridge processing results for this arrow
+	netbridgeResults, err := h.getNetbridgeResults(arrow, ctx)
+	if err != nil {
+		h.logger.Error("Failed to get netbridge results for %s: %v", name, err)
+		response.InternalServerError(c, "Netbridge processing failed", err.Error())
+		return
+	}
+
+	// Validate method exists and is supported
+	if err := h.validateMethodSupport(arrow, method); err != nil {
+		h.logger.Error("Method validation failed for %s.%s: %v", name, method, err)
+		response.BadRequest(c, "Method not supported", err.Error())
+		return
+	}
+
+	responseData := map[string]interface{}{
+		"arrow":   name,
+		"method":  method,
+		"message": fmt.Sprintf("Method %s initialized successfully", method),
+		"netbridge": map[string]interface{}{
+			"variables":   len(netbridgeResults),
+			"results":     netbridgeResults,
+			"has_failures": func() bool {
+				for _, result := range netbridgeResults {
+					if !result.Success {
+						return true
+					}
+				}
+				return false
+			}(),
+		},
+	}
+
+	h.logger.Info("Method %s initialization completed for arrow %s", method, name)
+	response.Success(c, "Method initialized with netbridge processing", responseData)
+}
+
+// GetArrowNetbridgeStatus returns the current netbridge status for an arrow
+func (h *Handler) GetArrowNetbridgeStatus(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
+		return
+	}
+
+	// Check if arrow is installed
+	installed := h.pkgManager.GetInstalledArrows()
+	pkg, exists := installed[name]
+	if !exists {
+		response.NotFound(c, "Arrow")
+		return
+	}
+
+	// Load arrow manifest
+	arrow, err := h.getArrowFromInstallation(pkg.InstallPath)
+	if err != nil {
+		h.logger.Error("Failed to load arrow %s: %v", name, err)
+		response.InternalServerError(c, "Failed to load arrow", err.Error())
+		return
+	}
+
+	// Create basic execution context to check netbridge variables
+	ctx := &types.ExecutionContext{
+		InstallPath: pkg.InstallPath,
+		Variables:   pkg.Variables,
+	}
+
+	// Get netbridge processing results
+	netbridgeResults, err := h.getNetbridgeResults(arrow, ctx)
+	if err != nil {
+		h.logger.Error("Failed to get netbridge status for %s: %v", name, err)
+		response.InternalServerError(c, "Failed to get netbridge status", err.Error())
+		return
+	}
+
+	responseData := map[string]interface{}{
+		"arrow": name,
+		"netbridge": map[string]interface{}{
+			"variables": len(netbridgeResults),
+			"results":   netbridgeResults,
+			"summary": map[string]int{
+				"total":     len(netbridgeResults),
+				"success":   0,
+				"failed":    0,
+			},
+		},
+	}
+
+	// Calculate summary statistics
+	summary := responseData["netbridge"].(map[string]interface{})["summary"].(map[string]int)
+	for _, result := range netbridgeResults {
+		if result.Success {
+			summary["success"]++
+		} else {
+			summary["failed"]++
+		}
+	}
+
+	h.logger.Info("Netbridge status retrieved for arrow %s: %d total, %d success, %d failed", 
+		name, summary["total"], summary["success"], summary["failed"])
+	
+	response.Success(c, "Netbridge status retrieved successfully", responseData)
 }
 
 // UninstallArrow handles arrow uninstallation
@@ -320,4 +476,48 @@ func (h *Handler) ListArrowStatuses(c *gin.Context) {
 	}
 
 	response.Success(c, "Arrow statuses retrieved successfully", responseData)
+} 
+
+// Helper methods
+
+// getArrowFromInstallation loads arrow manifest from installation directory
+func (h *Handler) getArrowFromInstallation(installPath string) (manifest.ArrowInterface, error) {
+	processor := manifest.NewProcessor(h.logger)
+	return processor.LoadFromInstallation(installPath)
+}
+
+// getNetbridgeResults gets netbridge processing results using the execution engine
+func (h *Handler) getNetbridgeResults(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]*execution.NetbridgeResult, error) {
+	engine := execution.NewEngine(h.logger)
+	defer engine.Cleanup()
+	return engine.GetNetbridgeResults(arrow, ctx)
+}
+
+// validateMethodSupport validates that a method is supported on the current platform
+func (h *Handler) validateMethodSupport(arrow manifest.ArrowInterface, methodType string) error {
+	methods := arrow.GetMethods()
+	methodMap := methods.GetMethod(methodType)
+	
+	if methodMap == nil {
+		return fmt.Errorf("method %s not found", methodType)
+	}
+
+	osStr := runtime.GOOS
+	archStr := runtime.GOARCH
+
+	osMap, exists := methodMap[osStr]
+	if !exists {
+		return fmt.Errorf("method %s not supported on platform %s", methodType, osStr)
+	}
+
+	if _, exists := osMap[archStr]; !exists {
+		// Check if any architecture is supported for this OS
+		if len(osMap) == 0 {
+			return fmt.Errorf("method %s not supported on platform %s", methodType, osStr)
+		}
+		// Architecture fallback available
+		h.logger.Warn("Architecture %s not directly supported for method %s, fallback available", archStr, methodType)
+	}
+
+	return nil
 } 
