@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rabbytesoftware/quiver/internal/logger"
+	"github.com/rabbytesoftware/quiver/internal/packages/execution/process"
 	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
 	"github.com/rabbytesoftware/quiver/internal/packages/types"
 )
@@ -23,12 +24,15 @@ type Engine struct {
 	tempDir           string
 	httpClient        *http.Client
 	netbridgeProcessor *NetbridgeProcessor
+	processTracker    *process.ProcessTracker
 }
 
 // ExecutionOptions provides options for command execution
 type ExecutionOptions struct {
-	Timeout time.Duration
-	DryRun  bool
+	Timeout     time.Duration
+	DryRun      bool
+	MethodType  types.MethodType  // Type of method being executed
+	ArrowName   string            // Name of the arrow being executed
 }
 
 // NewEngine creates a new execution engine
@@ -43,13 +47,16 @@ func NewEngine(logger *logger.Logger) *Engine {
 			Timeout: 30 * time.Second,
 		},
 		netbridgeProcessor: NewNetbridgeProcessor(logger),
+		processTracker:    process.NewProcessTracker(logger),
 	}
 }
 
 // ExecuteMethod executes a specific method of an arrow
 func (e *Engine) ExecuteMethod(arrow manifest.ArrowInterface, methodType types.MethodType, ctx *types.ExecutionContext) error {
 	return e.ExecuteMethodWithOptions(arrow, methodType, ctx, &ExecutionOptions{
-		Timeout: 5 * time.Minute,
+		Timeout:    5 * time.Minute,
+		MethodType: methodType,
+		ArrowName:  ctx.ArrowName,
 	})
 }
 
@@ -245,6 +252,12 @@ func (e *Engine) executeShellCommand(ctx context.Context, command, workDir strin
 		return fmt.Errorf("failed to start command: %v", err)
 	}
 	
+	// Track process if this is an execute method (likely to be long-running)
+	if opts.MethodType == types.MethodExecute && opts.ArrowName != "" {
+		e.processTracker.TrackProcess(opts.ArrowName, cmd.Process, command)
+		e.logger.Debug("Tracking process PID %d for arrow %s", cmd.Process.Pid, opts.ArrowName)
+	}
+	
 	// Create channels to handle output
 	done := make(chan bool, 2)
 	
@@ -285,6 +298,26 @@ func (e *Engine) executeShellCommand(ctx context.Context, command, workDir strin
 // GetNetbridgeResults returns netbridge processing results for API reporting
 func (e *Engine) GetNetbridgeResults(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]*NetbridgeResult, error) {
 	return e.netbridgeProcessor.GetResults(arrow, ctx)
+}
+
+// GetProcessTracker returns the process tracker for external access
+func (e *Engine) GetProcessTracker() *process.ProcessTracker {
+	return e.processTracker
+}
+
+// StopArrowProcesses stops all running processes for a given arrow
+func (e *Engine) StopArrowProcesses(arrowName string, graceful bool, timeout time.Duration) error {
+	return e.processTracker.StopProcesses(arrowName, graceful, timeout)
+}
+
+// GetArrowProcesses returns all running processes for a given arrow
+func (e *Engine) GetArrowProcesses(arrowName string) []*process.ProcessInfo {
+	return e.processTracker.GetProcesses(arrowName)
+}
+
+// HasRunningProcesses checks if an arrow has any running processes
+func (e *Engine) HasRunningProcesses(arrowName string) bool {
+	return e.processTracker.HasRunningProcesses(arrowName)
 }
 
 // Cleanup removes temporary files created during execution

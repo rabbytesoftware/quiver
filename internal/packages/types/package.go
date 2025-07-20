@@ -58,6 +58,7 @@ const (
 
 // ExecutionContext contains context information for command execution
 type ExecutionContext struct {
+	ArrowName   string            // Name of the arrow being executed
 	InstallPath string
 	Variables   map[string]string
 	Environment []string

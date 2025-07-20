@@ -9,6 +9,7 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/database"
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/packages/execution"
+	"github.com/rabbytesoftware/quiver/internal/packages/execution/process"
 	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
 	"github.com/rabbytesoftware/quiver/internal/packages/repository"
 	"github.com/rabbytesoftware/quiver/internal/packages/types"
@@ -121,6 +122,7 @@ func (m *Manager) InstallArrow(name string, variables map[string]string) error {
 
 	// Execute install method
 	ctx := &types.ExecutionContext{
+		ArrowName:   displayName,
 		InstallPath: arrowInstallPath,
 		Variables:   variables,
 	}
@@ -174,6 +176,7 @@ func (m *Manager) UninstallArrow(name string) error {
 	} else {
 		// Execute uninstall method
 		ctx := &types.ExecutionContext{
+			ArrowName:   name,
 			InstallPath: pkg.InstallPath,
 			Variables:   pkg.Variables,
 		}
@@ -235,6 +238,7 @@ func (m *Manager) ExecuteArrow(name string, variables map[string]string) error {
 
 	// Execute method
 	ctx := &types.ExecutionContext{
+		ArrowName:   name,
 		InstallPath: pkg.InstallPath,
 		Variables:   finalVariables,
 	}
@@ -284,6 +288,7 @@ func (m *Manager) UpdateArrow(name string) error {
 
 	// Execute update method if available
 	ctx := &types.ExecutionContext{
+		ArrowName:   displayName,
 		InstallPath: pkg.InstallPath,
 		Variables:   pkg.Variables,
 	}
@@ -313,6 +318,52 @@ func (m *Manager) UpdateArrow(name string) error {
 	return nil
 }
 
+// StopArrow stops all running processes for an arrow
+func (m *Manager) StopArrow(name string, graceful bool, timeout time.Duration) error {
+	m.logger.Info("Stopping arrow: %s (graceful: %t, timeout: %v)", name, graceful, timeout)
+
+	// Check if installed
+	_, exists := m.database.GetPackage(name)
+	if !exists {
+		return fmt.Errorf("arrow %s is not installed", name)
+	}
+
+	// Stop all processes for this arrow
+	err := m.execution.StopArrowProcesses(name, graceful, timeout)
+	if err != nil {
+		m.logger.Error("Failed to stop processes for arrow %s: %v", name, err)
+		// Update status to error since we couldn't stop cleanly
+		if statusErr := m.database.UpdatePackageStatus(name, types.StatusError); statusErr != nil {
+			m.logger.Warn("Failed to update package status to error: %v", statusErr)
+		}
+		return fmt.Errorf("failed to stop arrow processes: %w", err)
+	}
+
+	// Update status to stopped
+	if err := m.database.UpdatePackageStatus(name, types.StatusStopped); err != nil {
+		m.logger.Warn("Failed to update package status to stopped: %v", err)
+	}
+
+	m.logger.Info("Successfully stopped arrow: %s", name)
+	return nil
+}
+
+// GetArrowProcesses returns all running processes for an arrow
+func (m *Manager) GetArrowProcesses(name string) ([]*process.ProcessInfo, error) {
+	// Check if installed
+	_, exists := m.database.GetPackage(name)
+	if !exists {
+		return nil, fmt.Errorf("arrow %s is not installed", name)
+	}
+
+	return m.execution.GetArrowProcesses(name), nil
+}
+
+// HasRunningProcesses checks if an arrow has any running processes
+func (m *Manager) HasRunningProcesses(name string) bool {
+	return m.execution.HasRunningProcesses(name)
+}
+
 // ValidateArrow validates an arrow installation
 func (m *Manager) ValidateArrow(name string) error {
 	m.logger.Info("Validating arrow: %s", name)
@@ -331,6 +382,7 @@ func (m *Manager) ValidateArrow(name string) error {
 
 	// Execute validate method
 	ctx := &types.ExecutionContext{
+		ArrowName:   name,
 		InstallPath: pkg.InstallPath,
 		Variables:   pkg.Variables,
 	}

@@ -48,6 +48,16 @@ var CommandRegistry = map[string]Command{
 		},
 		Example: "./quiver stop minecraft-server",
 	},
+	"processes": {
+		Name:        "processes",
+		Description: "Get running processes for a package",
+		Method:      "GET",
+		Endpoint:    "/api/v1/packages/{id}/processes",
+		ParamTypes: []ParamType{
+			{Name: "package_id", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver processes minecraft-server",
+	},
 	"status": {
 		Name:        "status",
 		Description: "Get package status",

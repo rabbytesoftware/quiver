@@ -12,6 +12,7 @@ func (h *Handler) SetupRoutes(router *gin.RouterGroup) {
 		packages.POST("/:id/start", h.StartPackage)
 		packages.POST("/:id/stop", h.StopPackage)
 		packages.GET("/:id/status", h.GetPackageStatus)
+		packages.GET("/:id/processes", h.GetPackageProcesses)
 		
 		// Package listings and status
 		packages.GET("/installed", h.GetInstalledPackages)

@@ -2,7 +2,9 @@ package packages
 
 import (
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rabbytesoftware/quiver/internal/logger"
@@ -133,24 +135,46 @@ func (h *Handler) StopPackage(c *gin.Context) {
 
 	h.logger.Info("Stopping package: %s", id)
 
-	// Update status to stopped (there's no direct stop method in the new architecture)
-	// This is a legacy endpoint, so we'll just update the status
-	status, err := h.pkgManager.GetArrowStatus(id)
+	// Parse optional query parameters for stopping behavior
+	gracefulStr := c.DefaultQuery("graceful", "true")
+	timeoutStr := c.DefaultQuery("timeout", "30")
+
+	graceful, err := strconv.ParseBool(gracefulStr)
+	if err != nil {
+		graceful = true // Default to graceful shutdown
+	}
+
+	timeoutSecs, err := strconv.Atoi(timeoutStr)
+	if err != nil {
+		timeoutSecs = 30 // Default timeout
+	}
+	timeout := time.Duration(timeoutSecs) * time.Second
+
+	// Get current status before attempting to stop
+	previousStatus, err := h.pkgManager.GetArrowStatus(id)
 	if err != nil {
 		h.logger.Error("Failed to get package status %s: %v", id, err)
 		response.InternalServerError(c, "Failed to get package status", err.Error())
 		return
 	}
 
-	responseData := gin.H{
-		"package":        id,
-		"action":         "stopped",
-		"previous_status": status,
+	// Actually stop the arrow processes
+	err = h.pkgManager.StopArrow(id, graceful, timeout)
+	if err != nil {
+		h.logger.Error("Failed to stop package %s: %v", id, err)
+		response.InternalServerError(c, "Failed to stop package", err.Error())
+		return
 	}
 
-	// Note: In the new architecture, there's no explicit stop method for arrows
-	// This endpoint exists for backward compatibility but doesn't perform actual stopping
-	response.Success(c, "Package stop requested (note: actual stopping depends on arrow implementation)", responseData)
+	responseData := gin.H{
+		"package":         id,
+		"action":          "stopped",
+		"previous_status": string(previousStatus),
+		"graceful":        graceful,
+		"timeout_seconds": timeoutSecs,
+	}
+
+	response.Success(c, "Package stopped successfully", responseData)
 }
 
 // GetPackageStatus handles getting package status
@@ -168,12 +192,60 @@ func (h *Handler) GetPackageStatus(c *gin.Context) {
 		return
 	}
 
+	// Get process information for enhanced status
+	processes, err := h.pkgManager.GetArrowProcesses(id)
+	if err != nil {
+		h.logger.Warn("Failed to get processes for package %s: %v", id, err)
+		processes = nil // Continue without process info
+	}
+
 	responseData := gin.H{
-		"id":     id,
-		"status": status,
+		"id":                   id,
+		"status":               status,
+		"has_running_processes": h.pkgManager.HasRunningProcesses(id),
+		"process_count":        len(processes),
+	}
+
+	// Only include detailed process info if requested
+	if c.Query("include_processes") == "true" {
+		responseData["processes"] = processes
 	}
 
 	response.Success(c, "Package status retrieved successfully", responseData)
+}
+
+// GetPackageProcesses handles getting running processes for a package
+func (h *Handler) GetPackageProcesses(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.BadRequest(c, "Package ID is required")
+		return
+	}
+
+	// Check if package is installed
+	installed := h.pkgManager.GetInstalledArrows()
+	_, exists := installed[id]
+	if !exists {
+		response.NotFound(c, "Package")
+		return
+	}
+
+	// Get running processes for this package
+	processes, err := h.pkgManager.GetArrowProcesses(id)
+	if err != nil {
+		h.logger.Error("Failed to get processes for package %s: %v", id, err)
+		response.InternalServerError(c, "Failed to get package processes", err.Error())
+		return
+	}
+
+	responseData := gin.H{
+		"package":   id,
+		"processes": processes,
+		"count":     len(processes),
+		"has_running_processes": h.pkgManager.HasRunningProcesses(id),
+	}
+
+	response.Success(c, "Package processes retrieved successfully", responseData)
 }
 
 // GetInstalledPackages handles listing all installed packages

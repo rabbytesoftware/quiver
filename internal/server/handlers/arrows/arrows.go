@@ -185,6 +185,7 @@ func (h *Handler) InitializeArrowMethod(c *gin.Context) {
 	}
 
 	ctx := &types.ExecutionContext{
+		ArrowName:   name,
 		InstallPath: pkg.InstallPath,
 		Variables:   finalVariables,
 	}
@@ -252,6 +253,7 @@ func (h *Handler) GetArrowNetbridgeStatus(c *gin.Context) {
 
 	// Create basic execution context to check netbridge variables
 	ctx := &types.ExecutionContext{
+		ArrowName:   name,
 		InstallPath: pkg.InstallPath,
 		Variables:   pkg.Variables,
 	}
