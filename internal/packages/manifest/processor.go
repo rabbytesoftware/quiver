@@ -161,16 +161,20 @@ type ArrowBasicInfo struct {
 }
 
 // IsValidArrowFile checks if a file is a valid arrow manifest
-func (p *Processor) IsValidArrowFile(path string) bool {
+func (p *Processor) IsValidArrowFile(path string) error {
 	// Check file extension
 	ext := filepath.Ext(path)
 	if ext != ".yaml" && ext != ".yml" {
-		return false
+		return fmt.Errorf("unrecognized file extension: expected .yaml or .yml, got %s", ext)
 	}
 
 	// Try to parse basic structure
 	err := p.ValidateArrowFile(path)
-	return err == nil
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // GetSupportedVersions returns all supported manifest versions

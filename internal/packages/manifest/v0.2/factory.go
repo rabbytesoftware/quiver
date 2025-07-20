@@ -7,8 +7,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// init registers the v0.2 factory with the default registry
-func init() {
+// Init registers the v0.2 factory with the default registry
+func Init() {
 	manifest.RegisterFactory("0.2", NewFactory())
 }
 

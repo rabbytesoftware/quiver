@@ -49,6 +49,10 @@ func (m *Manager) Initialize() error {
 	}
 
 	m.logger.Info("Package manager initialized")
+
+	// Load manifests
+	registerManifests()
+
 	return nil
 }
 

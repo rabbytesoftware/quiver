@@ -117,8 +117,18 @@ func (m *Methods) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 // processOS handles the OS level of the methods structure
 func (m *Methods) processOS(osName string, osData interface{}) error {
-	osMap, ok := osData.(map[interface{}]interface{})
-	if !ok {
+	var osMap map[interface{}]interface{}
+	
+	// Handle both map[interface{}]interface{} and map[string]interface{}
+	switch v := osData.(type) {
+	case map[interface{}]interface{}:
+		osMap = v
+	case map[string]interface{}:
+		osMap = make(map[interface{}]interface{})
+		for k, v := range v {
+			osMap[k] = v
+		}
+	default:
 		return fmt.Errorf("invalid OS data for '%s': expected map, got %T", osName, osData)
 	}
 
@@ -136,8 +146,18 @@ func (m *Methods) processOS(osName string, osData interface{}) error {
 
 // processArch handles the architecture level of the methods structure
 func (m *Methods) processArch(osName, archName string, archData interface{}) error {
-	archMap, ok := archData.(map[interface{}]interface{})
-	if !ok {
+	var archMap map[interface{}]interface{}
+	
+	// Handle both map[interface{}]interface{} and map[string]interface{}
+	switch v := archData.(type) {
+	case map[interface{}]interface{}:
+		archMap = v
+	case map[string]interface{}:
+		archMap = make(map[interface{}]interface{})
+		for k, v := range v {
+			archMap[k] = v
+		}
+	default:
 		return fmt.Errorf("invalid arch data for '%s/%s': expected map, got %T", osName, archName, archData)
 	}
 

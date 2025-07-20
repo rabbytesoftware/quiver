@@ -8,7 +8,7 @@ import (
 )
 
 // init registers the v0.1 factory with the default registry
-func init() {
+func Init() {
 	manifest.RegisterFactory("0.1", NewFactory())
 }
 

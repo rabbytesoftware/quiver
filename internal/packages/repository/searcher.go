@@ -52,7 +52,9 @@ func (s *Searcher) searchLocalRepository(dirPath, query string) ([]*types.ArrowI
 	for _, path := range patterns {
 		if _, err := os.Stat(path); err == nil {
 			// File exists, verify it's a valid arrow
-			if s.processor.IsValidArrowFile(path) {
+			err := s.processor.IsValidArrowFile(path)
+
+			if err == nil {
 				arrowInfo := &types.ArrowInfo{
 					Name:           query,
 					PackageName:    filepath.Base(path),
@@ -63,7 +65,7 @@ func (s *Searcher) searchLocalRepository(dirPath, query string) ([]*types.ArrowI
 				s.logger.Debug("Found arrow %s in local repository %s", query, dirPath)
 				break // Found the file, no need to try other patterns
 			} else {
-				s.logger.Debug("Invalid arrow file %s", path)
+				s.logger.Debug("%s", err.Error())
 			}
 		}
 	}

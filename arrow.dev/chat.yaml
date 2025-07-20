@@ -48,7 +48,7 @@ methods:
         - "UNCOMPRESS quiver-chat-windows-amd64.zip"
         - "MOVE quiver-chat-windows-amd64.exe ${INSTALL_DIR}\\quiver-chat.exe"
       execute:
-        - "${INSTALL_DIR}\quiver-chat.exe --port ${CHAT_PORT}"
+        - "${INSTALL_DIR}\\quiver-chat.exe --port ${CHAT_PORT}"
       uninstall:
         - "REMOVE ${INSTALL_DIR}"
       update:
@@ -63,7 +63,7 @@ methods:
         - "UNCOMPRESS quiver-chat-windows-arm64.zip"
         - "MOVE quiver-chat-windows-arm64.exe ${INSTALL_DIR}\\quiver-chat.exe"
       execute:
-        - "${INSTALL_DIR}\quiver-chat.exe --port ${CHAT_PORT}"
+        - "${INSTALL_DIR}\\quiver-chat.exe --port ${CHAT_PORT}"
       uninstall:
         - "REMOVE ${INSTALL_DIR}"
       update:
