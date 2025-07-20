@@ -123,7 +123,7 @@ func (e *Engine) handleGetCommand(ctx context.Context, command, workDir string) 
 func (e *Engine) handleMoveCommand(command, workDir string) error {
 	e.logger.Info("Starting file move operation")
 	
-	// Parse MOVE: <source> to: <destination> or MOVE: <source> to <destination>
+	// Parse MOVE: <source> TO: <destination>
 	parts := strings.SplitN(command, ":", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid MOVE command format: %s", command)
@@ -132,18 +132,14 @@ func (e *Engine) handleMoveCommand(command, workDir string) error {
 	moveArgs := strings.TrimSpace(parts[1])
 	e.logger.Debug("Move arguments: %s", moveArgs)
 	
-	// Split by "to:" or "to "
+	// Split by " TO: "
 	var source, dest string
-	if strings.Contains(moveArgs, " to: ") {
-		moveParts := strings.SplitN(moveArgs, " to: ", 2)
-		source = strings.TrimSpace(moveParts[0])
-		dest = strings.TrimSpace(moveParts[1])
-	} else if strings.Contains(moveArgs, " to ") {
-		moveParts := strings.SplitN(moveArgs, " to ", 2)
+	if strings.Contains(moveArgs, " TO: ") {
+		moveParts := strings.SplitN(moveArgs, " TO: ", 2)
 		source = strings.TrimSpace(moveParts[0])
 		dest = strings.TrimSpace(moveParts[1])
 	} else {
-		return fmt.Errorf("invalid MOVE command format, missing 'to': %s", command)
+		return fmt.Errorf("invalid MOVE command format, missing 'TO:': %s", command)
 	}
 	
 	if source == "" || dest == "" {
