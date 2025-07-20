@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, test ]
   pull_request:
     branches: [ main ]
   release:
@@ -89,6 +89,231 @@ jobs:
       uses: github/codeql-action/upload-sarif@v2
       with:
         sarif_file: results.sarif
+
+  penetration-testing:
+    name: Penetration Testing
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: contains(github.ref, 'refs/heads/main') || contains(github.ref, 'refs/heads/test')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Build Quiver for testing
+      run: make build
+      
+    - name: Create test config
+      run: |
+        cat > config.json << EOF
+        {
+          "server": {
+            "host": "127.0.0.1",
+            "port": 8080,
+            "readTimeout": 30,
+            "writeTimeout": 30
+          },
+          "database": {
+            "type": "json",
+            "connectionString": "./test_data.json"
+          },
+          "logging": {
+            "level": "info",
+            "file": "./logs/test.log"
+          }
+        }
+        EOF
+        
+    - name: Start Quiver server in background
+      run: |
+        mkdir -p logs
+        ./bin/quiver server --config config.json &
+        echo $! > quiver.pid
+        sleep 10
+        
+    - name: Verify server is running
+      run: |
+        curl -f http://127.0.0.1:8080/health || exit 1
+        echo "Quiver server is running successfully"
+    
+    - name: Install security testing tools
+      run: |
+        # Install OWASP ZAP
+        wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2_14_0_unix.sh
+        chmod +x ZAP_2_14_0_unix.sh
+        sudo ./ZAP_2_14_0_unix.sh -q
+        
+        # Install Nuclei
+        sudo apt-get update
+        sudo apt-get install -y wget unzip
+        wget -q https://github.com/projectdiscovery/nuclei/releases/download/v3.1.0/nuclei_3.1.0_linux_amd64.zip
+        unzip nuclei_3.1.0_linux_amd64.zip
+        sudo mv nuclei /usr/local/bin/
+        
+        # Install Nikto
+        sudo apt-get install -y nikto
+        
+        # Install HTTPie for API testing
+        sudo apt-get install -y httpie
+        
+    - name: Update Nuclei templates
+      run: nuclei -update-templates
+    
+    - name: Run OWASP ZAP Baseline Scan
+      run: |
+        mkdir -p security-reports
+        /opt/zaproxy/zap.sh -cmd -quickurl http://127.0.0.1:8080 -quickprogress -quickout security-reports/zap-baseline-report.html
+        /opt/zaproxy/zap.sh -cmd -quickurl http://127.0.0.1:8080/api/v1 -quickprogress -quickout security-reports/zap-api-report.html
+        
+    - name: Run OWASP ZAP Full Scan
+      run: |
+        /opt/zaproxy/zap.sh -cmd -quickurl http://127.0.0.1:8080 -quickattackurl http://127.0.0.1:8080 -quickprogress -quickout security-reports/zap-full-scan.html
+        
+    - name: Run Nuclei Vulnerability Scan
+      run: |
+        nuclei -target http://127.0.0.1:8080 -o security-reports/nuclei-report.txt -severity critical,high,medium
+        nuclei -target http://127.0.0.1:8080/api/v1 -o security-reports/nuclei-api-report.txt -severity critical,high,medium
+        
+    - name: Run Nikto Web Scanner
+      run: |
+        nikto -h http://127.0.0.1:8080 -Format txt -output security-reports/nikto-report.txt
+        
+    - name: Test API Authentication & Authorization
+      run: |
+        echo "Testing API endpoints for security issues..." > security-reports/api-security-test.txt
+        
+        # Test health endpoints
+        echo "=== Health Endpoints ===" >> security-reports/api-security-test.txt
+        http GET 127.0.0.1:8080/health >> security-reports/api-security-test.txt 2>&1 || true
+        http GET 127.0.0.1:8080/ready >> security-reports/api-security-test.txt 2>&1 || true
+        http GET 127.0.0.1:8080/live >> security-reports/api-security-test.txt 2>&1 || true
+        
+        # Test API v1 endpoints
+        echo "=== API v1 Endpoints ===" >> security-reports/api-security-test.txt
+        http GET 127.0.0.1:8080/api/v1/server/info >> security-reports/api-security-test.txt 2>&1 || true
+        http GET 127.0.0.1:8080/api/v1/server/status >> security-reports/api-security-test.txt 2>&1 || true
+        http GET 127.0.0.1:8080/api/v1/packages/ >> security-reports/api-security-test.txt 2>&1 || true
+        http GET 127.0.0.1:8080/api/v1/repositories/ >> security-reports/api-security-test.txt 2>&1 || true
+        
+        # Test for common vulnerabilities
+        echo "=== Security Tests ===" >> security-reports/api-security-test.txt
+        
+        # Test SQL injection attempts
+        http GET "127.0.0.1:8080/api/v1/arrows/search?q='; DROP TABLE test; --" >> security-reports/api-security-test.txt 2>&1 || true
+        
+        # Test XSS attempts
+        http GET "127.0.0.1:8080/api/v1/arrows/search?q=<script>alert('xss')</script>" >> security-reports/api-security-test.txt 2>&1 || true
+        
+        # Test path traversal
+        http GET "127.0.0.1:8080/api/v1/packages/../../../etc/passwd" >> security-reports/api-security-test.txt 2>&1 || true
+        
+        # Test unauthorized POST requests
+        http POST 127.0.0.1:8080/api/v1/arrows/test/install >> security-reports/api-security-test.txt 2>&1 || true
+        http POST 127.0.0.1:8080/api/v1/netbridge/open port:=22 protocol:=tcp >> security-reports/api-security-test.txt 2>&1 || true
+        
+    - name: Run SSL/TLS Security Check
+      run: |
+        echo "=== SSL/TLS Security Analysis ===" > security-reports/ssl-analysis.txt
+        # Test for weak ciphers and protocols (if HTTPS was enabled)
+        echo "Note: Server running on HTTP, SSL/TLS testing skipped" >> security-reports/ssl-analysis.txt
+        
+    - name: Test for Information Disclosure
+      run: |
+        echo "=== Information Disclosure Tests ===" > security-reports/info-disclosure.txt
+        
+        # Check for verbose error messages
+        http GET 127.0.0.1:8080/api/v1/nonexistent >> security-reports/info-disclosure.txt 2>&1 || true
+        
+        # Check server headers for information leakage
+        curl -I http://127.0.0.1:8080 >> security-reports/info-disclosure.txt 2>&1 || true
+        
+        # Test for directory traversal in static files
+        http GET 127.0.0.1:8080/../../../etc/passwd >> security-reports/info-disclosure.txt 2>&1 || true
+        
+    - name: Generate Security Summary Report
+      run: |
+        cat > security-reports/security-summary.md << 'EOF'
+        # Quiver API Security Testing Report
+        
+        ## Scan Summary
+        - **Date**: $(date)
+        - **Target**: http://127.0.0.1:8080
+        - **Tools Used**: OWASP ZAP, Nuclei, Nikto
+        
+        ## Tests Performed
+        1. **OWASP ZAP Baseline Scan** - Basic vulnerability detection
+        2. **OWASP ZAP Full Scan** - Comprehensive security testing
+        3. **Nuclei Scan** - Modern vulnerability templates
+        4. **Nikto Scan** - Web server security assessment
+        5. **Manual API Security Tests** - Custom endpoint testing
+        6. **Information Disclosure Tests** - Data leakage detection
+        
+        ## API Endpoints Tested
+        - Health endpoints: /health, /ready, /live
+        - Server info: /api/v1/server/*
+        - Package management: /api/v1/packages/*
+        - Arrow management: /api/v1/arrows/*
+        - Repository management: /api/v1/repositories/*
+        - Network bridge: /api/v1/netbridge/*
+        
+        ## Report Files
+        - `zap-baseline-report.html` - ZAP baseline scan results
+        - `zap-full-scan.html` - ZAP comprehensive scan results
+        - `nuclei-report.txt` - Nuclei vulnerability findings
+        - `nikto-report.txt` - Nikto web server assessment
+        - `api-security-test.txt` - Manual API security tests
+        - `info-disclosure.txt` - Information disclosure tests
+        
+        ## Next Steps
+        Review all report files for security findings and remediate any identified vulnerabilities.
+        EOF
+        
+    - name: Stop Quiver server
+      run: |
+        if [ -f quiver.pid ]; then
+          kill $(cat quiver.pid) || true
+          rm quiver.pid
+        fi
+        
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-testing-reports
+        path: security-reports/
+        retention-days: 30
+        
+    - name: Check for critical vulnerabilities
+      run: |
+        # Fail the build if critical vulnerabilities are found
+        if grep -i "critical\|high" security-reports/nuclei-report.txt; then
+          echo "Critical or high severity vulnerabilities found!"
+          echo "Please review the security reports and fix issues before merging."
+          exit 1
+        fi
+        
+        # Check ZAP reports for high-risk findings
+        if grep -i "high\|critical" security-reports/zap-*.html; then
+          echo "High-risk vulnerabilities found in ZAP scan!"
+          echo "Please review the security reports and fix issues before merging."
+          exit 1
+        fi
+        
+        echo "No critical vulnerabilities detected in automated scans."
 
   build:
     name: Build

@@ -1,35 +1,101 @@
-package v0_1
+package v0_2
 
 import (
 	"fmt"
 )
 
-// Methods represents the OS -> ARCH -> METHOD -> [commands] structure
+// Methods represents the OS -> ARCH -> METHOD -> [commands] structure for v0.2
 // e.g., methods: { windows: { amd64: { install: [...], execute: [...] } } }
 type Methods map[string]map[string]map[string][]string
 
 func (m Methods) GetInstall() map[string]map[string][]string {
-	return m["install"]
+	result := make(map[string]map[string][]string)
+	for osName, osData := range m {
+		for archName, archData := range osData {
+			if installCommands, exists := archData["install"]; exists {
+				if result[osName] == nil {
+					result[osName] = make(map[string][]string)
+				}
+				result[osName][archName] = installCommands
+			}
+		}
+	}
+	return result
 }
 
 func (m Methods) GetExecute() map[string]map[string][]string {
-	return m["execute"]
+	result := make(map[string]map[string][]string)
+	for osName, osData := range m {
+		for archName, archData := range osData {
+			if executeCommands, exists := archData["execute"]; exists {
+				if result[osName] == nil {
+					result[osName] = make(map[string][]string)
+				}
+				result[osName][archName] = executeCommands
+			}
+		}
+	}
+	return result
 }
 
 func (m Methods) GetUninstall() map[string]map[string][]string {
-	return m["uninstall"]
+	result := make(map[string]map[string][]string)
+	for osName, osData := range m {
+		for archName, archData := range osData {
+			if uninstallCommands, exists := archData["uninstall"]; exists {
+				if result[osName] == nil {
+					result[osName] = make(map[string][]string)
+				}
+				result[osName][archName] = uninstallCommands
+			}
+		}
+	}
+	return result
 }
 
 func (m Methods) GetUpdate() map[string]map[string][]string {
-	return m["update"]
+	result := make(map[string]map[string][]string)
+	for osName, osData := range m {
+		for archName, archData := range osData {
+			if updateCommands, exists := archData["update"]; exists {
+				if result[osName] == nil {
+					result[osName] = make(map[string][]string)
+				}
+				result[osName][archName] = updateCommands
+			}
+		}
+	}
+	return result
 }
 
 func (m Methods) GetValidate() map[string]map[string][]string {
-	return m["validate"]
+	result := make(map[string]map[string][]string)
+	for osName, osData := range m {
+		for archName, archData := range osData {
+			if validateCommands, exists := archData["validate"]; exists {
+				if result[osName] == nil {
+					result[osName] = make(map[string][]string)
+				}
+				result[osName][archName] = validateCommands
+			}
+		}
+	}
+	return result
 }
 
 func (m Methods) GetMethod(methodName string) map[string]map[string][]string {
-	return m[methodName]
+	result := make(map[string]map[string][]string)
+	for osName, osData := range m {
+		for archName, archData := range osData {
+			if methodCommands, exists := archData[methodName]; exists {
+				if result[osName] == nil {
+					result[osName] = make(map[string][]string)
+				}
+				result[osName][archName] = methodCommands
+			}
+		}
+	}
+	return result
 }
 
 func (m *Methods) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -56,6 +122,8 @@ func (m *Methods) processOS(osName string, osData interface{}) error {
 		return fmt.Errorf("invalid OS data for '%s': expected map, got %T", osName, osData)
 	}
 
+	(*m)[osName] = make(map[string]map[string][]string)
+
 	for archKey, archData := range osMap {
 		archName := fmt.Sprintf("%v", archKey)
 		if err := m.processArch(osName, archName, archData); err != nil {
@@ -72,6 +140,8 @@ func (m *Methods) processArch(osName, archName string, archData interface{}) err
 	if !ok {
 		return fmt.Errorf("invalid arch data for '%s/%s': expected map, got %T", osName, archName, archData)
 	}
+
+	(*m)[osName][archName] = make(map[string][]string)
 
 	for methodKey, methodData := range archMap {
 		methodName := fmt.Sprintf("%v", methodKey)
@@ -90,9 +160,7 @@ func (m *Methods) processMethod(osName, archName, methodName string, methodData 
 		return fmt.Errorf("invalid commands for '%s/%s/%s': %w", osName, archName, methodName, err)
 	}
 
-	m.ensureMethodExists(methodName)
-	m.ensureOSExists(methodName, osName)
-	(*m)[methodName][osName][archName] = commands
+	(*m)[osName][archName][methodName] = commands
 
 	return nil
 }
@@ -110,18 +178,4 @@ func parseCommands(data interface{}) ([]string, error) {
 	}
 
 	return commands, nil
-}
-
-// ensureMethodExists initializes the method map if it doesn't exist
-func (m *Methods) ensureMethodExists(methodName string) {
-	if (*m)[methodName] == nil {
-		(*m)[methodName] = make(map[string]map[string][]string)
-	}
-}
-
-// ensureOSExists initializes the OS map for a method if it doesn't exist
-func (m *Methods) ensureOSExists(methodName, osName string) {
-	if (*m)[methodName][osName] == nil {
-		(*m)[methodName][osName] = make(map[string][]string)
-	}
-}
+} 

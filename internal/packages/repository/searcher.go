@@ -62,6 +62,8 @@ func (s *Searcher) searchLocalRepository(dirPath, query string) ([]*types.ArrowI
 				arrows = append(arrows, arrowInfo)
 				s.logger.Debug("Found arrow %s in local repository %s", query, dirPath)
 				break // Found the file, no need to try other patterns
+			} else {
+				s.logger.Debug("Invalid arrow file %s", path)
 			}
 		}
 	}

@@ -162,13 +162,13 @@ func (l *Logger) logToCLI(level slog.Level, msg string) {
 		levelStr = " INFO "
 		coloredLevel = pterm.FgCyan.Sprint(levelStr)
 	case slog.LevelWarn:
-		levelStr = " WARN"
+		levelStr = " WARN "
 		coloredLevel = pterm.FgYellow.Sprint(levelStr)
 	case slog.LevelError:
 		levelStr = "ERROR"
 		coloredLevel = pterm.FgRed.Sprint(levelStr)
 	default:
-		levelStr = "UNKNOWN"
+		levelStr = "UNFORESEEN"
 		coloredLevel = pterm.FgDefault.Sprint(levelStr)
 	}
 
