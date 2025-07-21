@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/rabbytesoftware/quiver/internal/database"
@@ -15,6 +16,16 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/packages/types"
 )
 
+// ExecutionStatus represents the status of an async execution
+type ExecutionStatus struct {
+	ArrowName   string            `json:"arrow_name"`
+	Status      string            `json:"status"`      // "running", "completed", "failed"
+	StartedAt   time.Time         `json:"started_at"`
+	CompletedAt *time.Time        `json:"completed_at,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Variables   map[string]string `json:"variables"`
+}
+
 // Manager is the main package manager that orchestrates all package operations
 type Manager struct {
 	database      database.Database
@@ -23,17 +34,20 @@ type Manager struct {
 	arrowProcessor *manifest.Processor
 	installDir    string
 	logger        *logger.Logger
+	executions     map[string]*ExecutionStatus
+	executionMutex sync.RWMutex
 }
 
 // NewManager creates a new package manager
 func NewManager(repositories []string, installDir, dbPath string, logger *logger.Logger) *Manager {
 	return &Manager{
-		database:      database.NewDefaultDatabase(dbPath, logger),
-		repository:    repository.NewManager(repositories, logger),
-		execution:     execution.NewEngine(logger),
+		database:       database.NewDefaultDatabase(dbPath, logger),
+		repository:     repository.NewManager(repositories, logger),
+		execution:      execution.NewEngine(logger),
 		arrowProcessor: manifest.NewProcessor(logger),
-		installDir:    installDir,
-		logger:        logger.WithService("package-manager"),
+		installDir:     installDir,
+		logger:         logger.WithService("package-manager"),
+		executions:     make(map[string]*ExecutionStatus),
 	}
 }
 
@@ -231,6 +245,9 @@ func (m *Manager) ExecuteArrow(name string, variables map[string]string) error {
 		return fmt.Errorf("failed to load arrow: %w", err)
 	}
 
+	// Track execution start
+	m.trackExecutionStart(name, finalVariables)
+
 	// Update status to running
 	if err := m.database.UpdatePackageStatus(name, types.StatusRunning); err != nil {
 		m.logger.Warn("Failed to update package status: %v", err)
@@ -248,12 +265,123 @@ func (m *Manager) ExecuteArrow(name string, variables map[string]string) error {
 	status := types.StatusStopped
 	if err != nil {
 		status = types.StatusError
+		m.trackExecutionComplete(name, err)
+	} else {
+		m.trackExecutionComplete(name, nil)
 	}
+	
 	if statusErr := m.database.UpdatePackageStatus(name, status); statusErr != nil {
 		m.logger.Warn("Failed to update package status: %v", statusErr)
 	}
 
 	return err
+}
+
+// ExecuteArrowAsync executes an arrow asynchronously and returns immediately
+func (m *Manager) ExecuteArrowAsync(name string, variables map[string]string) error {
+	// Validate that arrow exists before starting async execution
+	_, exists := m.database.GetPackage(name)
+	if !exists {
+		return fmt.Errorf("arrow %s is not installed", name)
+	}
+
+	// Check if already running
+	if m.IsExecutionRunning(name) {
+		return fmt.Errorf("arrow %s is already being executed", name)
+	}
+
+	// Start async execution
+	go func() {
+		err := m.ExecuteArrow(name, variables)
+		if err != nil {
+			m.logger.Error("Async execution of arrow %s failed: %v", name, err)
+		} else {
+			m.logger.Info("Async execution of arrow %s completed successfully", name)
+		}
+	}()
+
+	return nil
+}
+
+// Execution tracking methods
+
+// trackExecutionStart records the start of an execution
+func (m *Manager) trackExecutionStart(arrowName string, variables map[string]string) {
+	m.executionMutex.Lock()
+	defer m.executionMutex.Unlock()
+	
+	m.executions[arrowName] = &ExecutionStatus{
+		ArrowName: arrowName,
+		Status:    "running",
+		StartedAt: time.Now(),
+		Variables: variables,
+	}
+	
+	m.logger.Debug("Started tracking execution for arrow: %s", arrowName)
+}
+
+// trackExecutionComplete records the completion of an execution
+func (m *Manager) trackExecutionComplete(arrowName string, err error) {
+	m.executionMutex.Lock()
+	defer m.executionMutex.Unlock()
+	
+	if execution, exists := m.executions[arrowName]; exists {
+		now := time.Now()
+		execution.CompletedAt = &now
+		
+		if err != nil {
+			execution.Status = "failed"
+			execution.Error = err.Error()
+		} else {
+			execution.Status = "completed"
+		}
+		
+		m.logger.Debug("Completed tracking execution for arrow: %s (status: %s)", arrowName, execution.Status)
+	}
+}
+
+// GetExecutionStatus returns the current execution status for an arrow
+func (m *Manager) GetExecutionStatus(arrowName string) (*ExecutionStatus, bool) {
+	m.executionMutex.RLock()
+	defer m.executionMutex.RUnlock()
+	
+	execution, exists := m.executions[arrowName]
+	return execution, exists
+}
+
+// IsExecutionRunning checks if an arrow is currently being executed
+func (m *Manager) IsExecutionRunning(arrowName string) bool {
+	m.executionMutex.RLock()
+	defer m.executionMutex.RUnlock()
+	
+	execution, exists := m.executions[arrowName]
+	return exists && execution.Status == "running"
+}
+
+// GetAllExecutions returns all tracked executions
+func (m *Manager) GetAllExecutions() map[string]*ExecutionStatus {
+	m.executionMutex.RLock()
+	defer m.executionMutex.RUnlock()
+	
+	result := make(map[string]*ExecutionStatus)
+	for k, v := range m.executions {
+		result[k] = v
+	}
+	return result
+}
+
+// CleanupOldExecutions removes execution records older than specified duration
+func (m *Manager) CleanupOldExecutions(maxAge time.Duration) {
+	m.executionMutex.Lock()
+	defer m.executionMutex.Unlock()
+	
+	cutoff := time.Now().Add(-maxAge)
+	for arrowName, execution := range m.executions {
+		if execution.CompletedAt != nil && execution.CompletedAt.Before(cutoff) {
+			delete(m.executions, arrowName)
+			m.logger.Debug("Cleaned up old execution record for arrow: %s", arrowName)
+		}
+	}
 }
 
 // UpdateArrow updates an arrow to the latest version

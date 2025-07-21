@@ -83,7 +83,7 @@ func (h *Handler) GetPackage(c *gin.Context) {
 	response.Success(c, "Package information retrieved successfully", pkg)
 }
 
-// StartPackage handles starting a package (arrow execution)
+// StartPackage handles starting a package (arrow execution) asynchronously
 func (h *Handler) StartPackage(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
@@ -99,10 +99,10 @@ func (h *Handler) StartPackage(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Starting package: %s", id)
+	h.logger.Info("Starting asynchronous execution of package: %s", id)
 
-	// Execute the arrow (equivalent to starting the package)
-	err := h.pkgManager.ExecuteArrow(id, nil)
+	// Execute the arrow asynchronously (equivalent to starting the package)
+	err := h.pkgManager.ExecuteArrowAsync(id, nil)
 	if err != nil {
 		h.logger.Error("Failed to start package %s: %v", id, err)
 		response.BadRequest(c, "Failed to start package", err.Error())
@@ -112,9 +112,11 @@ func (h *Handler) StartPackage(c *gin.Context) {
 	responseData := gin.H{
 		"package": id,
 		"action":  "started",
+		"status":  "execution_started",
+		"message": "Package execution has been started in the background",
 	}
 
-	response.Success(c, "Package started successfully", responseData)
+	response.Success(c, "Package execution started successfully", responseData)
 }
 
 // StopPackage handles stopping a package
@@ -301,4 +303,40 @@ func (h *Handler) GetAllPackageStatuses(c *gin.Context) {
 	}
 
 	response.Success(c, "Package statuses retrieved successfully", responseData)
+}
+
+// GetPackageExecutionStatus handles getting the execution status of a package
+func (h *Handler) GetPackageExecutionStatus(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.BadRequest(c, "Package ID is required")
+		return
+	}
+
+	// Get execution status
+	status, exists := h.pkgManager.GetExecutionStatus(id)
+	if !exists {
+		response.NotFound(c, "No execution record found for this package")
+		return
+	}
+
+	responseData := gin.H{
+		"package":      id,
+		"execution":    status,
+		"is_running":   h.pkgManager.IsExecutionRunning(id),
+	}
+
+	response.Success(c, "Package execution status retrieved successfully", responseData)
+}
+
+// GetAllPackageExecutionStatuses handles getting all package execution statuses
+func (h *Handler) GetAllPackageExecutionStatuses(c *gin.Context) {
+	executions := h.pkgManager.GetAllExecutions()
+
+	responseData := gin.H{
+		"executions": executions,
+		"count":      len(executions),
+	}
+
+	response.Success(c, "All package execution statuses retrieved successfully", responseData)
 } 

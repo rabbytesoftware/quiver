@@ -30,7 +30,7 @@ var CommandRegistry = map[string]Command{
 	},
 	"start": {
 		Name:        "start",
-		Description: "Start a package",
+		Description: "Start a package (asynchronous - returns immediately)",
 		Method:      "POST",
 		Endpoint:    "/api/v1/packages/{id}/start",
 		ParamTypes: []ParamType{
@@ -67,6 +67,24 @@ var CommandRegistry = map[string]Command{
 			{Name: "package_id", Type: "string", Required: true, Position: 0, URLParam: true},
 		},
 		Example: "./quiver status minecraft-server",
+	},
+	"start-status": {
+		Name:        "start-status",
+		Description: "Get execution status of a started package",
+		Method:      "GET",
+		Endpoint:    "/api/v1/packages/{id}/execution/status",
+		ParamTypes: []ParamType{
+			{Name: "package_id", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver start-status minecraft-server",
+	},
+	"all-executions": {
+		Name:        "all-executions",
+		Description: "List all package execution statuses",
+		Method:      "GET",
+		Endpoint:    "/api/v1/packages/executions/status",
+		ParamTypes:  []ParamType{},
+		Example:     "./quiver all-executions",
 	},
 	"info": {
 		Name:        "info",
@@ -107,13 +125,31 @@ var CommandRegistry = map[string]Command{
 	},
 	"execute": {
 		Name:        "execute",
-		Description: "Execute an installed arrow",
+		Description: "Execute an installed arrow (asynchronous - returns immediately)",
 		Method:      "POST",
 		Endpoint:    "/api/v1/arrows/{name}/execute",
 		ParamTypes: []ParamType{
 			{Name: "name", Type: "string", Required: true, Position: 0, URLParam: true},
 		},
 		Example: "./quiver execute cs2",
+	},
+	"execution-status": {
+		Name:        "execution-status",
+		Description: "Get execution status of an arrow",
+		Method:      "GET",
+		Endpoint:    "/api/v1/arrows/{name}/execution/status",
+		ParamTypes: []ParamType{
+			{Name: "name", Type: "string", Required: true, Position: 0, URLParam: true},
+		},
+		Example: "./quiver execution-status cs2",
+	},
+	"executions": {
+		Name:        "executions",
+		Description: "List all execution statuses",
+		Method:      "GET",
+		Endpoint:    "/api/v1/arrows/executions/status",
+		ParamTypes:  []ParamType{},
+		Example:     "./quiver executions",
 	},
 	"uninstall": {
 		Name:        "uninstall",

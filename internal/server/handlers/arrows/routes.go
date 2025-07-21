@@ -24,5 +24,9 @@ func (h *Handler) SetupRoutes(router *gin.RouterGroup) {
 		arrows.GET("/status/:status", h.GetArrowsByStatus)
 		arrows.GET("/:name", h.GetArrowInfo)
 		arrows.GET("/statuses", h.ListArrowStatuses)
+		
+		// Execution status tracking
+		arrows.GET("/:name/execution/status", h.GetArrowExecutionStatus)
+		arrows.GET("/executions/status", h.GetAllExecutionStatuses)
 	}
 } 

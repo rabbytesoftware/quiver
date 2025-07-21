@@ -27,7 +27,7 @@ type Server struct {
 
 // New creates a new server instance using Gin
 func New(
-	cfg config.ServerConfig,
+	cfg *config.Config,
 	pkgManager *packages.ArrowsServer,
 	logger *logger.Logger,
 ) *Server {
@@ -35,14 +35,14 @@ func New(
 	gin.SetMode(gin.ReleaseMode)
 
 	// Initialize netbridge
-	netbridgeInstance, err := netbridge.NewNetbridge()
+	netbridgeInstance, err := netbridge.NewNetbridge(&cfg.Netbridge)
 	if err != nil {
 		logger.Warn("Failed to initialize netbridge: %v (port forwarding will be disabled)", err)
 		netbridgeInstance = nil
 	}
 
 	s := &Server{
-		config:     cfg,
+		config:     cfg.Server,
 		logger:     logger.WithService("server"),
 		pkgManager: pkgManager,
 		netbridge:  netbridgeInstance,
@@ -57,10 +57,10 @@ func New(
 	s.setupRoutes()
 
 	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 		Handler:      s.gin,
-		ReadTimeout:  time.Duration(cfg.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(cfg.WriteTimeout) * time.Second,
+		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
 	}
 
 	return s

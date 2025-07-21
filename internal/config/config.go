@@ -14,9 +14,10 @@ var embeddedConfig []byte
 
 // Config represents the application configuration
 type Config struct {
-	Server   ServerConfig   `json:"server"`
-	Logger   LoggerConfig   `json:"logger"`
-	Packages PackagesConfig `json:"packages"`
+	Server    ServerConfig    `json:"server"`
+	Logger    LoggerConfig    `json:"logger"`
+	Packages  PackagesConfig  `json:"packages"`
+	Netbridge NetbridgeConfig `json:"netbridge"`
 }
 
 // ServerConfig holds server-specific configuration
@@ -44,6 +45,12 @@ type PackagesConfig struct {
 	DatabasePath string   `json:"database_path"` // Local package database path
 }
 
+// NetbridgeConfig holds netbridge-specific configuration
+type NetbridgeConfig struct {
+	PortRangeStart uint16 `json:"port_range_start"` // Start of auto-assignment port range
+	PortRangeEnd   uint16 `json:"port_range_end"`   // End of auto-assignment port range
+}
+
 // Default returns a default configuration
 func Default() *Config {
 	return &Config{
@@ -65,6 +72,10 @@ func Default() *Config {
 			Repositories: []string{"./pkgs"},
 			InstallDir:   "./pkgs",
 			DatabasePath: "./pkgs/packages.db",
+		},
+		Netbridge: NetbridgeConfig{
+			PortRangeStart: 65000,
+			PortRangeEnd:   65534,
 		},
 	}
 }

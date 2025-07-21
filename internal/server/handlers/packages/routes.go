@@ -18,5 +18,9 @@ func (h *Handler) SetupRoutes(router *gin.RouterGroup) {
 		packages.GET("/installed", h.GetInstalledPackages)
 		packages.GET("/status/:status", h.GetPackagesByStatus)
 		packages.GET("/statuses", h.GetAllPackageStatuses)
+		
+		// Execution status tracking
+		packages.GET("/:id/execution/status", h.GetPackageExecutionStatus)
+		packages.GET("/executions/status", h.GetAllPackageExecutionStatuses)
 	}
 } 

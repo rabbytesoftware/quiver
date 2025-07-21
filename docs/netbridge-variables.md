@@ -2,28 +2,37 @@
 
 ## Overview
 
-Netbridge variables are a powerful feature in Quiver that automatically manages port assignments for arrows. They bridge the gap between port forwarding capabilities and arrow execution by attempting to open ports and making them available as variables to arrow methods.
+Netbridge variables are a powerful feature in Quiver that automatically manages port assignments for arrows. They bridge the gap between port forwarding capabilities and arrow execution by **dynamically assigning and opening ports at runtime** when arrows are executed.
 
 ## How It Works
 
 ### Basic Concept
 
-Netbridge variables are defined in an arrow's manifest and represent ports that the system should attempt to open. The key principle is:
+Netbridge variables are defined in an arrow's manifest and represent ports that the system should attempt to open **during execution runtime**. The key principle is:
 
+- **Installation**: No ports are assigned or opened
+- **Initialization**: Variables are identified but no ports assigned  
+- **Runtime Execution**: Ports are dynamically assigned and opened just before the arrow starts
 - **Success case**: Port opens successfully → variable becomes available with the assigned port number
-- **Failure case**: Port cannot be opened → variable still gets the attempted port number, but user is informed via REST API
+- **Failure case**: Port cannot be opened → variable still gets a fallback port number, but user is informed
 
-This approach ensures that arrows can always execute, while giving users control over manual port configuration when automatic opening fails.
+This approach ensures that:
+- Installation never opens network ports (security best practice)
+- Ports are checked for availability at execution time (handles port conflicts)
+- Multiple attempts can be made if initial ports are busy
+- Arrows can always execute, with manual port configuration as fallback
 
 ### Workflow
 
 1. **Arrow Definition**: Arrow manifest includes `netbridge` section with port specifications
-2. **Method Initialization**: When a method is initialized, netbridge processing occurs
-3. **Port Assignment**: System attempts to open each netbridge port using UPnP/NAT-PMP
-4. **Variable Creation**: Port numbers are assigned to variables regardless of opening success
-5. **Status Reporting**: REST API reports which ports opened successfully and which failed
-6. **User Decision**: User can manually open failed ports or proceed with current assignment
-7. **Method Execution**: Arrow methods use `${VARIABLE_NAME}` syntax to access port numbers
+2. **Installation**: Arrow is installed with no port assignment or opening
+3. **Method Initialization**: When a method is initialized, netbridge variables are identified but no ports assigned
+4. **Runtime Execution**: Just before executing arrow commands:
+   - System attempts to find available ports
+   - Attempts to open each netbridge port using UPnP/NAT-PMP  
+   - Port numbers are assigned to variables regardless of opening success
+5. **Variable Expansion**: Arrow commands use `${VARIABLE_NAME}` syntax to access dynamically assigned port numbers
+6. **Status Reporting**: Execution logs report which ports opened successfully and which failed
 
 ## Arrow Manifest Configuration
 
@@ -69,6 +78,7 @@ methods:
 - Variables are expanded during command execution
 - Use `${VARIABLE_NAME}` syntax
 - Works in any arrow method (install, execute, uninstall, etc.)
+- **Note**: Netbridge variables are only assigned during execute methods
 
 ## REST API Integration
 
@@ -85,7 +95,7 @@ Content-Type: application/json
 }
 ```
 
-**Response (Success)**:
+**Response (Identification Only)**:
 ```json
 {
   "success": true,
@@ -97,48 +107,19 @@ Content-Type: application/json
       "CHAT_PORT": "8080",
       "QUIVER_CHAT_HOSTNAME": "chat.quiver.ar"
     },
-    "netbridge": [
-      {
-        "variable_name": "CHAT_PORT",
-        "port": 8080,
-        "protocol": "tcp/udp",
-        "success": true,
-        "result": {
-          "port": {...},
-          "method": "upnp",
-          "success": true
+    "netbridge": {
+      "variables": 1,
+      "identifications": [
+        {
+          "variable_name": "CHAT_PORT",
+          "protocol": "tcp/udp",
+          "user_specified": true,
+          "user_value": "8080"
         }
-      }
-    ],
-    "status": "initialized"
-  }
-}
-```
-
-**Response (Partial Failure)**:
-```json
-{
-  "success": true,
-  "message": "Method initialized successfully",
-  "data": {
-    "arrow": "quiver.chat",
-    "method": "execute",
-    "variables": {
-      "CHAT_PORT": "8080"
+      ],
+      "note": "Ports will be assigned dynamically at runtime during execution"
     },
-    "netbridge": [
-      {
-        "variable_name": "CHAT_PORT", 
-        "port": 8080,
-        "protocol": "tcp/udp",
-        "success": false,
-        "error": "Port forwarding failed: UPnP and NAT-PMP methods unsuccessful"
-      }
-    ],
-    "status": "initialized",
-    "warnings": [
-      "Port 8080 for variable CHAT_PORT could not be opened: Port forwarding failed: UPnP and NAT-PMP methods unsuccessful"
-    ]
+    "status": "initialized"
   }
 }
 ```
@@ -157,54 +138,58 @@ GET /api/v1/arrows/:name/netbridge
   "data": {
     "arrow": "quiver.chat",
     "netbridge_vars": 1,
-    "variables": [
+    "identifications": [
       {
         "variable_name": "CHAT_PORT",
-        "port": 8080,
-        "protocol": "tcp/udp", 
-        "success": false,
-        "error": "Netbridge not available"
+        "protocol": "tcp/udp",
+        "user_specified": false,
+        "user_value": ""
       }
     ],
-    "status": "processed"
+    "note": "Ports are assigned dynamically at runtime, not during initialization",
+    "status": "identified"
   }
 }
 ```
 
 ## User Workflow Examples
 
-### Scenario 1: Successful Port Opening
+### Scenario 1: Successful Dynamic Port Assignment
 
 1. User calls `POST /api/v1/arrows/quiver.chat/initialize/execute`
-2. System successfully opens port 8080 via UPnP
-3. `CHAT_PORT` variable is set to "8080" 
-4. User sees success status in API response
-5. User calls `POST /api/v1/arrows/quiver.chat/execute` to run the arrow
-6. Arrow executes with `${CHAT_PORT}` expanded to "8080"
+2. System identifies netbridge variables but assigns no ports
+3. User sees identification status in API response
+4. User calls `POST /api/v1/arrows/quiver.chat/execute` to run the arrow
+5. **At runtime**: System finds available port (e.g., 8080) and opens it via UPnP
+6. `CHAT_PORT` variable is set to "8080" and expanded in commands
+7. Arrow executes with dynamically assigned port
 
-### Scenario 2: Failed Port Opening
+### Scenario 2: Port Opening Failure with Fallback
 
 1. User calls `POST /api/v1/arrows/quiver.chat/initialize/execute`
-2. System fails to open port 8080 (UPnP/NAT-PMP unavailable)
-3. `CHAT_PORT` variable is still set to "8080"
-4. User sees failure status and warning in API response
-5. **User Choice A**: Manually open port 8080 in router, then execute arrow
-6. **User Choice B**: Accept that port is closed and execute anyway (app handles closed port)
+2. System identifies netbridge variables (no ports assigned)
+3. User calls `POST /api/v1/arrows/quiver.chat/execute`
+4. **At runtime**: System tries to open port 8080 but UPnP/NAT-PMP fails
+5. `CHAT_PORT` variable is still set to "8080" (fallback)
+6. Arrow executes with assigned port (app must handle closed port)
+7. Execution logs show port opening failure
 
-### Scenario 3: User-Specified Port
+### Scenario 3: User-Specified Port with Runtime Check
 
 1. User calls `POST /api/v1/arrows/quiver.chat/initialize/execute` with `{"variables": {"CHAT_PORT": "9000"}}`
-2. System attempts to open user-specified port 9000
-3. `CHAT_PORT` variable is set to "9000" regardless of opening result
-4. User gets status about whether port 9000 was opened successfully
+2. System identifies user wants port 9000 (no assignment yet)
+3. User calls `POST /api/v1/arrows/quiver.chat/execute`
+4. **At runtime**: System checks if port 9000 is available and tries to open it
+5. `CHAT_PORT` variable is set to "9000" regardless of opening result
+6. Arrow executes with user-specified port
 
 ## Port Assignment Logic
 
-### Auto-Assignment
+### Dynamic Assignment at Runtime
 
 When no user port is specified:
 
-1. Try `netbridge.OpenPortAuto()` with specified protocol
+1. **At runtime**: Try `netbridge.OpenPortAuto()` with specified protocol
 2. If successful: use the auto-assigned port number
 3. If failed: find an available port in range 8000-9000 without opening
 4. If no available port: default to 8080
@@ -213,10 +198,10 @@ When no user port is specified:
 
 When user provides a port number:
 
-1. Validate port number (1-65535)
+1. **At runtime**: Validate port number (1-65535)
 2. Try `netbridge.OpenPort()` with user's port and protocol
 3. Use the user's port number regardless of opening success
-4. Report opening status to user
+4. Report opening status in execution logs
 
 ### Port Range
 
@@ -229,22 +214,22 @@ When user provides a port number:
 ### Common Scenarios
 
 1. **Netbridge Unavailable**: UPnP/NAT-PMP not supported on network
-   - Variables still get assigned port numbers
-   - Error reported to user
+   - Variables still get assigned port numbers at runtime
+   - Error logged during execution
    - Arrow can still execute
 
-2. **Port Already in Use**: Specified port is occupied
+2. **Port Already in Use**: Specified port is occupied at runtime
    - Auto-assignment finds alternative port
    - User-specified ports report error but keep assignment
 
 3. **Invalid Port Number**: User provides invalid port
-   - Falls back to auto-assignment
+   - Falls back to auto-assignment at runtime
    - Logs warning about invalid input
 
-4. **Network Timeout**: UPnP/NAT-PMP requests timeout
+4. **Network Timeout**: UPnP/NAT-PMP requests timeout at runtime
    - Treated as opening failure
    - Variables still assigned
-   - Error reported to user
+   - Error logged during execution
 
 ## Best Practices
 
@@ -254,147 +239,76 @@ When user provides a port number:
 2. **Use descriptive names**: `CHAT_PORT` vs `PORT1` 
 3. **Document port usage**: Explain what each netbridge variable is for
 4. **Test both scenarios**: Verify arrow works with opened and unopened ports
+5. **Handle runtime failures**: Applications should gracefully handle port assignment failures
 
 ### For Users
 
-1. **Check initialization results**: Review netbridge status before executing
+1. **Check execution logs**: Review netbridge status during arrow execution
 2. **Understand port requirements**: Know which ports are critical vs optional
 3. **Manual configuration**: Be prepared to manually open failed ports if needed
-4. **Security considerations**: Understand which ports are being opened
+4. **Security considerations**: Understand which ports are being opened dynamically
 
 ### For System Administrators
 
 1. **Network compatibility**: Ensure UPnP/NAT-PMP is available if automatic opening is desired
-2. **Firewall rules**: Consider firewall implications of auto-opened ports
-3. **Monitoring**: Watch for failed port openings in logs
+2. **Firewall rules**: Consider firewall implications of dynamically opened ports
+3. **Monitoring**: Watch for failed port openings in execution logs
 4. **Documentation**: Inform users about network capabilities and limitations
-
-## Integration Examples
-
-### Complete Arrow Example
-
-```yaml
-version: "0.1"
-
-metadata:
-  name: "chat-server"
-  description: "A simple chat server with API"
-  version: "1.0.0"
-
-netbridge:
-  - name: "CHAT_PORT"
-    protocol: "tcp"
-  - name: "API_PORT"
-    protocol: "tcp"
-  - name: "STREAM_PORT"
-    protocol: "udp"
-
-variables:
-  - name: "SERVER_NAME"
-    default: "My Chat Server"
-
-methods:
-  execute:
-    linux:
-      - "${INSTALL_DIR}/chat-server --name '${SERVER_NAME}' --chat-port ${CHAT_PORT} --api-port ${API_PORT} --stream-port ${STREAM_PORT}"
-```
-
-### Client Application Usage
-
-```javascript
-// Initialize method with netbridge processing
-const initResponse = await fetch('/api/v1/arrows/chat-server/initialize/execute', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    variables: {
-      SERVER_NAME: "Production Chat"
-    }
-  })
-});
-
-const initData = await initResponse.json();
-
-// Check netbridge results
-for (const netVar of initData.data.netbridge) {
-  if (!netVar.success) {
-    console.warn(`Port ${netVar.port} for ${netVar.variable_name} failed to open: ${netVar.error}`);
-    
-    // Prompt user for manual configuration
-    const shouldContinue = confirm(
-      `Port ${netVar.port} could not be opened automatically. ` +
-      `You may need to manually configure your router. Continue anyway?`
-    );
-    
-    if (!shouldContinue) {
-      return; // Don't execute the arrow
-    }
-  }
-}
-
-// Execute the arrow
-const execResponse = await fetch('/api/v1/arrows/chat-server/execute', {
-  method: 'POST'
-});
-```
-
-## Troubleshooting
-
-### Port Opening Failures
-
-**Problem**: All netbridge variables show `success: false`
-
-**Solutions**:
-1. Check if UPnP is enabled on router
-2. Verify NAT-PMP support
-3. Check network connectivity
-4. Review firewall settings
-5. Consider manual port forwarding
-
-**Problem**: Specific ports fail while others succeed
-
-**Solutions**:
-1. Check if port is already in use
-2. Verify port is not blocked by ISP
-3. Try different port numbers
-4. Check port-specific router settings
-
-### Variable Expansion Issues
-
-**Problem**: `${VARIABLE_NAME}` not expanded in commands
-
-**Solutions**:
-1. Verify variable name matches netbridge definition
-2. Check for typos in variable syntax
-3. Ensure netbridge processing completed successfully
-4. Review execution logs for variable assignment
-
-### API Response Issues
-
-**Problem**: Missing netbridge data in API responses
-
-**Solutions**:
-1. Ensure arrow has netbridge variables defined
-2. Verify correct API endpoint usage
-3. Check for arrow installation issues
-4. Review server logs for processing errors
 
 ## Security Considerations
 
-### Automatic Port Opening
+### Dynamic Port Opening
 
-- **Risk**: Opens firewall ports automatically
-- **Mitigation**: User always informed of opening attempts
-- **Best Practice**: Review opened ports periodically
+- **Benefit**: No ports opened during installation (reduced attack surface)
+- **Risk**: Ports opened automatically during execution
+- **Mitigation**: User always informed via execution logs
+- **Best Practice**: Review opened ports periodically and monitor execution logs
 
 ### Port Assignment
 
-- **Risk**: Predictable port numbers in auto-assignment
+- **Benefit**: Ports checked for availability at runtime
+- **Risk**: Predictable port numbers in auto-assignment range
 - **Mitigation**: Use specific port assignment when security is critical
 - **Best Practice**: Combine with additional security measures (authentication, encryption)
 
 ### Network Exposure
 
-- **Risk**: Services become externally accessible
+- **Benefit**: Ports only open when applications are actually running
+- **Risk**: Services become externally accessible during execution
 - **Mitigation**: Ensure applications implement proper security
-- **Best Practice**: Use authentication and monitor access logs 
+- **Best Practice**: Use authentication, monitor access logs, and close ports when not needed
+
+## Implementation Details
+
+### Timing Overview
+
+```
+Installation Time:
+├── Arrow files downloaded
+├── Installation commands executed  
+└── NO netbridge processing
+
+Initialization Time:
+├── Method validation
+├── Variable identification (netbridge variables identified but no ports assigned)
+└── API response with identification data
+
+Runtime Execution:
+├── Dynamic port assignment starts
+├── Port availability check
+├── UPnP/NAT-PMP port opening attempts
+├── Variable assignment (regardless of opening success)
+├── Command expansion with assigned port numbers
+└── Arrow execution begins
+```
+
+### Error Recovery
+
+The system is designed to always allow arrow execution:
+
+1. **Primary**: Try to open requested/auto-assigned port
+2. **Fallback 1**: Assign port number even if opening fails
+3. **Fallback 2**: Use default port 8080 if no ports available
+4. **Result**: Arrow always gets port numbers, execution proceeds
+
+This ensures reliability while providing best-effort port opening. 

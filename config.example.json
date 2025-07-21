@@ -17,7 +17,12 @@
 	
 	"packages": {
 		"repositories": ["./pkgs"],
-		"install_dir": "./pkgs",
+		"install_dir": "./pkgs", // TODO: We should be able to set this directory to a different location, depending on the host OS.
 		"database_path": "./pkgs/packages.db"
+	},
+
+	"netbridge": {
+		"port_range_start": 65000,
+		"port_range_end": 65534
 	}
 }

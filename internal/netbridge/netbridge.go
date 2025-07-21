@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rabbytesoftware/quiver/internal/config"
 	natpmp "github.com/rabbytesoftware/quiver/internal/netbridge/natpmp"
 	port "github.com/rabbytesoftware/quiver/internal/netbridge/port"
 	upnp "github.com/rabbytesoftware/quiver/internal/netbridge/upnp"
@@ -31,15 +32,17 @@ type PortForwardingResult struct {
 type Netbridge struct {
 	PublicIP   	net.IP
 	Ports 		map[int32]port.Port
+	config     *config.NetbridgeConfig
 
 	upnpManager   *upnp.UPnPManager
 	natpmpClient  *natpmp.NATPMPClient
 }
 
-func NewNetbridge() (*Netbridge, error) {
+func NewNetbridge(cfg *config.NetbridgeConfig) (*Netbridge, error) {
 	var netbridge *Netbridge = &Netbridge{
 		PublicIP:     net.IPv4(0, 0, 0, 0),
 		Ports:        make(map[int32]port.Port),
+		config:       cfg,
 		upnpManager:  upnp.NewUPnPManager(),
 		natpmpClient: nil, // Will be initialized if needed
 	}
@@ -150,9 +153,9 @@ func (n *Netbridge) OpenPortAuto(protocol string) (*PortForwardingResult, error)
 
 // findAvailablePort finds an available port on the local machine
 func (n *Netbridge) findAvailablePort() (uint16, error) {
-	// Start from a reasonable range for user applications
-	startPort := uint16(8000)
-	endPort := uint16(9000)
+	// Use configured port range
+	startPort := n.config.PortRangeStart
+	endPort := n.config.PortRangeEnd
 
 	for port := startPort; port <= endPort; port++ {
 		// Skip ports that are already open in our netbridge
@@ -446,7 +449,7 @@ func (n *Netbridge) AssignPortVariableWithFallback(userPortValue string, protoco
 		}
 		
 		// Find available port or use default
-		if availablePort := findAvailablePortStatic(); availablePort > 0 {
+		if availablePort := findAvailablePortStatic(nil); availablePort > 0 {
 			return &PortForwardingResult{
 				Port:    port.NewPort(fmt.Sprintf("port-%d", availablePort), availablePort, "", protocol),
 				Method:  MethodManual,
@@ -456,7 +459,7 @@ func (n *Netbridge) AssignPortVariableWithFallback(userPortValue string, protoco
 		}
 		
 		return &PortForwardingResult{
-			Port:    port.NewPort("port-8080", 8080, "", protocol),
+			Port:    port.NewPort("port-65534", 65534, "", protocol),
 			Method:  MethodManual,
 			Success: false,
 			Error:   "Netbridge not available",
@@ -468,9 +471,15 @@ func (n *Netbridge) AssignPortVariableWithFallback(userPortValue string, protoco
 }
 
 // findAvailablePortStatic finds an available port without requiring a Netbridge instance
-func findAvailablePortStatic() uint16 {
-	startPort := uint16(8000)
-	endPort := uint16(9000)
+func findAvailablePortStatic(cfg *config.NetbridgeConfig) uint16 {
+	// Use default range if config is nil
+	startPort := uint16(65000)
+	endPort := uint16(65534)
+	
+	if cfg != nil {
+		startPort = cfg.PortRangeStart
+		endPort = cfg.PortRangeEnd
+	}
 	
 	for port := startPort; port <= endPort; port++ {
 		if isPortAvailableStatic(port) {

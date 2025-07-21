@@ -98,12 +98,12 @@ func runServerMode(cfg *config.Config) {
 
 	// Initialize and start server
 	logger.Info("Starting Quiver API...")
-	srv := server.New(cfg.Server, pkgManager, logger)
+	srv := server.New(cfg, pkgManager, logger)
 	if err := srv.Start(ctx); err != nil {
 		logger.Fatal("Failed to start server: %v", err)
 	}
 
 	// Wait for context cancellation
 	<-ctx.Done()
-	logger.Info("Quiver stopped")
+	logger.Info("Quiver send a last signal: Goodbye my old friend, hope to see you again...")
 } 

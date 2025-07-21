@@ -119,7 +119,7 @@ func (h *Handler) ExecuteArrow(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Executing arrow: %s", name)
+	h.logger.Info("Starting asynchronous execution of arrow: %s", name)
 
 	// Get optional variables from request
 	var req struct {
@@ -127,18 +127,60 @@ func (h *Handler) ExecuteArrow(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&req)
 
-	err := h.pkgManager.ExecuteArrow(name, req.Variables)
-	if err != nil {
-		h.logger.Error("Failed to execute arrow %s: %v", name, err)
-		response.BadRequest(c, "Arrow execution failed", err.Error())
+	// Start execution asynchronously
+	go func() {
+		h.logger.Info("Executing arrow in background: %s", name)
+		err := h.pkgManager.ExecuteArrow(name, req.Variables)
+		if err != nil {
+			h.logger.Error("Background execution of arrow %s failed: %v", name, err)
+		} else {
+			h.logger.Info("Background execution of arrow %s completed successfully", name)
+		}
+	}()
+
+	responseData := gin.H{
+		"arrow":   name,
+		"status":  "execution_started",
+		"message": "Arrow execution has been started in the background",
+	}
+
+	response.Success(c, "Arrow execution started successfully", responseData)
+}
+
+// GetArrowExecutionStatus handles getting the execution status of an arrow
+func (h *Handler) GetArrowExecutionStatus(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "Arrow name is required")
+		return
+	}
+
+	// Get execution status
+	status, exists := h.pkgManager.GetExecutionStatus(name)
+	if !exists {
+		response.NotFound(c, "No execution record found for this arrow")
 		return
 	}
 
 	responseData := gin.H{
-		"arrow": name,
+		"arrow":        name,
+		"execution":    status,
+		"is_running":   h.pkgManager.IsExecutionRunning(name),
 	}
 
-	response.Success(c, "Arrow execution started successfully", responseData)
+	response.Success(c, "Execution status retrieved successfully", responseData)
+}
+
+// GetAllExecutionStatuses handles getting all execution statuses
+func (h *Handler) GetAllExecutionStatuses(c *gin.Context) {
+	executions := h.pkgManager.GetAllExecutions()
+
+	responseData := gin.H{
+		"executions": executions,
+		"count":      len(executions),
+	}
+
+	response.Success(c, "All execution statuses retrieved successfully", responseData)
 }
 
 // InitializeArrowMethod handles initializing an arrow method with netbridge processing
@@ -190,11 +232,11 @@ func (h *Handler) InitializeArrowMethod(c *gin.Context) {
 		Variables:   finalVariables,
 	}
 
-	// Get netbridge processing results for this arrow
-	netbridgeResults, err := h.getNetbridgeResults(arrow, ctx)
+	// Get netbridge identification for this arrow (NO PORT ASSIGNMENT at initialization)
+	netbridgeIdentifications, err := h.getNetbridgeIdentifications(arrow, ctx)
 	if err != nil {
-		h.logger.Error("Failed to get netbridge results for %s: %v", name, err)
-		response.InternalServerError(c, "Netbridge processing failed", err.Error())
+		h.logger.Error("Failed to identify netbridge variables for %s: %v", name, err)
+		response.InternalServerError(c, "Netbridge identification failed", err.Error())
 		return
 	}
 
@@ -206,25 +248,19 @@ func (h *Handler) InitializeArrowMethod(c *gin.Context) {
 	}
 
 	responseData := map[string]interface{}{
-		"arrow":   name,
-		"method":  method,
-		"message": fmt.Sprintf("Method %s initialized successfully", method),
+		"arrow":     name,
+		"method":    method,
+		"variables": finalVariables,
 		"netbridge": map[string]interface{}{
-			"variables":   len(netbridgeResults),
-			"results":     netbridgeResults,
-			"has_failures": func() bool {
-				for _, result := range netbridgeResults {
-					if !result.Success {
-						return true
-					}
-				}
-				return false
-			}(),
+			"variables":     len(netbridgeIdentifications),
+			"identifications": netbridgeIdentifications,
+			"note":          "Ports will be assigned dynamically at runtime during execution",
 		},
+		"status": "initialized",
 	}
 
-	h.logger.Info("Method %s initialization completed for arrow %s", method, name)
-	response.Success(c, "Method initialized with netbridge processing", responseData)
+	h.logger.Info("Method %s initialization completed for arrow %s (no ports assigned)", method, name)
+	response.Success(c, "Method initialized successfully", responseData)
 }
 
 // GetArrowNetbridgeStatus returns the current netbridge status for an arrow
@@ -258,40 +294,22 @@ func (h *Handler) GetArrowNetbridgeStatus(c *gin.Context) {
 		Variables:   pkg.Variables,
 	}
 
-	// Get netbridge processing results
-	netbridgeResults, err := h.getNetbridgeResults(arrow, ctx)
+	// Get netbridge identification (no port assignment)
+	netbridgeIdentifications, err := h.getNetbridgeIdentifications(arrow, ctx)
 	if err != nil {
-		h.logger.Error("Failed to get netbridge status for %s: %v", name, err)
+		h.logger.Error("Failed to identify netbridge variables for %s: %v", name, err)
 		response.InternalServerError(c, "Failed to get netbridge status", err.Error())
 		return
 	}
 
 	responseData := map[string]interface{}{
-		"arrow": name,
-		"netbridge": map[string]interface{}{
-			"variables": len(netbridgeResults),
-			"results":   netbridgeResults,
-			"summary": map[string]int{
-				"total":     len(netbridgeResults),
-				"success":   0,
-				"failed":    0,
-			},
-		},
+		"arrow":          name,
+		"netbridge_vars": len(netbridgeIdentifications),
+		"identifications": netbridgeIdentifications,
+		"note":           "Ports are assigned dynamically at runtime, not during initialization",
+		"status":         "identified",
 	}
 
-	// Calculate summary statistics
-	summary := responseData["netbridge"].(map[string]interface{})["summary"].(map[string]int)
-	for _, result := range netbridgeResults {
-		if result.Success {
-			summary["success"]++
-		} else {
-			summary["failed"]++
-		}
-	}
-
-	h.logger.Info("Netbridge status retrieved for arrow %s: %d total, %d success, %d failed", 
-		name, summary["total"], summary["success"], summary["failed"])
-	
 	response.Success(c, "Netbridge status retrieved successfully", responseData)
 }
 
@@ -488,11 +506,29 @@ func (h *Handler) getArrowFromInstallation(installPath string) (manifest.ArrowIn
 	return processor.LoadFromInstallation(installPath)
 }
 
-// getNetbridgeResults gets netbridge processing results using the execution engine
-func (h *Handler) getNetbridgeResults(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]*execution.NetbridgeResult, error) {
+// getNetbridgeIdentifications gets netbridge variable identifications without port assignment
+func (h *Handler) getNetbridgeIdentifications(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]map[string]interface{}, error) {
+	// Create execution engine to identify netbridge variables
 	engine := execution.NewEngine(h.logger)
 	defer engine.Cleanup()
-	return engine.GetNetbridgeResults(arrow, ctx)
+	
+	netbridgeIdentifications, err := engine.GetNetbridgeProcessor().IdentifyVariables(arrow, ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map format for JSON response
+	result := make([]map[string]interface{}, len(netbridgeIdentifications))
+	for i, identification := range netbridgeIdentifications {
+		result[i] = map[string]interface{}{
+			"variable_name":   identification.VariableName,
+			"protocol":        identification.Protocol,
+			"user_specified":  identification.UserSpecified,
+			"user_value":      identification.UserValue,
+		}
+	}
+
+	return result, nil
 }
 
 // validateMethodSupport validates that a method is supported on the current platform

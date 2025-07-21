@@ -64,16 +64,6 @@ func (e *Engine) ExecuteMethod(arrow manifest.ArrowInterface, methodType types.M
 func (e *Engine) ExecuteMethodWithOptions(arrow manifest.ArrowInterface, methodType types.MethodType, ctx *types.ExecutionContext, opts *ExecutionOptions) error {
 	e.logger.Info("Starting execution of method %s for arrow %s", methodType, arrow.Name())
 	
-	// Process netbridge variables before method execution
-	netbridgeResults, err := e.netbridgeProcessor.ProcessVariables(arrow, ctx)
-	if err != nil {
-		e.logger.Error("Failed to process netbridge variables: %v", err)
-		return fmt.Errorf("netbridge variable processing failed: %v", err)
-	}
-	
-	// Log netbridge results for method initialization status
-	e.netbridgeProcessor.LogProcessingResults(netbridgeResults)
-	
 	// Validate pre-execution requirements
 	if err := e.ValidateRequirements(arrow); err != nil {
 		return fmt.Errorf("requirements validation failed: %v", err)
@@ -131,7 +121,22 @@ func (e *Engine) ExecuteMethodWithOptions(arrow manifest.ArrowInterface, methodT
 
 	// Execute commands
 	for i, command := range commands {
-		// Expand variables in command
+		// RUNTIME NETBRIDGE PROCESSING: Only for execute methods, and only right before variable expansion
+		if methodType == types.MethodExecute && i == 0 { // Only process on first command to avoid duplicates
+			netbridgeResults, err := e.netbridgeProcessor.ProcessVariablesRuntime(arrow, ctx)
+			if err != nil {
+				e.logger.Error("Failed to process netbridge variables at runtime: %v", err)
+				return fmt.Errorf("runtime netbridge variable processing failed: %v", err)
+			}
+			
+			// Log netbridge results for runtime status
+			if len(netbridgeResults) > 0 {
+				e.logger.Info("Runtime netbridge processing completed for %d variables", len(netbridgeResults))
+				e.netbridgeProcessor.LogProcessingResults(netbridgeResults)
+			}
+		}
+		
+		// Expand variables in command (netbridge variables are now available if this is an execute method)
 		expandedCommand := e.expandVariables(command, ctx)
 		
 		if opts.DryRun {
@@ -298,6 +303,11 @@ func (e *Engine) executeShellCommand(ctx context.Context, command, workDir strin
 // GetNetbridgeResults returns netbridge processing results for API reporting
 func (e *Engine) GetNetbridgeResults(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]*NetbridgeResult, error) {
 	return e.netbridgeProcessor.GetResults(arrow, ctx)
+}
+
+// GetNetbridgeProcessor returns the netbridge processor for external access
+func (e *Engine) GetNetbridgeProcessor() *NetbridgeProcessor {
+	return e.netbridgeProcessor
 }
 
 // GetProcessTracker returns the process tracker for external access
