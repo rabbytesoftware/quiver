@@ -9,6 +9,7 @@ import (
 
 	"github.com/rabbytesoftware/quiver/internal/database"
 	"github.com/rabbytesoftware/quiver/internal/logger"
+	"github.com/rabbytesoftware/quiver/internal/netbridge"
 	"github.com/rabbytesoftware/quiver/internal/packages/execution"
 	"github.com/rabbytesoftware/quiver/internal/packages/execution/process"
 	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
@@ -39,11 +40,17 @@ type Manager struct {
 }
 
 // NewManager creates a new package manager
-func NewManager(repositories []string, installDir, dbPath string, logger *logger.Logger) *Manager {
+func NewManager(
+	repositories []string, 
+	installDir, 
+	dbPath string, 
+	netbridge *netbridge.Netbridge, 
+	logger *logger.Logger,
+) *Manager {
 	return &Manager{
 		database:       database.NewDefaultDatabase(dbPath, logger),
 		repository:     repository.NewManager(repositories, logger),
-		execution:      execution.NewEngine(logger),
+		execution:      execution.NewEngine(netbridge, logger),
 		arrowProcessor: manifest.NewProcessor(logger),
 		installDir:     installDir,
 		logger:         logger.WithService("package-manager"),

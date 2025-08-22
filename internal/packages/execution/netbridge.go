@@ -3,7 +3,6 @@ package execution
 import (
 	"strconv"
 
-	"github.com/rabbytesoftware/quiver/internal/config"
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/netbridge"
 	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
@@ -35,31 +34,13 @@ type NetbridgeProcessor struct {
 }
 
 // NewNetbridgeProcessor creates a new netbridge processor
-func NewNetbridgeProcessor(logger *logger.Logger) *NetbridgeProcessor {
-	return NewNetbridgeProcessorWithConfig(logger, nil)
-}
-
-// NewNetbridgeProcessorWithConfig creates a new netbridge processor with config
-func NewNetbridgeProcessorWithConfig(logger *logger.Logger, cfg *config.NetbridgeConfig) *NetbridgeProcessor {
-	// Use default config if none provided
-	if cfg == nil {
-		cfg = &config.NetbridgeConfig{
-			PortRangeStart: 65000,
-			PortRangeEnd:   65534,
-		}
-	}
-
-	netbridgeInstance, err := netbridge.NewNetbridge(cfg)
-	if err != nil {
-		logger.Warn("Netbridge initialization failed: %v (port forwarding disabled)", err)
-		netbridgeInstance = nil
-	}
-
+func NewNetbridgeProcessor(netbridge *netbridge.Netbridge, logger *logger.Logger) *NetbridgeProcessor {
 	return &NetbridgeProcessor{
 		logger:    logger.WithService("netbridge-processor"),
-		netbridge: netbridgeInstance,
+		netbridge: netbridge,
 	}
 }
+
 
 // IdentifyVariables identifies netbridge variables for API reporting without assigning ports
 // This is used during initialization to show what netbridge variables exist
@@ -147,20 +128,6 @@ func (np *NetbridgeProcessor) processVariableRuntime(spec manifest.Netbridge, ct
 	}
 }
 
-// ProcessVariables is the legacy method that should only be used for backwards compatibility
-// DEPRECATED: Use IdentifyVariables for initialization and ProcessVariablesRuntime for execution
-func (np *NetbridgeProcessor) ProcessVariables(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]*NetbridgeResult, error) {
-	np.logger.Warn("DEPRECATED: ProcessVariables called - this should be replaced with IdentifyVariables or ProcessVariablesRuntime")
-	return np.ProcessVariablesRuntime(arrow, ctx)
-}
-
-// GetResults returns netbridge processing results for API reporting
-// DEPRECATED: Use IdentifyVariables for initialization reporting
-func (np *NetbridgeProcessor) GetResults(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]*NetbridgeResult, error) {
-	np.logger.Warn("DEPRECATED: GetResults called - this should be replaced with IdentifyVariables for initialization")
-	return np.ProcessVariablesRuntime(arrow, ctx)
-}
-
 // IsNetbridgeAvailable returns whether netbridge functionality is available
 func (np *NetbridgeProcessor) IsNetbridgeAvailable() bool {
 	return np.netbridge != nil
@@ -181,4 +148,4 @@ func (np *NetbridgeProcessor) LogProcessingResults(results []*NetbridgeResult) {
 			np.logger.Info("Port %d assigned to %s for manual configuration", result.Port, result.VariableName)
 		}
 	}
-} 
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/config"
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/metadata"
+	"github.com/rabbytesoftware/quiver/internal/netbridge"
 	"github.com/rabbytesoftware/quiver/internal/packages"
 	"github.com/rabbytesoftware/quiver/internal/server"
 	"github.com/rabbytesoftware/quiver/internal/ui"
@@ -82,23 +83,29 @@ func runServerMode(cfg *config.Config) {
 		cancel()
 	}()
 
+	// Initialize Netbridge
+	logger.Info("Initializing Netbridge...")
+	netbridge, err := netbridge.NewNetbridge(&cfg.Netbridge)
+	if err != nil {
+		logger.Fatal("Failed to initialize Netbridge: %v", err)
+	}
+
 	// Initialize package manager
 	logger.Info("Initializing package manager...")
 	pkgManager := packages.NewArrowsServer(
 		cfg.Packages.Repositories,
 		cfg.Packages.InstallDir,
 		cfg.Packages.DatabasePath,
+		netbridge,
 		logger.WithService("pkgsServer"),
 	)
-	
-	// Initialize package manager
 	if err := pkgManager.Initialize(); err != nil {
 		logger.Fatal("Failed to initialize package manager: %v", err)
 	}
 
 	// Initialize and start server
 	logger.Info("Starting Quiver API...")
-	srv := server.New(cfg, pkgManager, logger)
+	srv := server.New(cfg, pkgManager, netbridge, logger)
 	if err := srv.Start(ctx); err != nil {
 		logger.Fatal("Failed to start server: %v", err)
 	}

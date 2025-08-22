@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rabbytesoftware/quiver/internal/logger"
+	"github.com/rabbytesoftware/quiver/internal/netbridge"
 	"github.com/rabbytesoftware/quiver/internal/packages/execution/process"
 	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
 	"github.com/rabbytesoftware/quiver/internal/packages/types"
@@ -36,7 +37,7 @@ type ExecutionOptions struct {
 }
 
 // NewEngine creates a new execution engine
-func NewEngine(logger *logger.Logger) *Engine {
+func NewEngine(netbridge *netbridge.Netbridge, logger *logger.Logger) *Engine {
 	tempDir := filepath.Join(os.TempDir(), "quiver-exec")
 	os.MkdirAll(tempDir, 0755)
 	
@@ -46,7 +47,7 @@ func NewEngine(logger *logger.Logger) *Engine {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		netbridgeProcessor: NewNetbridgeProcessor(logger),
+		netbridgeProcessor: NewNetbridgeProcessor(netbridge, logger),
 		processTracker:    process.NewProcessTracker(logger),
 	}
 }
@@ -298,16 +299,6 @@ func (e *Engine) executeShellCommand(ctx context.Context, command, workDir strin
 	
 	e.logger.Info("Shell command completed successfully")
 	return nil
-}
-
-// GetNetbridgeResults returns netbridge processing results for API reporting
-func (e *Engine) GetNetbridgeResults(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]*NetbridgeResult, error) {
-	return e.netbridgeProcessor.GetResults(arrow, ctx)
-}
-
-// GetNetbridgeProcessor returns the netbridge processor for external access
-func (e *Engine) GetNetbridgeProcessor() *NetbridgeProcessor {
-	return e.netbridgeProcessor
 }
 
 // GetProcessTracker returns the process tracker for external access

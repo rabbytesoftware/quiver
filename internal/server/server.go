@@ -29,17 +29,11 @@ type Server struct {
 func New(
 	cfg *config.Config,
 	pkgManager *packages.ArrowsServer,
+	netbridgeInstance *netbridge.Netbridge,
 	logger *logger.Logger,
 ) *Server {
 	// Set Gin to release mode by default
 	gin.SetMode(gin.ReleaseMode)
-
-	// Initialize netbridge
-	netbridgeInstance, err := netbridge.NewNetbridge(&cfg.Netbridge)
-	if err != nil {
-		logger.Warn("Failed to initialize netbridge: %v (port forwarding will be disabled)", err)
-		netbridgeInstance = nil
-	}
 
 	s := &Server{
 		config:     cfg.Server,

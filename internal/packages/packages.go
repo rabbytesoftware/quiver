@@ -2,6 +2,7 @@ package packages
 
 import (
 	"github.com/rabbytesoftware/quiver/internal/logger"
+	"github.com/rabbytesoftware/quiver/internal/netbridge"
 	"github.com/rabbytesoftware/quiver/internal/packages/core"
 )
 
@@ -9,6 +10,18 @@ import (
 type ArrowsServer = core.Manager
 
 // NewArrowsServer creates a new arrows server using the core manager directly
-func NewArrowsServer(repositories []string, installDir, dbPath string, logger *logger.Logger) *ArrowsServer {
-	return core.NewManager(repositories, installDir, dbPath, logger)
+func NewArrowsServer(
+	repositories []string, 
+	installDir, 
+	dbPath string, 
+	netbridgeInstance *netbridge.Netbridge,
+	logger *logger.Logger,
+) *ArrowsServer {
+	return core.NewManager(
+		repositories, 
+		installDir, 
+		dbPath, 
+		netbridgeInstance, 
+		logger,
+	)
 }

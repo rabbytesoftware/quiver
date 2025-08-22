@@ -8,7 +8,6 @@ import (
 
 	"github.com/rabbytesoftware/quiver/internal/logger"
 	"github.com/rabbytesoftware/quiver/internal/packages"
-	"github.com/rabbytesoftware/quiver/internal/packages/execution"
 	"github.com/rabbytesoftware/quiver/internal/packages/manifest"
 	"github.com/rabbytesoftware/quiver/internal/packages/types"
 	"github.com/rabbytesoftware/quiver/internal/server/response"
@@ -271,7 +270,6 @@ func (h *Handler) GetArrowNetbridgeStatus(c *gin.Context) {
 		return
 	}
 
-	// Check if arrow is installed
 	installed := h.pkgManager.GetInstalledArrows()
 	pkg, exists := installed[name]
 	if !exists {
@@ -279,11 +277,21 @@ func (h *Handler) GetArrowNetbridgeStatus(c *gin.Context) {
 		return
 	}
 
-	// Load arrow manifest
 	arrow, err := h.getArrowFromInstallation(pkg.InstallPath)
 	if err != nil {
 		h.logger.Error("Failed to load arrow %s: %v", name, err)
 		response.InternalServerError(c, "Failed to load arrow", err.Error())
+		return
+	}
+
+	netbridgeIdentifications, err := h.pkgManager.GetNetbridgeProcessor().IdentifyVariables(arrow, &types.ExecutionContext{
+		ArrowName:   name,
+		InstallPath: pkg.InstallPath,
+		Variables:   pkg.Variables,
+	})
+	if err != nil {
+		h.logger.Error("Failed to identify netbridge variables for %s: %v", name, err)
+		response.InternalServerError(c, "Failed to get netbridge status", err.Error())
 		return
 	}
 
@@ -293,21 +301,20 @@ func (h *Handler) GetArrowNetbridgeStatus(c *gin.Context) {
 		InstallPath: pkg.InstallPath,
 		Variables:   pkg.Variables,
 	}
-
-	// Get netbridge identification (no port assignment)
-	netbridgeIdentifications, err := h.getNetbridgeIdentifications(arrow, ctx)
 	if err != nil {
 		h.logger.Error("Failed to identify netbridge variables for %s: %v", name, err)
 		response.InternalServerError(c, "Failed to get netbridge status", err.Error())
 		return
 	}
-
+	
 	responseData := map[string]interface{}{
 		"arrow":          name,
-		"netbridge_vars": len(netbridgeIdentifications),
-		"identifications": netbridgeIdentifications,
-		"note":           "Ports are assigned dynamically at runtime, not during initialization",
-		"status":         "identified",
+		"netbridge":      map[string]interface{}{
+			"variables":     len(netbridgeIdentifications),
+			"identifications": netbridgeIdentifications,
+			"note":          "Ports will be assigned dynamically at runtime during execution",
+		},
+		"status": "initialized",
 	}
 
 	response.Success(c, "Netbridge status retrieved successfully", responseData)
@@ -504,31 +511,6 @@ func (h *Handler) ListArrowStatuses(c *gin.Context) {
 func (h *Handler) getArrowFromInstallation(installPath string) (manifest.ArrowInterface, error) {
 	processor := manifest.NewProcessor(h.logger)
 	return processor.LoadFromInstallation(installPath)
-}
-
-// getNetbridgeIdentifications gets netbridge variable identifications without port assignment
-func (h *Handler) getNetbridgeIdentifications(arrow manifest.ArrowInterface, ctx *types.ExecutionContext) ([]map[string]interface{}, error) {
-	// Create execution engine to identify netbridge variables
-	engine := execution.NewEngine(h.logger)
-	defer engine.Cleanup()
-	
-	netbridgeIdentifications, err := engine.GetNetbridgeProcessor().IdentifyVariables(arrow, ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert to map format for JSON response
-	result := make([]map[string]interface{}, len(netbridgeIdentifications))
-	for i, identification := range netbridgeIdentifications {
-		result[i] = map[string]interface{}{
-			"variable_name":   identification.VariableName,
-			"protocol":        identification.Protocol,
-			"user_specified":  identification.UserSpecified,
-			"user_value":      identification.UserValue,
-		}
-	}
-
-	return result, nil
 }
 
 // validateMethodSupport validates that a method is supported on the current platform
