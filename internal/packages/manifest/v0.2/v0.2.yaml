@@ -1,0 +1,142 @@
+version: "0.2"
+
+metadata:
+  name: "Example Application"
+  description: "An example application for v0.2 manifest"
+  mainteiners:
+    - "https://example.com"
+  credits:
+    - "Example Creator"
+    - "The Quiver Project && Rabbyte Software"
+  license: "MIT"
+  repository: "https://github.com/example/app"
+  documentation: "https://github.com/example/app"
+  version: "1.0.0"
+
+requirements:
+  system:
+    - "windows/amd64"
+    - "windows/arm64"
+    - "linux/amd64"
+    - "linux/arm64"
+    - "darwin/amd64"
+    - "darwin/arm64"
+  minimum:
+    cpu_cores: 1
+    ram_gb: 1
+    disk_gb: 1
+    network_mbps: 1
+  recommended:
+    cpu_cores: 2
+    ram_gb: 2
+    disk_gb: 5
+    network_mbps: 10
+
+netbridge: 
+  - name: "APP_PORT"
+    protocol: "tcp/udp"
+
+variables:
+  - name: "APP_HOSTNAME"
+    default: "app.example.com"
+    sensitive: false
+  - name: "DEBUG_MODE"
+    default: false
+    sensitive: false
+
+methods:
+  windows:
+    amd64:
+      install: 
+        - "GET https://releases.example.com/app-windows-amd64.zip"
+        - "UNCOMPRESS app-windows-amd64.zip"
+        - "MOVE app-windows-amd64.exe ${INSTALL_DIR}\\app.exe"
+      execute:
+        - "${INSTALL_DIR}\\app.exe --port ${APP_PORT} --hostname ${APP_HOSTNAME}"
+      uninstall:
+        - "REMOVE ${INSTALL_DIR}"
+      update:
+        - "GET https://releases.example.com/app-windows-amd64.zip"
+        - "UNCOMPRESS app-windows-amd64.zip"
+        - "MOVE app-windows-amd64.exe ${INSTALL_DIR}\\app.exe"
+      validate:
+        - "echo 'Application is installed and running.'"
+    arm64:
+      install:
+        - "GET https://releases.example.com/app-windows-arm64.zip"
+        - "UNCOMPRESS app-windows-arm64.zip"
+        - "MOVE app-windows-arm64.exe ${INSTALL_DIR}\\app.exe"
+      execute:
+        - "${INSTALL_DIR}\\app.exe --port ${APP_PORT} --hostname ${APP_HOSTNAME}"
+      uninstall:
+        - "REMOVE ${INSTALL_DIR}"
+      update:
+        - "GET https://releases.example.com/app-windows-arm64.zip"
+        - "UNCOMPRESS app-windows-arm64.zip"
+        - "MOVE app-windows-arm64.exe ${INSTALL_DIR}\\app.exe"
+      validate:
+        - "echo 'Application is installed and running.'"
+
+  linux:
+    amd64:
+      install:
+        - "GET https://releases.example.com/app-linux-amd64.tar.gz"
+        - "UNCOMPRESS app-linux-amd64.tar.gz"
+        - "MOVE app-linux-amd64 ${INSTALL_DIR}/app"
+      execute:
+        - "${INSTALL_DIR}/app --port ${APP_PORT} --hostname ${APP_HOSTNAME}"
+      uninstall:
+        - "REMOVE ${INSTALL_DIR}"
+      update:
+        - "GET https://releases.example.com/app-linux-amd64.tar.gz"
+        - "UNCOMPRESS app-linux-amd64.tar.gz"
+        - "MOVE app-linux-amd64 ${INSTALL_DIR}/app"
+      validate:
+        - "echo 'Validating application...'"
+    arm64:
+      install:
+        - "GET https://releases.example.com/app-linux-arm64.tar.gz"
+        - "UNCOMPRESS app-linux-arm64.tar.gz"
+        - "MOVE app-linux-arm64 ${INSTALL_DIR}/app"
+      execute: 
+        - "${INSTALL_DIR}/app --port ${APP_PORT} --hostname ${APP_HOSTNAME}"
+      uninstall:
+        - "REMOVE ${INSTALL_DIR}"
+      update:
+        - "GET https://releases.example.com/app-linux-arm64.tar.gz"
+        - "UNCOMPRESS app-linux-arm64.tar.gz"
+        - "MOVE app-linux-arm64 ${INSTALL_DIR}/app"
+      validate:
+        - "echo 'Validating application...'"
+  
+  darwin:
+    amd64:
+      install:
+        - "GET https://releases.example.com/app-darwin-amd64.tar.gz"
+        - "UNCOMPRESS app-darwin-amd64.tar.gz"
+        - "MOVE app-darwin-amd64 ${INSTALL_DIR}/app"
+      execute:
+        - "${INSTALL_DIR}/app --port ${APP_PORT} --hostname ${APP_HOSTNAME}"
+      uninstall:
+        - "REMOVE ${INSTALL_DIR}"
+      update:
+        - "GET https://releases.example.com/app-darwin-amd64.tar.gz"
+        - "UNCOMPRESS app-darwin-amd64.tar.gz"
+        - "MOVE app-darwin-amd64 ${INSTALL_DIR}/app"
+      validate:
+        - "echo 'Validating application...'"
+    arm64:
+      install:
+        - "GET https://releases.example.com/app-darwin-arm64.tar.gz"
+        - "UNCOMPRESS app-darwin-arm64.tar.gz"
+        - "MOVE app-darwin-arm64 ${INSTALL_DIR}/app"
+      execute: 
+        - "${INSTALL_DIR}/app --port ${APP_PORT} --hostname ${APP_HOSTNAME}"
+      uninstall:
+        - "REMOVE ${INSTALL_DIR}"
+      update:
+        - "GET https://releases.example.com/app-darwin-arm64.tar.gz"
+        - "UNCOMPRESS app-darwin-arm64.tar.gz"
+        - "MOVE app-darwin-arm64 ${INSTALL_DIR}/app"
+      validate:
+        - "echo 'Validating application...'" 

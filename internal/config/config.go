@@ -1,6 +1,7 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,11 +9,15 @@ import (
 	"strings"
 )
 
+//go:embed config.json
+var embeddedConfig []byte
+
 // Config represents the application configuration
 type Config struct {
-	Server   ServerConfig   `json:"server"`
-	Logger   LoggerConfig   `json:"logger"`
-	Packages PackagesConfig `json:"packages"`
+	Server    ServerConfig    `json:"server"`
+	Logger    LoggerConfig    `json:"logger"`
+	Packages  PackagesConfig  `json:"packages"`
+	Netbridge NetbridgeConfig `json:"netbridge"`
 }
 
 // ServerConfig holds server-specific configuration
@@ -25,6 +30,7 @@ type ServerConfig struct {
 
 // LoggerConfig holds logger-specific configuration
 type LoggerConfig struct {
+	Show      bool   `json:"show"`       // Whether to show logs on CLI
 	Level     string `json:"level"`
 	LogDir    string `json:"log_dir"`
 	MaxSize   int    `json:"max_size"`
@@ -34,8 +40,15 @@ type LoggerConfig struct {
 
 // PackagesConfig holds package-specific configuration
 type PackagesConfig struct {
-	Repository    string   `json:"repository"`
-	TemplateDir  string   `json:"template_dir"`
+	Repositories []string `json:"repositories"`  // List of repositories (URLs or local directories)
+	InstallDir   string   `json:"install_dir"`   // Directory to install packages	
+	DatabasePath string   `json:"database_path"` // Local package database path
+}
+
+// NetbridgeConfig holds netbridge-specific configuration
+type NetbridgeConfig struct {
+	PortRangeStart uint16 `json:"port_range_start"` // Start of auto-assignment port range
+	PortRangeEnd   uint16 `json:"port_range_end"`   // End of auto-assignment port range
 }
 
 // Default returns a default configuration
@@ -48,6 +61,7 @@ func Default() *Config {
 			WriteTimeout: 30,
 		},
 		Logger: LoggerConfig{
+			Show:     false,
 			Level:    "info",
 			LogDir:   "./logs",
 			MaxSize:  100, // megabytes
@@ -55,22 +69,24 @@ func Default() *Config {
 			Compress: true,
 		},
 		Packages: PackagesConfig{
-			Repository:    "./pkgs",
-			TemplateDir:  "./template",
+			Repositories: []string{"./pkgs"},
+			InstallDir:   "./pkgs",
+			DatabasePath: "./pkgs/packages.db",
+		},
+		Netbridge: NetbridgeConfig{
+			PortRangeStart: 65000,
+			PortRangeEnd:   65534,
 		},
 	}
 }
 
-// Load loads configuration from file or environment variables
+// Load loads configuration from embedded data or environment variables
 func Load() (*Config, error) {
 	cfg := Default()
 
-	// Try to load from config file
-	configPath := getConfigPath()
-	if _, err := os.Stat(configPath); err == nil {
-		if err := loadFromFile(cfg, configPath); err != nil {
-			return nil, fmt.Errorf("failed to load config from file: %w", err)
-		}
+	// Load from embedded config first
+	if err := loadFromEmbedded(cfg); err != nil {
+		return nil, fmt.Errorf("failed to load embedded config: %w", err)
 	}
 
 	// Override with environment variables
@@ -79,22 +95,9 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// getConfigPath returns the configuration file path
-func getConfigPath() string {
-	if path := os.Getenv("QUIVER_CONFIG"); path != "" {
-		return path
-	}
-	return "./config.json"
-}
-
-// loadFromFile loads configuration from a JSON file
-func loadFromFile(cfg *Config, path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal(data, cfg)
+// loadFromEmbedded loads configuration from embedded JSON data
+func loadFromEmbedded(cfg *Config) error {
+	return json.Unmarshal(embeddedConfig, cfg)
 }
 
 // loadFromEnv loads configuration from environment variables
@@ -115,10 +118,6 @@ func loadFromEnv(cfg *Config) {
 
 	if logDir := os.Getenv("QUIVER_LOG_DIR"); logDir != "" {
 		cfg.Logger.LogDir = logDir
-	}
-
-	if pkgDir := os.Getenv("QUIVER_PACKAGES_DIR"); pkgDir != "" {
-		cfg.Packages.Repository = pkgDir
 	}
 }
 

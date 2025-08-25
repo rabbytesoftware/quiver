@@ -1,28 +1,4 @@
-{
-	"version": "25.6.0",
-	"description": "Quiver is a game server management platform that allows you to manage your game servers with ease.",
-	"author": "Rabbyte Software",
-	"url": "https://github.com/rabbytesoftware/quiver",
-	"license": "GPL-3.0",
-	"copyright": "Copyright 2025 Rabbyte Software",
-	"maintainers": [
-		{
-			"name": "Mateo Urrutia",
-			"email": "me@char2cs.net",
-			"url": "https://char2cs.net"
-		},
-		{
-			"name": "Agustin Gil",
-			"email": "",
-			"url": "https://github.com/AgustinGil21"
-		},
-		{
-			"name": "Luca Lombardo",
-			"email": "",
-			"url": "https://github.com/Lucacux"
-		}
-	],
-	
+{	
 	"server": {
 		"port": 8080,
 		"host": "0.0.0.0",
@@ -31,6 +7,7 @@
 	},
 
 	"logger": {
+		"show": false,
 		"level": "info",
 		"log_dir": "./logs",
 		"max_size": 100,
@@ -39,7 +16,13 @@
 	},
 	
 	"packages": {
-		"directory": "./pkgs",
-		"template_dir": "./template"
+		"repositories": ["./pkgs"],
+		"install_dir": "./pkgs", // TODO: We should be able to set this directory to a different location, depending on the host OS.
+		"database_path": "./pkgs/packages.db"
+	},
+
+	"netbridge": {
+		"port_range_start": 65000,
+		"port_range_end": 65534
 	}
 }

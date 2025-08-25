@@ -7,7 +7,7 @@ BUILD_DIR=bin
 MAIN_PATH=./cmd/quiver
 DOCKER_IMAGE=quiver:latest
 VERSION?=$(shell git describe --tags --always --dirty)
-LDFLAGS=-ldflags "-X main.version=${VERSION}"
+LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.buildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ) -X main.gitCommit=$(shell git rev-parse --short HEAD)"
 
 # Go parameters
 GOCMD=go
@@ -28,17 +28,29 @@ all: clean deps test build
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
+	@echo "Copying embedded files..."
+	@cp config.json internal/config/config.json
+	@cp metadata.json internal/metadata/metadata.json
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
+	@echo "Cleaning up embedded files..."
+	@rm -f internal/config/config.json internal/metadata/metadata.json
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
 # Build for multiple platforms
 build-all:
 	@echo "Building for multiple platforms..."
 	@mkdir -p $(BUILD_DIR)
+	@echo "Copying embedded files..."
+	@cp config.json internal/config/config.json
+	@cp metadata.json internal/metadata/metadata.json
 	GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(MAIN_PATH)
+	GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 $(MAIN_PATH)
 	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 $(MAIN_PATH)
 	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 $(MAIN_PATH)
 	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(MAIN_PATH)
+	GOOS=windows GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-arm64.exe $(MAIN_PATH)
+	@echo "Cleaning up embedded files..."
+	@rm -f internal/config/config.json internal/metadata/metadata.json
 	@echo "Multi-platform build complete"
 
 # Clean build artifacts
