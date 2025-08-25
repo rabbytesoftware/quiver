@@ -1,0 +1,25 @@
+{
+	"version": "25.7.0",
+	"description": "Quiver is a game server management platform that allows you to manage your game servers with ease.",
+	"author": "Rabbyte Software",
+	"url": "https://github.com/rabbytesoftware/quiver",
+	"license": "GPL-3.0",
+	"copyright": "Copyright 2025 Rabbyte Software",
+	"maintainers": [
+		{
+			"name": "Mateo Urrutia",
+			"email": "me@char2cs.net",
+			"url": "https://char2cs.net"
+		},
+		{
+			"name": "Agustin Gil",
+			"email": "",
+			"url": "https://github.com/AgustinGil21"
+		},
+		{
+			"name": "Luca Lombardo",
+			"email": "",
+			"url": "https://github.com/Lucacux"
+		}
+	]
+}
