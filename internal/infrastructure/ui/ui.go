@@ -4,14 +4,18 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/tui"
 )
 
-type UI struct {
-	
+type TUI struct {
+	model *tui.Model
 }
 
-func NewUI() *UI {
-	return &UI{}
+func NewTUI() *TUI {
+	return &TUI{}
 }
 
-func (ui *UI) Run() error {
+func (t *TUI) Run() error {
 	return tui.RunTUI()
+}
+
+func (t *TUI) Stop() error {
+	return nil
 }

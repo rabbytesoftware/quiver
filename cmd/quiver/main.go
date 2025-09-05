@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	ui := ui.NewUI()
+	ui := ui.NewTUI()
 	if err := ui.Run(); err != nil {
 		log.Fatal(err)
 	}
