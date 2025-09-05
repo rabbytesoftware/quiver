@@ -118,7 +118,7 @@ func (lv *LogViewport) formatLogEntry(entry models.LogEntry) string {
 	switch entry.Level {
 	case models.LogLevelError:
 		levelStyled = lv.getLevelStyle().Foreground(lipgloss.Color("#FF6B6B")).Render(fmt.Sprintf("[%s]", entry.Level))
-	case models.LogLevelWarn:
+	case models.LogLevelWarning:
 		levelStyled = lv.getLevelStyle().Foreground(lipgloss.Color("#FFE66D")).Render(fmt.Sprintf("[%s]", entry.Level))
 	case models.LogLevelInfo:
 		levelStyled = lv.getLevelStyle().Foreground(lipgloss.Color("#4ECDC4")).Render(fmt.Sprintf("[%s]", entry.Level))

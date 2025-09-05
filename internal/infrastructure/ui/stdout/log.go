@@ -52,13 +52,17 @@ func (l *logView) View(width int, height int) string {
 		
 		var levelStyled string
 		switch log.Level {
-		case "ERROR":
+		case models.LogLevelError:
 			levelStyled = levelStyle.Foreground(lipgloss.Color("#FF6B6B")).Render(fmt.Sprintf("[%s]", log.Level))
-		case "WARN":
+		case models.LogLevelWarning:
 			levelStyled = levelStyle.Foreground(lipgloss.Color("#FFE66D")).Render(fmt.Sprintf("[%s]", log.Level))
-		case "INFO":
+		case models.LogLevelInfo:
 			levelStyled = levelStyle.Foreground(lipgloss.Color("#4ECDC4")).Render(fmt.Sprintf("[%s]", log.Level))
-		case "CMD":
+		case models.LogLevelDebug:
+			levelStyled = levelStyle.Foreground(lipgloss.Color("#45B7D1")).Render(fmt.Sprintf("[%s]", log.Level))
+		case models.LogLevelUnforeseen:
+			levelStyled = levelStyle.Foreground(lipgloss.Color("#FF1493")).Render(fmt.Sprintf("[%s]", log.Level))
+		case "CMD": // Keep support for legacy CMD level
 			levelStyled = levelStyle.Foreground(lipgloss.Color("#45B7D1")).Render(fmt.Sprintf("[%s]", log.Level))
 		default:
 			levelStyled = levelStyle.Render(fmt.Sprintf("[%s]", log.Level))

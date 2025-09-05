@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/cmd/interpreter"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/stdout"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/stdout/models"
 )
 
@@ -22,6 +23,7 @@ type Model struct {
 	footerBar      *FooterBar
 	metricsCollector *SystemMetricsCollector
 	commandInterpreter *interpreter.CommandInterpreter
+	logService     *stdout.LogService
 	
 	// State
 	ready        bool
@@ -33,24 +35,21 @@ type tickMsg time.Time
 type resourceUpdateMsg ResourceMetrics
 
 // NewModel creates a new TUI model
-func NewModel() Model {
+func NewModel(logService *stdout.LogService) Model {
 	logViewport := NewLogViewport()
 	inputPrompt := NewInputPrompt()
 	footerBar := NewFooterBar()
 	metricsCollector := NewSystemMetricsCollector()
 	commandInterpreter := interpreter.NewCommandInterpreter()
 	
-	// Add initial log entries
-	logViewport.Add(models.LogEntry{
-		Timestamp: time.Now(),
-		Level:     models.LogLevelInfo,
-		Message:   "Quiver TUI started",
+	// Set up log service subscription to update the viewport
+	logService.Subscribe(func(entry models.LogEntry) {
+		logViewport.Add(entry)
 	})
-	logViewport.Add(models.LogEntry{
-		Timestamp: time.Now(),
-		Level:     models.LogLevelInfo,
-		Message:   "Initializing system...",
-	})
+	
+	// Add initial log entries through the log service
+	logService.Info("Quiver TUI started")
+	logService.Info("Initializing system...")
 	
 	return Model{
 		logViewport:        logViewport,
@@ -58,6 +57,7 @@ func NewModel() Model {
 		footerBar:          footerBar,
 		metricsCollector:   metricsCollector,
 		commandInterpreter: commandInterpreter,
+		logService:         logService,
 		lastUpdate:         time.Now(),
 	}
 }
@@ -167,30 +167,18 @@ func (m Model) processCommand() Model {
 	command := m.inputPrompt.GetValue()
 	
 	// Log the command
-	m.logViewport.Add(models.LogEntry{
-		Timestamp: time.Now(),
-		Level:     models.LogLevelInfo,
-		Message:   fmt.Sprintf("> %s", command),
-	})
+	m.logService.Info(fmt.Sprintf("> %s", command))
 	
 	// Process the command
 	result, err := m.commandInterpreter.ProcessCommand(command)
 	if err != nil {
-		m.logViewport.Add(models.LogEntry{
-			Timestamp: time.Now(),
-			Level:     models.LogLevelError,
-			Message:   fmt.Sprintf("Error: %s", err.Error()),
-		})
+		m.logService.Error(fmt.Sprintf("Error: %s", err.Error()))
 	} else if result != "" {
 		// Handle special commands
 		if result == "CLEAR_SCREEN" {
 			m = m.ClearScreen()
 		} else {
-			m.logViewport.Add(models.LogEntry{
-				Timestamp: time.Now(),
-				Level:     models.LogLevelInfo,
-				Message:   result,
-			})
+			m.logService.Info(result)
 		}
 	}
 	
@@ -211,14 +199,15 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-// RunTUI starts the TUI application
-func RunTUI() error {
+func RunTUI() (*stdout.LogService, error) {
+	logService := stdout.NewLogService()
+	
 	p := tea.NewProgram(
-		NewModel(),
+		NewModel(logService),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
 
 	_, err := p.Run()
-	return err
+	return logService, err
 }

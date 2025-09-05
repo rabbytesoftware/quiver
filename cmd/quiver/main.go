@@ -3,12 +3,14 @@ package main
 import (
 	"log"
 
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/tui"
 )
 
 func main() {
-	ui := ui.NewTUI()
-	if err := ui.Run(); err != nil {
+	logger, err := tui.RunTUI()
+	if err != nil {
 		log.Fatal(err)
 	}
+
+	logger.Info("Hello world")
 }
