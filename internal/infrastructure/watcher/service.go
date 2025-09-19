@@ -37,7 +37,7 @@ func (w *Watcher) WithField(key string, value interface{}) *logrus.Entry {
 	return w.logger.WithField(key, value)
 }
 
-func (w *Watcher) Subscribe(callback func(string)) {
+func (w *Watcher) Subscribe(callback pool.Subscriber) {
 	w.pool.Subscribe(callback)
 }
 

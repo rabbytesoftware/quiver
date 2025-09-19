@@ -5,19 +5,19 @@ import (
 )
 
 type Pool struct {
-	messages    chan string
-	subscribers []func(string)
-	mu          sync.RWMutex
+	mu			sync.RWMutex
+	messages    chan Message
+	subscribers []Subscriber
 }
 
 func NewPool() *Pool {
 	return &Pool{
-		messages:    make(chan string, 100),
-		subscribers: make([]func(string), 0),
+		messages:    make(chan Message, 128),
+		subscribers: make([]Subscriber, 0),
 	}
 }
 
-func (p *Pool) AddMessage(message string) {
+func (p *Pool) AddMessage(message Message) {
 	select {
 	case p.messages <- message:
 		p.notifySubscribers(message)
@@ -25,21 +25,18 @@ func (p *Pool) AddMessage(message string) {
 	}
 }
 
-func (p *Pool) Subscribe(callback func(string)) {
+func (p *Pool) Subscribe(callback Subscriber) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.subscribers = append(p.subscribers, callback)
 }
 
-func (p *Pool) notifySubscribers(message string) {
-	p.mu.RLock()
-	subscribers := make([]func(string), len(p.subscribers))
-	copy(subscribers, p.subscribers)
-	p.mu.RUnlock()
-	
-	for _, subscriber := range subscribers {
-		go subscriber(message)
-	}
+func (p *Pool) notifySubscribers(message Message) {
+	go func() {
+		for _, subscriber := range p.subscribers {
+			subscriber(message.Level, message.Message)
+		}
+	}()
 }
 
 func (p *Pool) GetSubscriberCount() int {
