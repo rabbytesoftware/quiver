@@ -1,0 +1,359 @@
+package ui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/commands"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/events"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/handlers"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/services/logstream"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/styles"
+)
+
+const (
+	maxLogLines = 10000 // Ring buffer size for log lines
+)
+
+// Model represents the Bubble Tea model for the TUI
+type Model struct {
+	// UI components
+	viewport  viewport.Model
+	textInput textinput.Model
+	
+	// Application state
+	logLines     []string
+	autoScroll   bool
+	status       string
+	statusExpiry time.Time
+	ready        bool
+	quitting     bool
+	
+	// Services and handlers
+	logService logstream.LogService
+	handler    *handlers.Handler
+	theme      styles.Theme
+	
+	// Context and cancellation
+	ctx     context.Context
+	cancel  context.CancelFunc
+	logChan <-chan events.LogLine
+	
+	// Dimensions
+	width  int
+	height int
+}
+
+// NewModel creates a new TUI model with the provided watcher
+func NewModel(l *logstream.LogService) *Model {
+	// Create services
+	handler := handlers.NewHandler(l)
+	theme := styles.NewDefaultTheme()
+	
+	// Create context
+	ctx, cancel := context.WithCancel(context.Background())
+	
+	// Initialize text input
+	ti := textinput.New()
+	ti.Placeholder = "Enter a command (e.g., help)"
+	ti.Focus()
+	ti.CharLimit = 256
+	ti.Width = 50
+	
+	// Initialize viewport
+	vp := viewport.New(80, 20)
+	vp.SetContent("")
+	
+	return &Model{
+		viewport:   vp,
+		textInput:  ti,
+		logLines:   make([]string, 0, maxLogLines),
+		autoScroll: true,
+		theme:      theme,
+		logService: w,
+		handler:    handler,
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+}
+
+// Init initializes the model
+func (m *Model) Init() tea.Cmd {
+	// Start log streaming
+	logChan, _ := m.logService.Start(m.ctx)
+	m.logChan = logChan
+	
+	return tea.Batch(
+		textinput.Blink,
+		m.waitForLogLine(m.logChan),
+		m.tickStatus(),
+	)
+}
+
+// Update handles messages and updates the model
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var (
+		cmd  tea.Cmd
+		cmds []tea.Cmd
+	)
+	
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		
+		// Update viewport size (leave space for input and status)
+		viewportHeight := msg.Height - 3 // 1 for input, 1 for status, 1 for border
+		m.viewport.Width = msg.Width - 2  // Account for border
+		m.viewport.Height = viewportHeight
+		
+		// Update text input width
+		m.textInput.Width = msg.Width - 4 // Account for prompt "> "
+		
+		if !m.ready {
+			m.ready = true
+		}
+		
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q":
+			m.quitting = true
+			m.cancel()
+			return m, tea.Quit
+			
+		case "enter":
+			return m.handleCommand()
+			
+		case "esc":
+			m.textInput.SetValue("")
+			
+		case "up", "down", "pgup", "pgdown":
+			// Handle viewport scrolling
+			m.viewport, cmd = m.viewport.Update(msg)
+			cmds = append(cmds, cmd)
+			
+			// Update auto-scroll based on position
+			m.autoScroll = m.viewport.AtBottom()
+		}
+		
+	case events.LogLineReceivedMsg:
+		m.addLogLine(msg.Event.LogLine)
+		// Continue listening for more log lines
+		cmds = append(cmds, m.waitForLogLine(m.logChan))
+		
+	case events.FilterAppliedMsg:
+		if msg.Event.Pattern == "" {
+			m.setStatus("Filter cleared", 3*time.Second)
+		} else {
+			m.setStatus(fmt.Sprintf("Filter applied: %s", msg.Event.Pattern), 3*time.Second)
+		}
+		
+	case events.LevelChangedMsg:
+		m.setStatus(fmt.Sprintf("Log level set to: %s", msg.Event.Level), 3*time.Second)
+		
+	case events.StreamPausedMsg:
+		m.setStatus("Log streaming paused", 3*time.Second)
+		
+	case events.StreamResumedMsg:
+		m.setStatus("Log streaming resumed", 3*time.Second)
+		
+	case events.ClearedMsg:
+		m.clearLogs()
+		m.setStatus("Viewport cleared", 2*time.Second)
+		
+	case events.CommandErrorMsg:
+		m.setStatus(m.theme.FormatError(msg.Event.Message), 5*time.Second)
+		
+	case events.HelpRequestedMsg:
+		m.showHelp(msg.Event.HelpText)
+		
+	case statusTickMsg:
+		// Clear expired status messages
+		if time.Now().After(m.statusExpiry) {
+			m.status = ""
+		}
+		return m, m.tickStatus()
+	}
+	
+	// Update text input
+	m.textInput, cmd = m.textInput.Update(msg)
+	cmds = append(cmds, cmd)
+	
+	return m, tea.Batch(cmds...)
+}
+
+// handleCommand processes the entered command
+func (m *Model) handleCommand() (tea.Model, tea.Cmd) {
+	input := strings.TrimSpace(m.textInput.Value())
+	m.textInput.SetValue("")
+	
+	if input == "" {
+		return m, nil
+	}
+	
+	// Parse command
+	cmd, err := commands.Parse(input)
+	if err != nil {
+		m.setStatus(m.theme.FormatError(err.Error()), 5*time.Second)
+		return m, nil
+	}
+	
+	// Handle command
+	resultEvents := m.handler.Handle(cmd)
+	
+	// Convert events to tea messages and send them
+	var cmds []tea.Cmd
+	for _, event := range resultEvents {
+		if teaMsg := events.ToTeaMsg(event); teaMsg != nil {
+			cmds = append(cmds, func(msg tea.Msg) tea.Cmd {
+				return func() tea.Msg { return msg }
+			}(teaMsg))
+		}
+	}
+	
+	return m, tea.Batch(cmds...)
+}
+
+// addLogLine adds a new log line to the viewport
+func (m *Model) addLogLine(logLine events.LogLine) {
+	// Format the log line with styling
+	formattedLine := m.theme.FormatLogLine(logLine.Text, logLine.Level)
+	
+	// Add to ring buffer
+	m.logLines = append(m.logLines, formattedLine)
+	if len(m.logLines) > maxLogLines {
+		m.logLines = m.logLines[1:]
+	}
+	
+	// Update viewport content
+	m.updateViewportContent()
+}
+
+// updateViewportContent updates the viewport with current log lines
+func (m *Model) updateViewportContent() {
+	content := strings.Join(m.logLines, "\n")
+	m.viewport.SetContent(content)
+	
+	// Auto-scroll to bottom if enabled
+	if m.autoScroll {
+		m.viewport.GotoBottom()
+	}
+}
+
+// clearLogs clears all log lines
+func (m *Model) clearLogs() {
+	m.logLines = make([]string, 0, maxLogLines)
+	m.viewport.SetContent("")
+	m.autoScroll = true
+}
+
+// showHelp displays help text in the viewport
+func (m *Model) showHelp(helpText string) {
+	// Add help text as a special log entry
+	formattedHelp := m.theme.FormatHelp(helpText)
+	lines := strings.Split(formattedHelp, "\n")
+	
+	for _, line := range lines {
+		m.logLines = append(m.logLines, line)
+		if len(m.logLines) > maxLogLines {
+			m.logLines = m.logLines[1:]
+		}
+	}
+	
+	m.updateViewportContent()
+}
+
+// setStatus sets a status message with expiry
+func (m *Model) setStatus(message string, duration time.Duration) {
+	m.status = message
+	m.statusExpiry = time.Now().Add(duration)
+}
+
+// statusTickMsg is used for status message expiry
+type statusTickMsg time.Time
+
+// tickStatus returns a command that ticks for status updates
+func (m *Model) tickStatus() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return statusTickMsg(t)
+	})
+}
+
+// listenForLogs creates a command that listens for log messages
+func (m *Model) listenForLogs(logChan <-chan events.LogLine) tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case logLine, ok := <-logChan:
+			if !ok {
+				return nil
+			}
+			return events.LogLineReceivedMsg{
+				Event: events.LogLineReceived{LogLine: logLine},
+			}
+		case <-m.ctx.Done():
+			return nil
+		}
+	}
+}
+
+// waitForLogLine returns a command that waits for the next log line
+func (m *Model) waitForLogLine(logChan <-chan events.LogLine) tea.Cmd {
+	return tea.Cmd(func() tea.Msg {
+		for {
+			select {
+			case logLine, ok := <-logChan:
+				if !ok {
+					return nil
+				}
+				return events.LogLineReceivedMsg{
+					Event: events.LogLineReceived{LogLine: logLine},
+				}
+			case <-m.ctx.Done():
+				return nil
+			}
+		}
+	})
+}
+
+// View renders the model
+func (m *Model) View() string {
+	if !m.ready {
+		return "\n  Initializing..."
+	}
+	
+	if m.quitting {
+		return "\n  Goodbye!\n"
+	}
+	
+	// Main viewport
+	viewportView := m.theme.ViewportStyle.Render(m.viewport.View())
+	
+	// Status line
+	statusView := ""
+	if m.status != "" {
+		statusView = m.theme.FormatStatus(m.status)
+	}
+	
+	// Input line
+	prompt := m.theme.InputPromptStyle.Render("> ")
+	inputView := prompt + m.theme.InputStyle.Render(m.textInput.View())
+	
+	// Combine all parts
+	var parts []string
+	parts = append(parts, viewportView)
+	
+	if statusView != "" {
+		parts = append(parts, statusView)
+	}
+	
+	parts = append(parts, inputView)
+	
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}

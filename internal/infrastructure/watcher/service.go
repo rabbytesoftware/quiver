@@ -14,8 +14,12 @@ type Watcher struct {
 }
 
 func NewWatcherService() *Watcher {
+	logger := logrus.New()
+	logger.SetLevel(logrus.DebugLevel)
+	logger.SetOutput(nil)
+
 	return &Watcher{
-		logger: logrus.New(),
+		logger: logger,
 		pool: pool.NewPool(),
 	}
 }
