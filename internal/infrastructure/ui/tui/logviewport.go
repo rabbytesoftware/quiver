@@ -3,34 +3,40 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/stdout/models"
 )
 
-// LogViewport handles the scrollable log area
+type LogEntry struct {
+	Timestamp time.Time
+	Message   string
+}
+
 type LogViewport struct {
-	entries      []models.LogEntry
+	entries      []LogEntry
 	scrollOffset int
 	maxLines     int
 	width        int
 	height       int
 }
 
-// NewLogViewport creates a new log viewport
 func NewLogViewport() *LogViewport {
 	return &LogViewport{
-		entries:      make([]models.LogEntry, 0),
+		entries:      make([]LogEntry, 0),
 		scrollOffset: 0,
 		maxLines:     0,
 	}
 }
 
-// Add adds a new log entry
-func (lv *LogViewport) Add(entry models.LogEntry) {
+func (lv *LogViewport) Add(message string) {
+	entry := LogEntry{
+		Timestamp: time.Now(),
+		Message:   message,
+	}
 	lv.entries = append(lv.entries, entry)
 	
-	// Auto-scroll to bottom when new entries are added
+	// ? Auto-scroll to bottom when new entries are added
 	if lv.maxLines > 0 {
 		maxScroll := len(lv.entries) - lv.maxLines
 		if maxScroll > 0 {
@@ -39,7 +45,6 @@ func (lv *LogViewport) Add(entry models.LogEntry) {
 	}
 }
 
-// View renders the log viewport
 func (lv *LogViewport) View(width, height int) string {
 	lv.width = width
 	lv.height = height
@@ -48,7 +53,7 @@ func (lv *LogViewport) View(width, height int) string {
 	var lines []string
 	totalLogs := len(lv.entries)
 	
-	// Calculate which logs to show based on scroll offset
+	// ? Calculate which logs to show based on scroll offset
 	start := lv.scrollOffset
 	end := start + height
 	if end > totalLogs {
@@ -61,12 +66,12 @@ func (lv *LogViewport) View(width, height int) string {
 		lines = append(lines, line)
 	}
 
-	// Fill remaining lines with empty space
+	// ? Fill remaining lines with empty space
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
 
-	// Add scroll indicator if needed
+	// ? Add scroll indicator if needed
 	scrollInfo := ""
 	if len(lv.entries) > height {
 		scrollInfo = fmt.Sprintf(" [%d/%d]", start+1, totalLogs)
@@ -80,14 +85,12 @@ func (lv *LogViewport) View(width, height int) string {
 		Render(logContent + scrollInfo)
 }
 
-// ScrollUp scrolls the viewport up
 func (lv *LogViewport) ScrollUp() {
 	if lv.scrollOffset > 0 {
 		lv.scrollOffset--
 	}
 }
 
-// ScrollDown scrolls the viewport down
 func (lv *LogViewport) ScrollDown() {
 	maxScroll := len(lv.entries) - lv.maxLines
 	if maxScroll > 0 && lv.scrollOffset < maxScroll {
@@ -95,7 +98,6 @@ func (lv *LogViewport) ScrollDown() {
 	}
 }
 
-// ScrollToBottom scrolls to the bottom
 func (lv *LogViewport) ScrollToBottom() {
 	maxScroll := len(lv.entries) - lv.maxLines
 	if maxScroll > 0 {
@@ -105,34 +107,19 @@ func (lv *LogViewport) ScrollToBottom() {
 	}
 }
 
-// GetEntryCount returns the number of log entries
 func (lv *LogViewport) GetEntryCount() int {
 	return len(lv.entries)
 }
 
-// formatLogEntry formats a single log entry for display
-func (lv *LogViewport) formatLogEntry(entry models.LogEntry) string {
+func (lv *LogViewport) formatLogEntry(entry LogEntry) string {
 	timestamp := lv.getTimestampStyle().Render(entry.Timestamp.Format("15:04:05"))
 	
-	var levelStyled string
-	switch entry.Level {
-	case models.LogLevelError:
-		levelStyled = lv.getLevelStyle().Foreground(lipgloss.Color("#FF6B6B")).Render(fmt.Sprintf("[%s]", entry.Level))
-	case models.LogLevelWarning:
-		levelStyled = lv.getLevelStyle().Foreground(lipgloss.Color("#FFE66D")).Render(fmt.Sprintf("[%s]", entry.Level))
-	case models.LogLevelInfo:
-		levelStyled = lv.getLevelStyle().Foreground(lipgloss.Color("#4ECDC4")).Render(fmt.Sprintf("[%s]", entry.Level))
-	case models.LogLevelDebug:
-		levelStyled = lv.getLevelStyle().Foreground(lipgloss.Color("#45B7D1")).Render(fmt.Sprintf("[%s]", entry.Level))
-	default:
-		levelStyled = lv.getLevelStyle().Render(fmt.Sprintf("[%s]", entry.Level))
-	}
+	levelStyled := lv.getLevelStyle().Foreground(lipgloss.Color("#4ECDC4")).Render("[INFO]")
 	
 	message := lv.getMessageStyle().Render(entry.Message)
 	return fmt.Sprintf("%s %s %s", timestamp, levelStyled, message)
 }
 
-// Styles
 func (lv *LogViewport) getLogStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Padding(0, 1).

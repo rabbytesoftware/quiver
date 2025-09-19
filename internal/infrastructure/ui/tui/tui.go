@@ -7,49 +7,41 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/cmd/interpreter"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/stdout"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/stdout/models"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/watcher"
 )
 
-// Model represents the main TUI model
+// ? Model represents the main TUI model
 type Model struct {
-	// Layout dimensions
+	// ? Layout dimensions
 	width  int
 	height int
 
-	// Components
+	// ? Components
 	logViewport    *LogViewport
 	inputPrompt    *InputPrompt
 	footerBar      *FooterBar
 	metricsCollector *SystemMetricsCollector
 	commandInterpreter *interpreter.CommandInterpreter
-	logService     *stdout.LogService
+	logService     *watcher.Watcher
 	
-	// State
+	// ? State
 	ready        bool
 	lastUpdate   time.Time
 }
 
-// Messages
 type tickMsg time.Time
 type resourceUpdateMsg ResourceMetrics
 
-// NewModel creates a new TUI model
-func NewModel(logService *stdout.LogService) Model {
+func NewModel(logService *watcher.Watcher) Model {
 	logViewport := NewLogViewport()
 	inputPrompt := NewInputPrompt()
 	footerBar := NewFooterBar()
 	metricsCollector := NewSystemMetricsCollector()
 	commandInterpreter := interpreter.NewCommandInterpreter()
 	
-	// Set up log service subscription to update the viewport
-	logService.Subscribe(func(entry models.LogEntry) {
-		logViewport.Add(entry)
+	logService.Subscribe(func(message string) {
+		logViewport.Add(message)
 	})
-	
-	// Add initial log entries through the log service
-	logService.Info("Quiver TUI started")
-	logService.Info("Initializing system...")
 	
 	return Model{
 		logViewport:        logViewport,
@@ -92,23 +84,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// View renders the TUI
+// ? View renders the TUI
 func (m Model) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
 
-	// Calculate layout dimensions
+	// ? Calculate layout dimensions
 	footerHeight := 1
 	promptHeight := 1
-	logHeight := m.height - footerHeight - promptHeight - 2 // -2 for borders/spacing
+	logHeight := m.height - footerHeight - promptHeight - 2 // ? For borders/spacing
 
-	// Render components
+	// ? Render components
 	logView := m.logViewport.View(m.width, logHeight)
 	promptView := m.inputPrompt.View(m.width)
 	footerView := m.footerBar.View(m.width)
 
-	// Combine all components
+	// ? Combine all components
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		logView,
@@ -117,7 +109,7 @@ func (m Model) View() string {
 	)
 }
 
-// listenForMetricsUpdates listens for metrics updates from the collector
+// ? listenForMetricsUpdates listens for metrics updates from the collector
 func (m Model) listenForMetricsUpdates() tea.Cmd {
 	return func() tea.Msg {
 		metrics := <-m.metricsCollector.GetUpdateChannel()
@@ -125,7 +117,7 @@ func (m Model) listenForMetricsUpdates() tea.Cmd {
 	}
 }
 
-// handleWindowSize handles window size changes
+// ? handleWindowSize handles window size changes
 func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 	m.width = msg.Width
 	m.height = msg.Height
@@ -133,7 +125,7 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 	return m
 }
 
-// handleKeyInput handles keyboard input
+// ? handleKeyInput handles keyboard input
 func (m Model) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "esc":
@@ -152,7 +144,7 @@ func (m Model) handleKeyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleEnterKey processes the enter key press
+// ? handleEnterKey processes the enter key press
 func (m Model) handleEnterKey() (tea.Model, tea.Cmd) {
 	if m.inputPrompt.GetValue() == "" {
 		return m, nil
@@ -162,19 +154,18 @@ func (m Model) handleEnterKey() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// processCommand processes the current command input
+// ? processCommand processes the current command input
 func (m Model) processCommand() Model {
 	command := m.inputPrompt.GetValue()
 	
-	// Log the command
+	// ? Log the command
 	m.logService.Info(fmt.Sprintf("> %s", command))
 	
-	// Process the command
+	// ? Process the command
 	result, err := m.commandInterpreter.ProcessCommand(command)
 	if err != nil {
 		m.logService.Error(fmt.Sprintf("Error: %s", err.Error()))
 	} else if result != "" {
-		// Handle special commands
 		if result == "CLEAR_SCREEN" {
 			m = m.ClearScreen()
 		} else {
@@ -182,7 +173,7 @@ func (m Model) processCommand() Model {
 		}
 	}
 	
-	// Clear input
+	// ? Clear input
 	m.inputPrompt.Clear()
 	return m
 }
@@ -192,16 +183,15 @@ func (m Model) ClearScreen() Model {
 	return m
 }
 
-// Commands
 func tickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
-func RunTUI() (*stdout.LogService, error) {
-	logService := stdout.NewLogService()
-	
+func RunTUI(
+	logService *watcher.Watcher,
+) (error) {
 	p := tea.NewProgram(
 		NewModel(logService),
 		tea.WithAltScreen(),
@@ -209,5 +199,5 @@ func RunTUI() (*stdout.LogService, error) {
 	)
 
 	_, err := p.Run()
-	return logService, err
+	return err
 }

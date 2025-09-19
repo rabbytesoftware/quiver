@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/google/uuid v1.4.0
 	github.com/shirou/gopsutil/v3 v3.24.5
+	github.com/sirupsen/logrus v1.9.3
 )
 
 require (

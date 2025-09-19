@@ -1,16 +1,25 @@
 package main
 
 import (
-	"log"
+	"time"
 
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/tui"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/watcher"
 )
 
 func main() {
-	logger, err := tui.RunTUI()
+	watcher := watcher.NewWatcherService()
+
+	err := tui.RunTUI(watcher)
 	if err != nil {
-		log.Fatal(err)
+		watcher.Unforeseen(err.Error())
 	}
 
-	logger.Info("Hello world")
+	time.Sleep(5 * time.Second)
+
+	watcher.Debug("Freeman!")
+	watcher.Info("Freeman!")
+	watcher.Warning("Freeman!")
+	watcher.Error("Freeman!")
+	watcher.Unforeseen("Freeman!")
 }
