@@ -20,6 +20,7 @@ vendor/
 go.work
 
 quiver
+!/cmd/quiver/
 
 # Environment variables
 .env

@@ -1,11 +1,11 @@
 package main
 
 import (
-	"log"
 	"time"
 
+	"github.com/rabbytesoftware/quiver/cmd/ui"
+
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui"
 )
 
 func main() {
@@ -27,6 +27,6 @@ func main() {
 	
 	err := ui.RunUI(watcher)
 	if err != nil {
-		log.Fatal(err)
+		watcher.Unforeseen(err.Error())
 	}
 }

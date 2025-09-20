@@ -12,12 +12,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sirupsen/logrus"
 
+	"github.com/rabbytesoftware/quiver/cmd/ui/domain/commands"
+	"github.com/rabbytesoftware/quiver/cmd/ui/domain/events"
+	"github.com/rabbytesoftware/quiver/cmd/ui/domain/handlers"
+	"github.com/rabbytesoftware/quiver/cmd/ui/services"
+	"github.com/rabbytesoftware/quiver/cmd/ui/styles"
+
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/commands"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/events"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/handlers"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/services"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/styles"
 )
 
 const (
@@ -31,12 +32,18 @@ type Model struct {
 	textInput textinput.Model
 	
 	// Application state
-	logLines     []string
-	autoScroll   bool
-	status       string
-	statusExpiry time.Time
-	ready        bool
-	quitting     bool
+	logLines       []string
+	autoScroll     bool
+	status         string
+	statusExpiry   time.Time
+	ready          bool
+	quitting       bool
+	
+	// Command history
+	commandHistory    []string
+	historyIndex      int
+	currentInput      string
+	navigatingHistory bool
 	
 	// Services and handlers
 	watcher        *watcher.Watcher
@@ -75,16 +82,20 @@ func NewModel(w *watcher.Watcher) *Model {
 	vp.SetContent("")
 	
 	model := &Model{
-		viewport:       vp,
-		textInput:      ti,
-		logLines:       make([]string, 0, maxLogLines),
-		autoScroll:     true,
-		theme:          theme,
-		watcher:        w,
-		watcherAdapter: watcherAdapter,
-		handler:        handler,
-		ctx:            ctx,
-		cancel:         cancel,
+		viewport:          vp,
+		textInput:         ti,
+		logLines:          make([]string, 0, maxLogLines),
+		autoScroll:        true,
+		theme:             theme,
+		watcher:           w,
+		watcherAdapter:    watcherAdapter,
+		handler:           handler,
+		ctx:               ctx,
+		cancel:            cancel,
+		commandHistory:    make([]string, 0),
+		historyIndex:      -1,
+		currentInput:      "",
+		navigatingHistory: false,
 	}
 	
 	// Subscribe to watcher for log messages
@@ -127,7 +138,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			m.quitting = true
 			m.cancel()
 			return m, tea.Quit
@@ -137,14 +148,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			
 		case "esc":
 			m.textInput.SetValue("")
+			m.resetHistoryNavigation()
 			
-		case "up", "down", "pgup", "pgdown":
+		case "up":
+			// If text input is focused, navigate command history
+			if m.textInput.Focused() {
+				return m.navigateHistory(-1), nil
+			}
+			// Otherwise, handle viewport scrolling
+			m.viewport, cmd = m.viewport.Update(msg)
+			cmds = append(cmds, cmd)
+			m.autoScroll = m.viewport.AtTop()
+			
+		case "down":
+			// If text input is focused, navigate command history
+			if m.textInput.Focused() {
+				return m.navigateHistory(1), nil
+			}
+			// Otherwise, handle viewport scrolling
+			m.viewport, cmd = m.viewport.Update(msg)
+			cmds = append(cmds, cmd)
+			m.autoScroll = m.viewport.AtTop()
+			
+		case "pgup", "pgdown":
 			// Handle viewport scrolling
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
-			
-			// Update auto-scroll based on position
-			m.autoScroll = m.viewport.AtBottom()
+			m.autoScroll = m.viewport.AtTop()
 		}
 		
 	case events.LogLineReceivedMsg:
@@ -195,9 +225,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleCommand() (tea.Model, tea.Cmd) {
 	input := strings.TrimSpace(m.textInput.Value())
 	m.textInput.SetValue("")
+	m.resetHistoryNavigation()
 	
 	if input == "" {
 		return m, nil
+	}
+	
+	// Add to command history (avoid duplicates)
+	if len(m.commandHistory) == 0 || m.commandHistory[len(m.commandHistory)-1] != input {
+		m.commandHistory = append(m.commandHistory, input)
+		// Keep history size manageable
+		if len(m.commandHistory) > 100 {
+			m.commandHistory = m.commandHistory[1:]
+		}
+	}
+	
+	// Handle quit command
+	if input == "quit" || input == "q" || input == "exit" {
+		m.quitting = true
+		m.cancel()
+		return m, tea.Quit
 	}
 	
 	// Parse command
@@ -228,10 +275,10 @@ func (m *Model) addLogLine(logLine events.LogLine) {
 	// Format the log line with styling
 	formattedLine := m.theme.FormatLogLine(logLine.Text, logLine.Level)
 	
-	// Add to ring buffer
-	m.logLines = append(m.logLines, formattedLine)
+	// Add to the beginning of the slice for newest-first display
+	m.logLines = append([]string{formattedLine}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
-		m.logLines = m.logLines[1:]
+		m.logLines = m.logLines[:maxLogLines]
 	}
 	
 	// Update viewport content
@@ -243,9 +290,9 @@ func (m *Model) updateViewportContent() {
 	content := strings.Join(m.logLines, "\n")
 	m.viewport.SetContent(content)
 	
-	// Auto-scroll to bottom if enabled
+	// Auto-scroll to top for newest messages if enabled
 	if m.autoScroll {
-		m.viewport.GotoBottom()
+		m.viewport.GotoTop()
 	}
 }
 
@@ -262,10 +309,11 @@ func (m *Model) showHelp(helpText string) {
 	formattedHelp := m.theme.FormatHelp(helpText)
 	lines := strings.Split(formattedHelp, "\n")
 	
-	for _, line := range lines {
-		m.logLines = append(m.logLines, line)
+	// Reverse lines to maintain newest-first order when prepending
+	for i := len(lines) - 1; i >= 0; i-- {
+		m.logLines = append([]string{lines[i]}, m.logLines...)
 		if len(m.logLines) > maxLogLines {
-			m.logLines = m.logLines[1:]
+			m.logLines = m.logLines[:maxLogLines]
 		}
 	}
 	
@@ -321,10 +369,10 @@ func (m *Model) addLogLineFromWatcher(logLine events.LogLine) {
 	// Format the log line with styling
 	formattedLine := m.theme.FormatLogLine(logLine.Text, logLine.Level)
 	
-	// Add to ring buffer
-	m.logLines = append(m.logLines, formattedLine)
+	// Add to the beginning of the slice for newest-first display
+	m.logLines = append([]string{formattedLine}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
-		m.logLines = m.logLines[1:]
+		m.logLines = m.logLines[:maxLogLines]
 	}
 	
 	// Update viewport content
@@ -365,4 +413,42 @@ func (m *Model) View() string {
 	parts = append(parts, inputView)
 	
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// navigateHistory navigates through command history
+func (m *Model) navigateHistory(direction int) tea.Model {
+	if len(m.commandHistory) == 0 {
+		return m
+	}
+
+	// Save current input if not already navigating
+	if !m.navigatingHistory {
+		m.currentInput = m.textInput.Value()
+		m.navigatingHistory = true
+		m.historyIndex = len(m.commandHistory) // Start at end + 1
+	}
+
+	// Navigate history
+	m.historyIndex += direction
+
+	// Bounds checking
+	if m.historyIndex < 0 {
+		m.historyIndex = 0
+	} else if m.historyIndex >= len(m.commandHistory) {
+		// Beyond history - restore current input
+		m.historyIndex = len(m.commandHistory)
+		m.textInput.SetValue(m.currentInput)
+		return m
+	}
+
+	// Set the history item
+	m.textInput.SetValue(m.commandHistory[m.historyIndex])
+	return m
+}
+
+// resetHistoryNavigation resets history navigation state
+func (m *Model) resetHistoryNavigation() {
+	m.navigatingHistory = false
+	m.historyIndex = -1
+	m.currentInput = ""
 }
