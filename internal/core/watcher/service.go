@@ -1,7 +1,9 @@
 package watcher
 
 import (
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/watcher/pool"
+	"io"
+
+	"github.com/rabbytesoftware/quiver/internal/core/watcher/pool"
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,7 +18,7 @@ type Watcher struct {
 func NewWatcherService() *Watcher {
 	logger := logrus.New()
 	logger.SetLevel(logrus.DebugLevel)
-	logger.SetOutput(nil)
+	logger.SetOutput(io.Discard)
 
 	return &Watcher{
 		logger: logger,
@@ -25,12 +27,11 @@ func NewWatcherService() *Watcher {
 }
 
 func (w *Watcher) SetLevel(level logrus.Level) {
-	logrus.SetLevel(level)
 	w.logger.SetLevel(level)
 }
 
 func (w *Watcher) GetLevel() logrus.Level {
-	return logrus.GetLevel()
+	return w.logger.GetLevel()
 }
 
 func (w *Watcher) WithFields(fields logrus.Fields) *logrus.Entry {

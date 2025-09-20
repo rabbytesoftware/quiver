@@ -1,7 +1,7 @@
 package watcher
 
 import (
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/watcher/pool"
+	"github.com/rabbytesoftware/quiver/internal/core/watcher/pool"
 	"github.com/sirupsen/logrus"
 )
 

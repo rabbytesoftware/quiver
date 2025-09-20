@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/watcher"
 )
 
 func main() {

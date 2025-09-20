@@ -10,11 +10,13 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sirupsen/logrus"
 
+	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/commands"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/events"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/handlers"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/services/logstream"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/services"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/styles"
 )
 
@@ -37,14 +39,14 @@ type Model struct {
 	quitting     bool
 	
 	// Services and handlers
-	logService logstream.LogService
-	handler    *handlers.Handler
-	theme      styles.Theme
+	watcher        *watcher.Watcher
+	watcherAdapter *services.WatcherAdapter
+	handler        *handlers.Handler
+	theme          styles.Theme
 	
 	// Context and cancellation
-	ctx     context.Context
-	cancel  context.CancelFunc
-	logChan <-chan events.LogLine
+	ctx    context.Context
+	cancel context.CancelFunc
 	
 	// Dimensions
 	width  int
@@ -52,9 +54,10 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model with the provided watcher
-func NewModel(l *logstream.LogService) *Model {
+func NewModel(w *watcher.Watcher) *Model {
 	// Create services
-	handler := handlers.NewHandler(l)
+	watcherAdapter := services.NewWatcherAdapter(w)
+	handler := handlers.NewHandler(watcherAdapter)
 	theme := styles.NewDefaultTheme()
 	
 	// Create context
@@ -71,28 +74,29 @@ func NewModel(l *logstream.LogService) *Model {
 	vp := viewport.New(80, 20)
 	vp.SetContent("")
 	
-	return &Model{
-		viewport:   vp,
-		textInput:  ti,
-		logLines:   make([]string, 0, maxLogLines),
-		autoScroll: true,
-		theme:      theme,
-		logService: w,
-		handler:    handler,
-		ctx:        ctx,
-		cancel:     cancel,
+	model := &Model{
+		viewport:       vp,
+		textInput:      ti,
+		logLines:       make([]string, 0, maxLogLines),
+		autoScroll:     true,
+		theme:          theme,
+		watcher:        w,
+		watcherAdapter: watcherAdapter,
+		handler:        handler,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
+	
+	// Subscribe to watcher for log messages
+	model.subscribeToWatcher()
+	
+	return model
 }
 
 // Init initializes the model
 func (m *Model) Init() tea.Cmd {
-	// Start log streaming
-	logChan, _ := m.logService.Start(m.ctx)
-	m.logChan = logChan
-	
 	return tea.Batch(
 		textinput.Blink,
-		m.waitForLogLine(m.logChan),
 		m.tickStatus(),
 	)
 }
@@ -145,8 +149,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 	case events.LogLineReceivedMsg:
 		m.addLogLine(msg.Event.LogLine)
-		// Continue listening for more log lines
-		cmds = append(cmds, m.waitForLogLine(m.logChan))
 		
 	case events.FilterAppliedMsg:
 		if msg.Event.Pattern == "" {
@@ -286,40 +288,47 @@ func (m *Model) tickStatus() tea.Cmd {
 	})
 }
 
-// listenForLogs creates a command that listens for log messages
-func (m *Model) listenForLogs(logChan <-chan events.LogLine) tea.Cmd {
-	return func() tea.Msg {
-		select {
-		case logLine, ok := <-logChan:
-			if !ok {
-				return nil
-			}
-			return events.LogLineReceivedMsg{
-				Event: events.LogLineReceived{LogLine: logLine},
-			}
-		case <-m.ctx.Done():
-			return nil
+// subscribeToWatcher sets up the subscription to watcher for log messages
+func (m *Model) subscribeToWatcher() {
+	m.watcherAdapter.Subscribe(func(level logrus.Level, message string) {
+		// Convert logrus level to string
+		levelStr := level.String()
+		
+		// Create log line event
+		logLine := events.LogLine{
+			Text:  message,
+			Level: levelStr,
+			Time:  time.Now(),
 		}
-	}
+		
+		// Send the event through a goroutine to avoid blocking
+		go func() {
+			select {
+			case <-m.ctx.Done():
+				return
+			default:
+				// This creates a Bubble Tea command to send the message
+				// We need to use the program's Send method, but since we don't have access to it here,
+				// we'll store the log line and let the UI poll for it
+				m.addLogLineFromWatcher(logLine)
+			}
+		}()
+	})
 }
 
-// waitForLogLine returns a command that waits for the next log line
-func (m *Model) waitForLogLine(logChan <-chan events.LogLine) tea.Cmd {
-	return tea.Cmd(func() tea.Msg {
-		for {
-			select {
-			case logLine, ok := <-logChan:
-				if !ok {
-					return nil
-				}
-				return events.LogLineReceivedMsg{
-					Event: events.LogLineReceived{LogLine: logLine},
-				}
-			case <-m.ctx.Done():
-				return nil
-			}
-		}
-	})
+// addLogLineFromWatcher adds a log line from the watcher subscription
+func (m *Model) addLogLineFromWatcher(logLine events.LogLine) {
+	// Format the log line with styling
+	formattedLine := m.theme.FormatLogLine(logLine.Text, logLine.Level)
+	
+	// Add to ring buffer
+	m.logLines = append(m.logLines, formattedLine)
+	if len(m.logLines) > maxLogLines {
+		m.logLines = m.logLines[1:]
+	}
+	
+	// Update viewport content
+	m.updateViewportContent()
 }
 
 // View renders the model

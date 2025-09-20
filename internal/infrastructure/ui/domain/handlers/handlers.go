@@ -5,18 +5,18 @@ import (
 
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/commands"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/domain/events"
-	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/services/logstream"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/ui/services"
 )
 
 // Handler handles commands and returns events
 type Handler struct {
-	logService logstream.LogService
+	watcherAdapter *services.WatcherAdapter
 }
 
 // NewHandler creates a new command handler
-func NewHandler(logService logstream.LogService) *Handler {
+func NewHandler(watcherAdapter *services.WatcherAdapter) *Handler {
 	return &Handler{
-		logService: logService,
+		watcherAdapter: watcherAdapter,
 	}
 }
 
@@ -57,7 +57,7 @@ func (h *Handler) handleHelp() []events.Event {
 func (h *Handler) handleFilter(args []string) []events.Event {
 	if len(args) == 0 {
 		// Clear filter
-		if err := h.logService.SetFilter(""); err != nil {
+		if err := h.watcherAdapter.SetFilter(""); err != nil {
 			return []events.Event{
 				events.CommandError{
 					Message: "failed to clear filter: " + err.Error(),
@@ -73,7 +73,7 @@ func (h *Handler) handleFilter(args []string) []events.Event {
 
 	// Apply filter
 	pattern := strings.Join(args, " ")
-	if err := h.logService.SetFilter(pattern); err != nil {
+	if err := h.watcherAdapter.SetFilter(pattern); err != nil {
 		return []events.Event{
 			events.CommandError{
 				Message: "failed to set filter: " + err.Error(),
@@ -99,7 +99,7 @@ func (h *Handler) handleLevel(args []string) []events.Event {
 	}
 
 	level := strings.ToLower(args[0])
-	if err := h.logService.SetLevel(level); err != nil {
+	if err := h.watcherAdapter.SetLevel(level); err != nil {
 		return []events.Event{
 			events.CommandError{
 				Message: "failed to set level: " + err.Error(),
@@ -116,7 +116,7 @@ func (h *Handler) handleLevel(args []string) []events.Event {
 
 // handlePause handles the pause command
 func (h *Handler) handlePause() []events.Event {
-	if h.logService.IsPaused() {
+	if h.watcherAdapter.IsPaused() {
 		return []events.Event{
 			events.CommandError{
 				Message: "log streaming is already paused",
@@ -124,7 +124,7 @@ func (h *Handler) handlePause() []events.Event {
 		}
 	}
 
-	h.logService.Pause()
+	h.watcherAdapter.Pause()
 	return []events.Event{
 		events.StreamPaused{},
 	}
@@ -132,7 +132,7 @@ func (h *Handler) handlePause() []events.Event {
 
 // handleResume handles the resume command
 func (h *Handler) handleResume() []events.Event {
-	if !h.logService.IsPaused() {
+	if !h.watcherAdapter.IsPaused() {
 		return []events.Event{
 			events.CommandError{
 				Message: "log streaming is not paused",
@@ -140,7 +140,7 @@ func (h *Handler) handleResume() []events.Event {
 		}
 	}
 
-	h.logService.Resume()
+	h.watcherAdapter.Resume()
 	return []events.Event{
 		events.StreamResumed{},
 	}
