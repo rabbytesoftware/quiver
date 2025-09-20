@@ -3,9 +3,9 @@ package handlers
 import (
 	"strings"
 
-	"github.com/rabbytesoftware/quiver/cmd/ui/domain/commands"
-	"github.com/rabbytesoftware/quiver/cmd/ui/domain/events"
-	"github.com/rabbytesoftware/quiver/cmd/ui/services"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/commands"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/events"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/services"
 )
 
 // Handler handles commands and returns events

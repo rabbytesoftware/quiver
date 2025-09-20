@@ -12,11 +12,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sirupsen/logrus"
 
-	"github.com/rabbytesoftware/quiver/cmd/ui/domain/commands"
-	"github.com/rabbytesoftware/quiver/cmd/ui/domain/events"
-	"github.com/rabbytesoftware/quiver/cmd/ui/domain/handlers"
-	"github.com/rabbytesoftware/quiver/cmd/ui/services"
-	"github.com/rabbytesoftware/quiver/cmd/ui/styles"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/commands"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/events"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/handlers"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/services"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/styles"
 
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 )
