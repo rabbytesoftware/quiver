@@ -1,0 +1,19 @@
+version: 25.9.0
+
+name: Quiver
+description: The future of wizards and package managers.
+author: Rabbyte Software
+url: https://quiver.ar
+license: GPL-3.0
+copyright: Copyright 2025 Rabbyte Software & char2cs.net
+
+maintainers:
+  - name: Mateo Urrutia
+    email: me@char2cs.net
+    url: https://char2cs.net
+  - name: Agustin Gil
+    email:
+    url: https://github.com/AgustinGil21
+  - name: Luca Lombardo
+    email:
+    url: https://github.com/Lucacux
