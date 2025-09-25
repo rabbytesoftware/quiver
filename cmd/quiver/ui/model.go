@@ -18,6 +18,7 @@ import (
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/services"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/styles"
 
+	"github.com/rabbytesoftware/quiver/internal/core/metadata"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 )
 
@@ -272,8 +273,8 @@ func (m *Model) handleCommand() (tea.Model, tea.Cmd) {
 
 // addLogLine adds a new log line to the viewport
 func (m *Model) addLogLine(logLine events.LogLine) {
-	// Format the log line with styling
-	formattedLine := m.theme.FormatLogLine(logLine.Text, logLine.Level)
+	// Format the log line with timestamp and gray styling
+	formattedLine := m.theme.FormatLogLineWithTime(logLine.Text, logLine.Level, logLine.Time)
 	
 	// Add to the beginning of the slice for newest-first display
 	m.logLines = append([]string{formattedLine}, m.logLines...)
@@ -366,8 +367,8 @@ func (m *Model) subscribeToWatcher() {
 
 // addLogLineFromWatcher adds a log line from the watcher subscription
 func (m *Model) addLogLineFromWatcher(logLine events.LogLine) {
-	// Format the log line with styling
-	formattedLine := m.theme.FormatLogLine(logLine.Text, logLine.Level)
+	// Format the log line with timestamp and gray styling
+	formattedLine := m.theme.FormatLogLineWithTime(logLine.Text, logLine.Level, logLine.Time)
 	
 	// Add to the beginning of the slice for newest-first display
 	m.logLines = append([]string{formattedLine}, m.logLines...)
@@ -398,8 +399,9 @@ func (m *Model) View() string {
 		statusView = m.theme.FormatStatus(m.status)
 	}
 	
-	// Input line
-	prompt := m.theme.InputPromptStyle.Render("> ")
+	// Input line with metadata name and version
+	promptText := fmt.Sprintf("%s:%s ", metadata.GetName(), metadata.GetVersion())
+	prompt := m.theme.InputPromptStyle.Render(promptText)
 	inputView := prompt + m.theme.InputStyle.Render(m.textInput.View())
 	
 	// Combine all parts

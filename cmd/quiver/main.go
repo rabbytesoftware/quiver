@@ -13,18 +13,18 @@ import (
 func main() {
 	watcher := watcher.NewWatcherService()
 	
-	err := ui.RunUI(watcher)
-	if err != nil {
-		watcher.Unforeseen(err.Error())
-	}
-
 	go func() {
 		time.Sleep(5 * time.Second)
 	
 		watcher.Info(fmt.Sprintf(
-		"%s %s - Initializing...",
+			"%s %s - Initializing...",
 			metadata.GetName(), 
 			metadata.GetVersion(),
 		))
 	}()
+
+	err := ui.RunUI(watcher)
+	if err != nil {
+		watcher.Unforeseen(err.Error())
+	}
 }

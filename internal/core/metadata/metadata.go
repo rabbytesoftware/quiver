@@ -34,10 +34,11 @@ func Get() (*Metadata) {
 		return metadata
 	}
 	
+	metadata = &Metadata{}
 	err := yaml.Unmarshal(metadataByte, metadata)
 	if err != nil {
 		// Fallback to default metadata
-		return &Metadata{
+		metadata = &Metadata{
 			Version:     "25.9.0",
 			Name:        "Quiver",
 			Description: "The future of wizards and package managers.",

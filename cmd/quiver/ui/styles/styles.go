@@ -1,6 +1,10 @@
 package styles
 
 import (
+	"fmt"
+	"strings"
+	"time"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -105,6 +109,38 @@ func (t Theme) GetLogLevelStyle(level string) lipgloss.Style {
 func (t Theme) FormatLogLine(text, level string) string {
 	style := t.GetLogLevelStyle(level)
 	return style.Render(text)
+}
+
+// FormatLogLineWithTime formats a log line with timestamp and appropriate colors
+func (t Theme) FormatLogLineWithTime(text, level string, timestamp time.Time) string {
+	// Format timestamp as hh:mm:ss in gray
+	timeStr := timestamp.Format("15:04:05")
+	grayStyle := lipgloss.NewStyle().Foreground(t.MutedColor)
+	formattedTime := grayStyle.Render(timeStr)
+	
+	// Get level color based on log level
+	var levelColor lipgloss.Color
+	switch strings.ToLower(level) {
+	case "debug":
+		levelColor = lipgloss.Color("#3B82F6") // Blue
+	case "info":
+		levelColor = lipgloss.Color("#10B981") // Green
+	case "warn":
+		levelColor = lipgloss.Color("#F59E0B") // Yellow/Amber
+	case "error":
+		levelColor = lipgloss.Color("#EF4444") // Red
+	default:
+		levelColor = lipgloss.Color("#10B981") // Default to green
+	}
+	
+	// Format level with appropriate color
+	levelStyle := lipgloss.NewStyle().Foreground(levelColor).Bold(true)
+	formattedLevel := levelStyle.Render(strings.ToUpper(level))
+	
+	// Create the formatted log line: hh:mm:ss [ LEVEL ] Message
+	formattedLine := fmt.Sprintf("%s [ %s ] %s", formattedTime, formattedLevel, text)
+	
+	return formattedLine
 }
 
 // FormatStatus formats a status message

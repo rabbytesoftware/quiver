@@ -33,7 +33,12 @@ func (p *Pool) Subscribe(callback Subscriber) {
 
 func (p *Pool) notifySubscribers(message Message) {
 	go func() {
-		for _, subscriber := range p.subscribers {
+		p.mu.RLock()
+		subscribers := make([]Subscriber, len(p.subscribers))
+		copy(subscribers, p.subscribers)
+		p.mu.RUnlock()
+		
+		for _, subscriber := range subscribers {
 			subscriber(message.Level, message.Message)
 		}
 	}()
