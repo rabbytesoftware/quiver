@@ -37,37 +37,26 @@ func WatcherLogger(watcher *watcher.Watcher) gin.HandlerFunc {
 			bodySize,
 		)
 
+		logEntry := watcher.WithFields(logrus.Fields{
+			"method":     method,
+			"path":       path,
+			"status":     statusCode,
+			"latency":    latency,
+			"client_ip":  clientIP,
+			"body_size":  bodySize,
+			"type":       "http_request",
+		})
+
 		switch {
 		case statusCode >= 500:
-			watcher.WithFields(logrus.Fields{
-				"method":     method,
-				"path":       path,
-				"status":     statusCode,
-				"latency":    latency,
-				"client_ip":  clientIP,
-				"body_size":  bodySize,
-				"type":       "http_request",
-			}).Error(message)
+			logEntry.Error(message)
+			watcher.Error(message)
 		case statusCode >= 400:
-			watcher.WithFields(logrus.Fields{
-				"method":     method,
-				"path":       path,
-				"status":     statusCode,
-				"latency":    latency,
-				"client_ip":  clientIP,
-				"body_size":  bodySize,
-				"type":       "http_request",
-			}).Warn(message)
+			logEntry.Warn(message)
+			watcher.Warn(message)
 		default:
-			watcher.WithFields(logrus.Fields{
-				"method":     method,
-				"path":       path,
-				"status":     statusCode,
-				"latency":    latency,
-				"client_ip":  clientIP,
-				"body_size":  bodySize,
-				"type":       "http_request",
-			}).Info(message)
+			logEntry.Info(message)
+			watcher.Info(message)
 		}
 	}
 }
@@ -78,6 +67,8 @@ func WatcherRecovery(watcher *watcher.Watcher) gin.HandlerFunc {
 			if err := recover(); err != nil {
 				// Log the panic with Watcher
 				message := fmt.Sprintf("Panic recovered: %v", err)
+				
+				// Log with structured fields for file output
 				watcher.WithFields(logrus.Fields{
 					"method":     c.Request.Method,
 					"path":       c.Request.URL.Path,
@@ -85,6 +76,9 @@ func WatcherRecovery(watcher *watcher.Watcher) gin.HandlerFunc {
 					"type":       "panic_recovery",
 					"error":      err,
 				}).Error(message)
+				
+				// Also send to UI via Watcher's direct method
+				watcher.Error(message)
 				
 				// Return 500 error
 				c.AbortWithStatus(500)

@@ -175,8 +175,19 @@ func (h *Handler) handleQuery(input string) []events.Event {
 	}
 
 	ctx := context.Background()
-	result, err := h.queryService.HandleCommand(ctx, input)
+	result, httpStatus, responseBody, err := h.queryService.HandleCommand(ctx, input)
 	if err != nil {
+		// If we have HTTP status and response body, create a QueryError event
+		if httpStatus > 0 {
+			return []events.Event{
+				events.QueryError{
+					UserInput:    input,
+					HTTPStatus:   httpStatus,
+					ResponseBody: responseBody,
+				},
+			}
+		}
+		// Otherwise, fall back to regular CommandError
 		return []events.Event{
 			events.CommandError{
 				Message: "query execution error: " + err.Error(),

@@ -213,6 +213,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case events.QueryExecutedMsg:
 		m.showQueryResult(msg.Event.DisplayText)
 		
+	case events.QueryErrorMsg:
+		m.showQueryError(msg.Event.UserInput, msg.Event.HTTPStatus, msg.Event.ResponseBody)
+		
 	case statusTickMsg:
 		// Clear expired status messages
 		if time.Now().After(m.statusExpiry) {
@@ -339,6 +342,33 @@ func (m *Model) showQueryResult(resultText string) {
 		if len(m.logLines) > maxLogLines {
 			m.logLines = m.logLines[:maxLogLines]
 		}
+	}
+	
+	m.updateViewportContent()
+}
+
+// showQueryError displays query error with user input and API response in the viewport
+func (m *Model) showQueryError(userInput string, httpStatus int, responseBody string) {
+	userInputLine := fmt.Sprintf("> %s", userInput)
+	
+	apiResponseLine := fmt.Sprintf("[ %d ] %s", httpStatus, responseBody)
+	
+	// Apply error styling (color/tint) without adding "Error: " prefix
+	errorStyle := lipgloss.NewStyle().
+		Foreground(m.theme.ErrorColor).
+		Bold(true)
+	
+	formattedUserInput := errorStyle.Render(userInputLine)
+	formattedApiResponse := errorStyle.Render(apiResponseLine)
+	
+	m.logLines = append([]string{formattedApiResponse}, m.logLines...)
+	if len(m.logLines) > maxLogLines {
+		m.logLines = m.logLines[:maxLogLines]
+	}
+	
+	m.logLines = append([]string{formattedUserInput}, m.logLines...)
+	if len(m.logLines) > maxLogLines {
+		m.logLines = m.logLines[:maxLogLines]
 	}
 	
 	m.updateViewportContent()

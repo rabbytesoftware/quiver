@@ -50,27 +50,32 @@ func (s *QueryService) loadQueries() error {
 	return nil
 }
 
-func (s *QueryService) HandleCommand(ctx context.Context, input string) (string, error) {
+func (s *QueryService) HandleCommand(ctx context.Context, input string) (string, int, string, error) {
 	match, err := s.matcher.Match(input)
 	if err != nil {
-		return input, fmt.Errorf("failed to match command: %w", err)
+		return input, 0, "", fmt.Errorf("failed to match command: %w", err)
 	}
 
 	if match.REST == nil {
-		return input, fmt.Errorf("no matching command found")
+		return input, 0, "", fmt.Errorf("no matching command found")
 	}
 
 	request, err := s.matcher.BuildRequest(match)
 	if err != nil {
-		return input, fmt.Errorf("failed to build request: %w", err)
+		return input, 0, "", fmt.Errorf("failed to build request: %w", err)
 	}
 
 	response, err := s.client.ExecuteRequest(ctx, request)
 	if err != nil {
-		return input, fmt.Errorf("failed to execute request: %w", err)
+		return input, 0, "", fmt.Errorf("failed to execute request: %w", err)
 	}
 
-	return response.String(), nil
+	// If the response is not successful, return error with HTTP status and response body
+	if !response.Success {
+		return input, response.StatusCode, response.GetBodyAsString(), fmt.Errorf("HTTP %d", response.StatusCode)
+	}
+
+	return response.String(), response.StatusCode, response.GetBodyAsString(), nil
 }
 
 func (s *QueryService) IsLoaded() bool {

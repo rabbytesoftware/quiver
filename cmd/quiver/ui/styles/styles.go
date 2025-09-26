@@ -15,6 +15,7 @@ type Theme struct {
 	InfoStyle  lipgloss.Style
 	WarnStyle  lipgloss.Style
 	ErrorStyle lipgloss.Style
+	FatalStyle lipgloss.Style
 	
 	// UI components
 	ViewportStyle    lipgloss.Style
@@ -57,6 +58,9 @@ func NewDefaultTheme() Theme {
 		ErrorStyle: lipgloss.NewStyle().
 			Foreground(errorColor).
 			Bold(true),
+		FatalStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FF8C00")). // Orange
+			Bold(true),
 		
 		// UI component styles
 		ViewportStyle: lipgloss.NewStyle().
@@ -96,10 +100,12 @@ func (t Theme) GetLogLevelStyle(level string) lipgloss.Style {
 		return t.DebugStyle
 	case "info":
 		return t.InfoStyle
-	case "warn":
+	case "warn", "warning":
 		return t.WarnStyle
 	case "error":
 		return t.ErrorStyle
+	case "fatal":
+		return t.FatalStyle
 	default:
 		return t.InfoStyle
 	}
@@ -125,10 +131,12 @@ func (t Theme) FormatLogLineWithTime(text, level string, timestamp time.Time) st
 		levelColor = lipgloss.Color("#3B82F6") // Blue
 	case "info":
 		levelColor = lipgloss.Color("#10B981") // Green
-	case "warn":
+	case "warn", "warning":
 		levelColor = lipgloss.Color("#F59E0B") // Yellow/Amber
 	case "error":
 		levelColor = lipgloss.Color("#EF4444") // Red
+	case "fatal":
+		levelColor = lipgloss.Color("#FF8C00") // Orange (for Unforeseen/Fatal level)
 	default:
 		levelColor = lipgloss.Color("#10B981") // Default to green
 	}
