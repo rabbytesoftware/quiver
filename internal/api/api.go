@@ -8,19 +8,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 	v1 "github.com/rabbytesoftware/quiver/internal/api/v1"
+	"github.com/rabbytesoftware/quiver/internal/usecases"
 )
 
 type API struct {
 	router *gin.Engine
 	watcher *watcher.Watcher
+	usecases *usecases.Usecases
 }
 
 func NewAPI(
 	watcher *watcher.Watcher,
+	usecases *usecases.Usecases,
 ) *API {
 	return &API{
 		router: gin.Default(),
 		watcher: watcher,
+		usecases: usecases,
 	}
 }
 
@@ -44,5 +48,5 @@ func (a *API) SetupMiddleware() {
 }
 
 func (a *API) SetupRoutes() {
-	v1.SetupRoutes(a.router)
+	v1.SetupRoutes(a.router, a.usecases)
 }
