@@ -2,11 +2,11 @@ package packages
 
 import (
 	"github.com/google/uuid"
-	"github.com/rabbytesoftware/quiver/internal/models/domain/port"
-	"github.com/rabbytesoftware/quiver/internal/models/domain/requirement"
-	"github.com/rabbytesoftware/quiver/internal/models/domain/runtime"
-	"github.com/rabbytesoftware/quiver/internal/models/domain/system"
-	"github.com/rabbytesoftware/quiver/internal/models/domain/variable"
+	"github.com/rabbytesoftware/quiver/internal/models/port"
+	"github.com/rabbytesoftware/quiver/internal/models/requirement"
+	"github.com/rabbytesoftware/quiver/internal/models/runtime"
+	"github.com/rabbytesoftware/quiver/internal/models/system"
+	"github.com/rabbytesoftware/quiver/internal/models/variable"
 )
 
 type Package struct {

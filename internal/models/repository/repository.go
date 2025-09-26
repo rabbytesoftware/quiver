@@ -1,8 +1,8 @@
 package repository
 
 import (
-	"github.com/rabbytesoftware/quiver/internal/models/domain/packages"
-	"github.com/rabbytesoftware/quiver/internal/models/domain/system"
+	"github.com/rabbytesoftware/quiver/internal/models/packages"
+	"github.com/rabbytesoftware/quiver/internal/models/system"
 )
 
 type Repository struct {

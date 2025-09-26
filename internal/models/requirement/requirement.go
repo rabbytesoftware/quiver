@@ -1,7 +1,7 @@
 package requirement
 
 import (
-	system "github.com/rabbytesoftware/quiver/internal/models/domain/system"
+	system "github.com/rabbytesoftware/quiver/internal/models/system"
 )
 
 type Requirement struct {
