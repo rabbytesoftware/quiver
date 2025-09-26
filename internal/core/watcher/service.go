@@ -75,7 +75,7 @@ func initLogger(watcherConfig config.Watcher) *logrus.Logger {
 	}
 
 	logFile := filepath.Join(watcherConfig.Folder, "quiver.log")
-		
+	
 	logger.SetOutput(&lumberjack.Logger{
 		Filename:   logFile,
 		MaxSize:    watcherConfig.MaxSize,
