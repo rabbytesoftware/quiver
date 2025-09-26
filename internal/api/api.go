@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"io"
 
+	"github.com/rabbytesoftware/quiver/internal/api/middleware"
 	"github.com/rabbytesoftware/quiver/internal/core/config"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 
@@ -21,8 +23,23 @@ func NewAPI(
 	watcher *watcher.Watcher,
 	usecases *usecases.Usecases,
 ) *API {
+	gin.DefaultWriter = io.Discard
+	gin.DefaultErrorWriter = io.Discard
+	
+	watcherConfig := watcher.GetConfig()
+	if !watcherConfig.Enabled {
+		gin.SetMode(gin.ReleaseMode)
+	} else {
+		level := watcher.GetLevel()
+		if level <= 4 {
+			gin.SetMode(gin.DebugMode)
+		} else {
+			gin.SetMode(gin.ReleaseMode)
+		}
+	}
+	
 	return &API{
-		router: gin.Default(),
+		router: gin.New(),
 		watcher: watcher,
 		usecases: usecases,
 	}
@@ -44,7 +61,8 @@ func (a *API) Run() {
 }
 
 func (a *API) SetupMiddleware() {
-	a.router.Use(gin.Recovery())
+	a.router.Use(middleware.WatcherLogger(a.watcher))
+	a.router.Use(middleware.WatcherRecovery(a.watcher))
 }
 
 func (a *API) SetupRoutes() {
