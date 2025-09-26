@@ -17,22 +17,22 @@ func NewArrowsRepository(
 	}
 }
 
-func (a *ArrowsRepository) GetArrows() []domain.Arrow {
+func (a *ArrowsRepository) Get() []domain.Arrow {
 	return []domain.Arrow{}
 }
 
-func (a *ArrowsRepository) GetArrow(id string) *domain.Arrow {
+func (a *ArrowsRepository) GetById(id string) *domain.Arrow {
 	return nil
 }
 
-func (a *ArrowsRepository) CreateArrow(arrow *domain.Arrow) *domain.Arrow {
+func (a *ArrowsRepository) Create(arrow *domain.Arrow) *domain.Arrow {
 	return nil
 }
 
-func (a *ArrowsRepository) UpdateArrow(arrow *domain.Arrow) *domain.Arrow {
+func (a *ArrowsRepository) Update(arrow *domain.Arrow) *domain.Arrow {
 	return nil
 }
 
-func (a *ArrowsRepository) DeleteArrow(id string) error {
+func (a *ArrowsRepository) DeleteById(id string) error {
 	return nil
 }

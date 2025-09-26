@@ -1,11 +1,10 @@
 package arrows
 
-import domain "github.com/rabbytesoftware/quiver/internal/models/arrow"
+import (
+	domain "github.com/rabbytesoftware/quiver/internal/models/arrow"
+	"github.com/rabbytesoftware/quiver/internal/repositories/common"
+)
 
 type ArrowsInterface interface {
-	GetArrows() []domain.Arrow
-	GetArrow(id string) *domain.Arrow
-	CreateArrow(arrow *domain.Arrow) *domain.Arrow
-	UpdateArrow(arrow *domain.Arrow) *domain.Arrow
-	DeleteArrow(id string) error
+	common.CRUD[domain.Arrow]
 }

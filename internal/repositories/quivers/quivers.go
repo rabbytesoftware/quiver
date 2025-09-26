@@ -17,22 +17,22 @@ func NewQuiversRepository(
 	}
 }
 
-func (q *QuiversRepository) GetQuivers() []domain.Quiver {
+func (q *QuiversRepository) Get() []domain.Quiver {
 	return []domain.Quiver{}
 }
 
-func (q *QuiversRepository) GetQuiver(id string) *domain.Quiver {
+func (q *QuiversRepository) GetById(id string) *domain.Quiver {
 	return nil
 }
 
-func (q *QuiversRepository) CreateQuiver(quiver *domain.Quiver) *domain.Quiver {
+func (q *QuiversRepository) Create(quiver *domain.Quiver) *domain.Quiver {
 	return nil
 }
 
-func (q *QuiversRepository) UpdateQuiver(quiver *domain.Quiver) *domain.Quiver {
+func (q *QuiversRepository) Update(quiver *domain.Quiver) *domain.Quiver {
 	return nil
 }
 
-func (q *QuiversRepository) DeleteQuiver(id string) error {
+func (q *QuiversRepository) DeleteById(id string) error {
 	return nil
 }
