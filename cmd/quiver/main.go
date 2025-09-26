@@ -6,12 +6,14 @@ import (
 
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui"
 
+	"github.com/rabbytesoftware/quiver/internal/core"
 	"github.com/rabbytesoftware/quiver/internal/core/metadata"
-	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 )
 
 func main() {
-	watcher := watcher.NewWatcherService()
+	core := core.Init()
+	
+	watcher := core.GetWatcher()
 	
 	go func() {
 		time.Sleep(5 * time.Second)

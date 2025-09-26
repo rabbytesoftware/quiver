@@ -7,8 +7,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Watcher is an logging service, focus on an
-// event sourcing approach to logging.
+// ? Watcher is an logging service, focus on an
+// ? event sourcing approach to logging.
 
 type Watcher struct {
 	logger *logrus.Logger
