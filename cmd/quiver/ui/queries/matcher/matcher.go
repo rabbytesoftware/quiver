@@ -56,10 +56,10 @@ func (m *Matcher) matchQuery(query models.Query, parts []string, partIndex int, 
 		if m.isArgument(syntaxPart) {
 			argName := m.extractArgName(syntaxPart)
 			executeQuery.Variables[argName] = inputPart
-		}
-
-		if !strings.EqualFold(syntaxPart, inputPart) {
-			return nil, fmt.Errorf("invalid part index")
+		} else {
+			if !strings.EqualFold(syntaxPart, inputPart) {
+				return nil, fmt.Errorf("command part mismatch: expected '%s', got '%s'", syntaxPart, inputPart)
+			}
 		}
 	}
 

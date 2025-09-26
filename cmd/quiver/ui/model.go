@@ -19,6 +19,7 @@ import (
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/services"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/styles"
 
+	"github.com/rabbytesoftware/quiver/internal/core/config"
 	"github.com/rabbytesoftware/quiver/internal/core/metadata"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 )
@@ -67,7 +68,7 @@ type Model struct {
 func NewModel(w *watcher.Watcher) *Model {
 	watcherAdapter := services.NewWatcherAdapter(w)
 	
-	queryService := queries.NewService("http://localhost:8080")
+	queryService := queries.NewService(fmt.Sprintf("http://%s:%d", config.GetAPI().Host, config.GetAPI().Port))
 	
 	handler := handlers.NewHandler(watcherAdapter, queryService)
 	theme := styles.NewDefaultTheme()

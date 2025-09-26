@@ -73,6 +73,10 @@ func (s *QueryService) HandleCommand(ctx context.Context, input string) (string,
 	return response.String(), nil
 }
 
+func (s *QueryService) IsLoaded() bool {
+	return len(s.Queries) > 0
+}
+
 func (s *QueryService) GetAvailableCommands() []string {
 	return s.matcher.GetAvailableCommands()
 }
@@ -97,9 +101,11 @@ func (s *QueryService) GetHelpText() string {
 }
 
 func (q *QueryService) loadFromMemory() error {
-	if err := yaml.Unmarshal(queriesByte, &q.Queries); err != nil {
+	var config models.QueriesConfig
+	if err := yaml.Unmarshal(queriesByte, &config); err != nil {
 		return fmt.Errorf("failed to parse queries YAML: %w", err)
 	}
 
+	q.Queries = config.Queries
 	return nil
 }
