@@ -102,7 +102,9 @@ func (e HelpRequested) Type() EventType {
 
 // QueryExecuted event when a query command is executed
 type QueryExecuted struct {
-	DisplayText string
+	UserInput    string
+	HTTPStatus   int
+	ResponseBody string
 }
 
 func (e QueryExecuted) Type() EventType {

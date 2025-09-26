@@ -211,7 +211,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.showHelp(msg.Event.HelpText)
 		
 	case events.QueryExecutedMsg:
-		m.showQueryResult(msg.Event.DisplayText)
+		m.showQueryResult(msg.Event.UserInput, msg.Event.HTTPStatus, msg.Event.ResponseBody)
 		
 	case events.QueryErrorMsg:
 		m.showQueryError(msg.Event.UserInput, msg.Event.HTTPStatus, msg.Event.ResponseBody)
@@ -330,18 +330,30 @@ func (m *Model) showHelp(helpText string) {
 	m.updateViewportContent()
 }
 
-// showQueryResult displays query result text in the viewport
-func (m *Model) showQueryResult(resultText string) {
-	// Add query result as a special log entry
-	formattedResult := m.theme.FormatHelp(resultText)
-	lines := strings.Split(formattedResult, "\n")
+// showQueryResult displays query result with user input and API response in the viewport
+func (m *Model) showQueryResult(userInput string, httpStatus int, responseBody string) {
+	userInputLine := fmt.Sprintf("> %s", userInput)
 	
-	// Reverse lines to maintain newest-first order when prepending
-	for i := len(lines) - 1; i >= 0; i-- {
-		m.logLines = append([]string{lines[i]}, m.logLines...)
-		if len(m.logLines) > maxLogLines {
-			m.logLines = m.logLines[:maxLogLines]
-		}
+	apiResponseLine := fmt.Sprintf("[ %d ] %s", httpStatus, responseBody)
+	
+	// Apply success styling (green color) for successful responses
+	successStyle := lipgloss.NewStyle().
+		Foreground(m.theme.SuccessColor).
+		Bold(true)
+	
+	formattedUserInput := successStyle.Render(userInputLine)
+	formattedApiResponse := successStyle.Render(apiResponseLine)
+	
+	// Add both lines to the viewport in reverse order since we prepend to maintain newest-first display
+	// We want: command first, then response, so we add response first, then command
+	m.logLines = append([]string{formattedApiResponse}, m.logLines...)
+	if len(m.logLines) > maxLogLines {
+		m.logLines = m.logLines[:maxLogLines]
+	}
+	
+	m.logLines = append([]string{formattedUserInput}, m.logLines...)
+	if len(m.logLines) > maxLogLines {
+		m.logLines = m.logLines[:maxLogLines]
 	}
 	
 	m.updateViewportContent()
@@ -361,6 +373,8 @@ func (m *Model) showQueryError(userInput string, httpStatus int, responseBody st
 	formattedUserInput := errorStyle.Render(userInputLine)
 	formattedApiResponse := errorStyle.Render(apiResponseLine)
 	
+	// Add both lines to the viewport in reverse order since we prepend to maintain newest-first display
+	// We want: command first, then response, so we add response first, then command
 	m.logLines = append([]string{formattedApiResponse}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
 		m.logLines = m.logLines[:maxLogLines]
