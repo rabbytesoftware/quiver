@@ -40,12 +40,14 @@ func Parse(input string) (Command, error) {
 	case "clear", "c":
 		kind = CmdClear
 	default:
-		return Command{}, NewCommandError("unknown command", commandStr)
+		// If it's not a base TUI command, treat it as a query command
+		kind = CmdQuery
 	}
 	
 	cmd := Command{
-		Kind: kind,
-		Args: args,
+		Kind:          kind,
+		Args:          args,
+		OriginalInput: input,
 	}
 	
 	// Validate the command

@@ -15,6 +15,7 @@ import (
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/commands"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/events"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/handlers"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/queries"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/services"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/styles"
 
@@ -49,6 +50,7 @@ type Model struct {
 	// Services and handlers
 	watcher        *watcher.Watcher
 	watcherAdapter *services.WatcherAdapter
+	queryService   *queries.QueryService
 	handler        *handlers.Handler
 	theme          styles.Theme
 	
@@ -63,22 +65,21 @@ type Model struct {
 
 // NewModel creates a new TUI model with the provided watcher
 func NewModel(w *watcher.Watcher) *Model {
-	// Create services
 	watcherAdapter := services.NewWatcherAdapter(w)
-	handler := handlers.NewHandler(watcherAdapter)
+	
+	queryService := queries.NewService("http://localhost:8080")
+	
+	handler := handlers.NewHandler(watcherAdapter, queryService)
 	theme := styles.NewDefaultTheme()
 	
-	// Create context
 	ctx, cancel := context.WithCancel(context.Background())
 	
-	// Initialize text input
 	ti := textinput.New()
 	ti.Placeholder = "Enter a command (e.g., help)"
 	ti.Focus()
 	ti.CharLimit = 256
 	ti.Width = 50
 	
-	// Initialize viewport
 	vp := viewport.New(80, 20)
 	vp.SetContent("")
 	
@@ -90,6 +91,7 @@ func NewModel(w *watcher.Watcher) *Model {
 		theme:             theme,
 		watcher:           w,
 		watcherAdapter:    watcherAdapter,
+		queryService:      queryService,
 		handler:           handler,
 		ctx:               ctx,
 		cancel:            cancel,
@@ -207,6 +209,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case events.HelpRequestedMsg:
 		m.showHelp(msg.Event.HelpText)
 		
+	case events.QueryExecutedMsg:
+		m.showQueryResult(msg.Event.DisplayText)
+		
 	case statusTickMsg:
 		// Clear expired status messages
 		if time.Now().After(m.statusExpiry) {
@@ -309,6 +314,23 @@ func (m *Model) showHelp(helpText string) {
 	// Add help text as a special log entry
 	formattedHelp := m.theme.FormatHelp(helpText)
 	lines := strings.Split(formattedHelp, "\n")
+	
+	// Reverse lines to maintain newest-first order when prepending
+	for i := len(lines) - 1; i >= 0; i-- {
+		m.logLines = append([]string{lines[i]}, m.logLines...)
+		if len(m.logLines) > maxLogLines {
+			m.logLines = m.logLines[:maxLogLines]
+		}
+	}
+	
+	m.updateViewportContent()
+}
+
+// showQueryResult displays query result text in the viewport
+func (m *Model) showQueryResult(resultText string) {
+	// Add query result as a special log entry
+	formattedResult := m.theme.FormatHelp(resultText)
+	lines := strings.Split(formattedResult, "\n")
 	
 	// Reverse lines to maintain newest-first order when prepending
 	for i := len(lines) - 1; i >= 0; i-- {

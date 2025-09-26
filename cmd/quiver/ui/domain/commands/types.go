@@ -15,12 +15,15 @@ const (
 	CmdPause  CommandKind = "pause"
 	CmdResume CommandKind = "resume"
 	CmdClear  CommandKind = "clear"
+	CmdQuery  CommandKind = "query" // For query system commands
 )
 
 // Command represents a parsed command with its arguments
 type Command struct {
 	Kind CommandKind
 	Args []string
+	// OriginalInput stores the original input for query commands
+	OriginalInput string
 }
 
 // CommandError represents an error that occurred during command parsing or execution
@@ -57,7 +60,7 @@ func (ck CommandKind) String() string {
 // IsValid checks if a CommandKind is valid
 func (ck CommandKind) IsValid() bool {
 	switch ck {
-	case CmdHelp, CmdFilter, CmdLevel, CmdPause, CmdResume, CmdClear:
+	case CmdHelp, CmdFilter, CmdLevel, CmdPause, CmdResume, CmdClear, CmdQuery:
 		return true
 	default:
 		return false
@@ -85,6 +88,8 @@ func (c Command) Validate() error {
 		}
 	case CmdHelp, CmdPause, CmdResume, CmdClear:
 		// These commands don't require arguments
+	case CmdQuery:
+		// Query commands are validated by the queries system
 	}
 
 	return nil

@@ -1,22 +1,26 @@
 package handlers
 
 import (
+	"context"
 	"strings"
 
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/commands"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/domain/events"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/queries"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/services"
 )
 
 // Handler handles commands and returns events
 type Handler struct {
 	watcherAdapter *services.WatcherAdapter
+	queryService   *queries.QueryService
 }
 
 // NewHandler creates a new command handler
-func NewHandler(watcherAdapter *services.WatcherAdapter) *Handler {
+func NewHandler(watcherAdapter *services.WatcherAdapter, queryService *queries.QueryService) *Handler {
 	return &Handler{
 		watcherAdapter: watcherAdapter,
+		queryService:   queryService,
 	}
 }
 
@@ -35,6 +39,8 @@ func (h *Handler) Handle(cmd commands.Command) []events.Event {
 		return h.handleResume()
 	case commands.CmdClear:
 		return h.handleClear()
+	case commands.CmdQuery:
+		return h.handleQuery(cmd.OriginalInput)
 	default:
 		return []events.Event{
 			events.CommandError{
@@ -44,19 +50,28 @@ func (h *Handler) Handle(cmd commands.Command) []events.Event {
 	}
 }
 
-// handleHelp handles the help command
 func (h *Handler) handleHelp() []events.Event {
+	baseHelp := commands.GetHelpText()
+	
+	if h.queryService != nil {
+		queryHelp := h.queryService.GetHelpText()
+		helpText := baseHelp + "\n\n" + queryHelp
+		return []events.Event{
+			events.HelpRequested{
+				HelpText: helpText,
+			},
+		}
+	}
+	
 	return []events.Event{
 		events.HelpRequested{
-			HelpText: commands.GetHelpText(),
+			HelpText: baseHelp,
 		},
 	}
 }
 
-// handleFilter handles the filter command
 func (h *Handler) handleFilter(args []string) []events.Event {
 	if len(args) == 0 {
-		// Clear filter
 		if err := h.watcherAdapter.SetFilter(""); err != nil {
 			return []events.Event{
 				events.CommandError{
@@ -71,7 +86,6 @@ func (h *Handler) handleFilter(args []string) []events.Event {
 		}
 	}
 
-	// Apply filter
 	pattern := strings.Join(args, " ")
 	if err := h.watcherAdapter.SetFilter(pattern); err != nil {
 		return []events.Event{
@@ -88,7 +102,6 @@ func (h *Handler) handleFilter(args []string) []events.Event {
 	}
 }
 
-// handleLevel handles the level command
 func (h *Handler) handleLevel(args []string) []events.Event {
 	if len(args) != 1 {
 		return []events.Event{
@@ -146,9 +159,34 @@ func (h *Handler) handleResume() []events.Event {
 	}
 }
 
-// handleClear handles the clear command
 func (h *Handler) handleClear() []events.Event {
 	return []events.Event{
 		events.Cleared{},
+	}
+}
+
+func (h *Handler) handleQuery(input string) []events.Event {
+	if h.queryService == nil {
+		return []events.Event{
+			events.CommandError{
+				Message: "queries system not loaded or available",
+			},
+		}
+	}
+
+	ctx := context.Background()
+	result, err := h.queryService.HandleCommand(ctx, input)
+	if err != nil {
+		return []events.Event{
+			events.CommandError{
+				Message: "query execution error: " + err.Error(),
+			},
+		}
+	}
+
+	return []events.Event{
+		events.QueryExecuted{
+			DisplayText: result,
+		},
 	}
 }

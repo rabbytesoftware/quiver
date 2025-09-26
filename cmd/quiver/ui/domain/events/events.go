@@ -23,6 +23,7 @@ const (
 	EventCleared         EventType = "cleared"
 	EventCommandError    EventType = "command_error"
 	EventHelpRequested   EventType = "help_requested"
+	EventQueryExecuted   EventType = "query_executed"
 )
 
 // LogLine represents a single log line with metadata
@@ -98,6 +99,15 @@ func (e HelpRequested) Type() EventType {
 	return EventHelpRequested
 }
 
+// QueryExecuted event when a query command is executed
+type QueryExecuted struct {
+	DisplayText string
+}
+
+func (e QueryExecuted) Type() EventType {
+	return EventQueryExecuted
+}
+
 // Bubble Tea message types
 // These wrap domain events for the Bubble Tea message system
 
@@ -141,6 +151,11 @@ type HelpRequestedMsg struct {
 	Event HelpRequested
 }
 
+// QueryExecutedMsg wraps QueryExecuted for Bubble Tea
+type QueryExecutedMsg struct {
+	Event QueryExecuted
+}
+
 // ToTeaMsg converts a domain event to a Bubble Tea message
 func ToTeaMsg(event Event) tea.Msg {
 	switch e := event.(type) {
@@ -160,6 +175,8 @@ func ToTeaMsg(event Event) tea.Msg {
 		return CommandErrorMsg{Event: e}
 	case HelpRequested:
 		return HelpRequestedMsg{Event: e}
+	case QueryExecuted:
+		return QueryExecutedMsg{Event: e}
 	default:
 		return nil
 	}
