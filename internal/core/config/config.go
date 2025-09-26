@@ -26,7 +26,6 @@ type Arrows struct {
 }
 
 type API struct {
-	Enabled bool   `yaml:"enabled"`
 	Host    string `yaml:"host"`
 	Port    int    `yaml:"port"`
 }
@@ -129,7 +128,6 @@ func getDefaultConfig() *Config {
 				InstallDir: "./arrows",
 			},
 			API: API{
-				Enabled: true,
 				Host:    "0.0.0.0",
 				Port:    40257,
 			},

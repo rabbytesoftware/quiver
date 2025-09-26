@@ -5,16 +5,17 @@ import (
 	"time"
 
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui"
+	"github.com/rabbytesoftware/quiver/internal"
 
-	"github.com/rabbytesoftware/quiver/internal/core"
 	"github.com/rabbytesoftware/quiver/internal/core/metadata"
 )
 
 func main() {
-	core := core.Init()
-	
-	watcher := core.GetWatcher()
-	
+	internal := internal.NewInternal()
+	watcher := internal.GetCore().GetWatcher()
+
+	go internal.Run()
+
 	go func() {
 		time.Sleep(5 * time.Second)
 	
