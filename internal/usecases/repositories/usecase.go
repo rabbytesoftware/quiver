@@ -4,14 +4,14 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/infrastructure"
 )
 
-type RepositoryUsecase struct {
+type RepositoriesUsecase struct {
 	infrastructure *infrastructure.Infrastructure
 }
 
-func NewRepositoryUsecase(
+func NewRepositoriesUsecase(
 	infrastructure *infrastructure.Infrastructure,
-) *RepositoryUsecase {
-	return &RepositoryUsecase{
+) *RepositoriesUsecase {
+	return &RepositoriesUsecase{
 		infrastructure: infrastructure,
 	}
 }

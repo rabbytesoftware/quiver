@@ -4,15 +4,15 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	usecase "github.com/rabbytesoftware/quiver/internal/usecases/repository"
+	usecase "github.com/rabbytesoftware/quiver/internal/usecases/repositories"
 )
 
 type HealthHandler struct {
-	usecases *usecase.RepositoryUsecase
+	usecases *usecase.RepositoriesUsecase
 }
 
 func NewHealthHandler(
-	usecases *usecase.RepositoryUsecase,
+	usecases *usecase.RepositoriesUsecase,
 ) *HealthHandler {
 	return &HealthHandler{
 		usecases: usecases,

@@ -1,26 +1,27 @@
 package usecases
 
 import (
-	"github.com/rabbytesoftware/quiver/internal/infrastructure"
+	"github.com/rabbytesoftware/quiver/internal/respositories"
 	"github.com/rabbytesoftware/quiver/internal/usecases/packages"
-	"github.com/rabbytesoftware/quiver/internal/usecases/repository"
+	repositories "github.com/rabbytesoftware/quiver/internal/usecases/repositories"
+	repository "github.com/rabbytesoftware/quiver/internal/usecases/repositories"
 	"github.com/rabbytesoftware/quiver/internal/usecases/system"
 )
 
 type Usecases struct {
-	infrastructure *infrastructure.Infrastructure
 	Packages *packages.PackagesUsecase
-	Repository *repository.RepositoryUsecase
+	Repositories *repositories.RepositoriesUsecase
 	System *system.SystemUsecase
 }
 
 func NewUsecases(
-	infrastructure *infrastructure.Infrastructure,
+	repositories *respositories.Repositories,
+	system *respositories.System,
+	packages *respositories.Packages,
 ) *Usecases {
 	return &Usecases{
-		infrastructure: infrastructure,
-		Packages: packages.NewPackagesUsecase(infrastructure),
-		Repository: repository.NewRepositoryUsecase(infrastructure),
-		System: system.NewSystemUsecase(infrastructure),
+		Packages: packages.NewPackagesUsecase(repositories),
+		Repository: repository.NewRepositoriesUsecase(repositories),
+		System: system.NewSystemUsecase(repositories),
 	}
 }
