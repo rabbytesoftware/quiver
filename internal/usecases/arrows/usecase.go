@@ -1,15 +1,15 @@
-package system
+package arrows
 
 import "github.com/rabbytesoftware/quiver/internal/repositories"
 
-type SystemUsecase struct {
+type ArrowsUsecase struct {
 	repositories *repositories.Repositories
 }
 
-func NewSystemUsecase(
+func NewArrowsUsecase(
 	repositories *repositories.Repositories,
-) *SystemUsecase {
-	return &SystemUsecase{
+) *ArrowsUsecase {
+	return &ArrowsUsecase{
 		repositories: repositories,
 	}
 }

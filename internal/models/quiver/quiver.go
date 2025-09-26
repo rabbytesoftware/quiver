@@ -1,11 +1,11 @@
-package repository
+package quiver
 
 import (
-	"github.com/rabbytesoftware/quiver/internal/models/packages"
+	"github.com/rabbytesoftware/quiver/internal/models/arrows"
 	"github.com/rabbytesoftware/quiver/internal/models/system"
 )
 
-type Repository struct {
+type Quiver struct {
 	ID string `json:"id"`
 	Name string `json:"name"`
 	Description string `json:"description"`
@@ -14,6 +14,6 @@ type Repository struct {
 	Security system.Security `json:"security"`
 	Maintainers []string `json:"maintainers"`
 	Version string `json:"version"`
-	InstalledPackages []packages.Package `json:"installed_packages"`
-	ListedPackages []packages.PackageNamespace `json:"listed_packages"`
+	InstalledArrows []arrows.Arrow `json:"installed_arrows"`
+	ListedArrows []arrows.ArrowNamespace `json:"listed_arrows"`
 }

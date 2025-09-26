@@ -1,15 +1,15 @@
-package system
+package quivers
 
 import "github.com/rabbytesoftware/quiver/internal/repositories"
 
-type SystemUsecase struct {
+type QuiversUsecase struct {
 	repositories *repositories.Repositories
 }
 
-func NewSystemUsecase(
+func NewQuiversUsecase(
 	repositories *repositories.Repositories,
-) *SystemUsecase {
-	return &SystemUsecase{
+) *QuiversUsecase {
+	return &QuiversUsecase{
 		repositories: repositories,
 	}
 }

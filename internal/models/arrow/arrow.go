@@ -1,4 +1,4 @@
-package packages
+package arrow
 
 import (
 	"github.com/google/uuid"
@@ -9,9 +9,9 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/models/variable"
 )
 
-type Package struct {
+type Arrow struct {
 	ID uuid.UUID `json:"id"`
-	Namespace PackageNamespace `json:"namespace"`
+	Namespace ArrowNamespace `json:"namespace"`
 	ArrowVersion []string `json:"arrow_version"`
 	Name string `json:"name"`
 	Description string `json:"description"`
@@ -23,7 +23,7 @@ type Package struct {
 	Documentation string `json:"documentation"`
 
 	Requirements requirement.Requirement `json:"requirements"`
-	Dependencies []PackageNamespace `json:"dependencies"`
+	Dependencies []ArrowNamespace `json:"dependencies"`
 
 	Netbridge []port.PortRule `json:"netbridge"`
 	Variables []variable.Variable `json:"variables"`

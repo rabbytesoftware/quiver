@@ -4,6 +4,7 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/api"
 	"github.com/rabbytesoftware/quiver/internal/core"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure"
+	"github.com/rabbytesoftware/quiver/internal/repositories"
 	"github.com/rabbytesoftware/quiver/internal/usecases"
 )
 
@@ -18,19 +19,22 @@ type Internal struct {
 	core *core.Core
 	api *api.API
 	infrastructure *infrastructure.Infrastructure
+	repositories *repositories.Repositories
 	usecases *usecases.Usecases
 }
 
 func NewInternal() *Internal {
 	core := core.Init()
 	infrastructure := infrastructure.NewInfrastructure()
-	usecases := usecases.NewUsecases(infrastructure)
+	repositories := repositories.NewRepositories(infrastructure)
+	usecases := usecases.NewUsecases(repositories)
 	api := api.NewAPI(core.GetWatcher(), usecases)
 
 	return &Internal{
 		api: api,
 		core: core,
 		infrastructure: infrastructure,
+		repositories: repositories,
 		usecases: usecases,
 	}
 }
