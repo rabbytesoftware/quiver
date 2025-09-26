@@ -1,19 +1,30 @@
-version: 25.9.0
+# ? Metadata is a collection of variables that 
+# ? are used throughout the project for:
+# ?  - Describe things
+# ?  - Set defaults variables (config relative paths, etc)
+# ?  - Versioning, credits, maintainers, etc
 
-name: Quiver
-description: The future of wizards and package managers.
-author: Rabbyte Software
-url: https://quiver.ar
-license: GPL-3.0
-copyright: Copyright 2025 Rabbyte Software & char2cs.net
+version:
+  number: 25.9.0
+  codename: "Freeman"
 
-maintainers:
-  - name: Mateo Urrutia
-    email: me@char2cs.net
-    url: https://char2cs.net
-  - name: Agustin Gil
-    email:
-    url: https://github.com/AgustinGil21
-  - name: Luca Lombardo
-    email:
-    url: https://github.com/Lucacux
+metadata: 
+  name: Quiver
+  description: The future of wizards and package managers.
+  author: Rabbyte Software
+  url: https://quiver.ar
+  license: GPL-3.0
+  copyright: Copyright 2025 Rabbyte Software & char2cs.net
+  maintainers:
+    - name: Mateo Urrutia
+      email: me@char2cs.net
+      url: https://char2cs.net
+    - name: Agustin Gil
+      email:
+      url: https://github.com/AgustinGil21
+    - name: Luca Lombardo
+      email:
+      url: https://github.com/Lucacux
+
+variables:
+  DEFAULT_CONFIG_PATH: ./config.yaml

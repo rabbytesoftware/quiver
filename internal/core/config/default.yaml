@@ -1,0 +1,30 @@
+# ? The default config are an collection of variables that
+# ? can be changed by the user on runtime, but these remain
+# ? as defaults when its either no present or empty.
+
+config:
+  netbridge:
+    enabled: true
+    allowed_ports: "40128-40256"
+
+  arrows:
+    repositories:
+      - ./pkgs
+      - https://raw.githubusercontent.com/rabbytesoftware/quiver.arrows/main
+    install_dir: ./arrows
+
+  api:
+    enabled: true
+    host: 0.0.0.0
+    port: 40257
+
+  database:
+    path: ./.db
+
+  watcher:
+    enabled: true
+    level: info
+    folder: ./logs
+    max_size: 100
+    max_age: 7
+    compress: true

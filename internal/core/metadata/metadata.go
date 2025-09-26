@@ -12,14 +12,18 @@ var (
 	metadata *Metadata
 )
 
+type Version struct {
+	Number   string `yaml:"number"`
+	Codename string `yaml:"codename"`
+}
+
 type Maintainer struct {
 	Name  string `yaml:"name"`
 	Email string `yaml:"email"`
 	URL   string `yaml:"url"`
 }
 
-type Metadata struct {
-	Version     string       `yaml:"version"`
+type MetadataInfo struct {
 	Name        string       `yaml:"name"`
 	Description string       `yaml:"description"`
 	Author      string       `yaml:"author"`
@@ -27,6 +31,16 @@ type Metadata struct {
 	License     string       `yaml:"license"`
 	Copyright   string       `yaml:"copyright"`
 	Maintainers []Maintainer `yaml:"maintainers"`
+}
+
+type Variables struct {
+	DefaultConfigPath string `yaml:"DEFAULT_CONFIG_PATH"`
+}
+
+type Metadata struct {
+	Version   Version     `yaml:"version"`
+	Metadata  MetadataInfo `yaml:"metadata"`
+	Variables Variables   `yaml:"variables"`
 }
 
 func Get() (*Metadata) {
@@ -37,9 +51,63 @@ func Get() (*Metadata) {
 	metadata = &Metadata{}
 	err := yaml.Unmarshal(metadataByte, metadata)
 	if err != nil {
-		// Fallback to default metadata
-		metadata = &Metadata{
-			Version:     "25.9.0",
+		metadata = defaultMetadata()
+	}
+
+	return metadata
+}
+
+func GetVersion() string {
+	return Get().Version.Number
+}
+
+func GetVersionCodename() string {
+	return Get().Version.Codename
+}
+
+func GetName() string {
+	return Get().Metadata.Name
+}
+
+func GetDescription() string {
+	return Get().Metadata.Description
+}
+
+func GetAuthor() string {
+	return Get().Metadata.Author
+}
+
+func GetURL() string {
+	return Get().Metadata.URL
+}
+
+func GetLicense() string {
+	return Get().Metadata.License
+}
+
+func GetCopyright() string {
+	return Get().Metadata.Copyright
+}
+
+func GetMaintainers() []Maintainer {
+	return Get().Metadata.Maintainers
+}
+
+func GetVariables() Variables {
+	return Get().Variables
+}
+
+func GetDefaultConfigPath() string {
+	return Get().Variables.DefaultConfigPath
+}
+
+func defaultMetadata() *Metadata {
+	return &Metadata{
+		Version: Version{
+			Number:   "25.9.0",
+			Codename: "Freeman",
+		},
+		Metadata: MetadataInfo{
 			Name:        "Quiver",
 			Description: "The future of wizards and package managers.",
 			Author:      "Rabbyte Software",
@@ -53,40 +121,9 @@ func Get() (*Metadata) {
 					URL:   "https://char2cs.net",
 				},
 			},
-		}
+		},
+		Variables: Variables{
+			DefaultConfigPath: "./config.yaml",
+		},
 	}
-
-	return metadata
-}
-
-func GetVersion() (string) {
-	return Get().Version
-}
-
-func GetName() (string) {
-	return Get().Name
-}
-
-func GetDescription() (string) {
-	return Get().Description
-}
-
-func GetAuthor() (string) {
-	return Get().Author
-}
-
-func GetURL() (string) {
-	return Get().URL
-}
-
-func GetLicense() (string) {
-	return Get().License
-}
-
-func GetCopyright() (string) {
-	return Get().Copyright
-}
-
-func GetMaintainers() ([]Maintainer) {
-	return Get().Maintainers
 }
