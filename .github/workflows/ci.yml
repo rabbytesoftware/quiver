@@ -1,4 +1,4 @@
-name: Comprehensive PR CI Pipeline
+name: CI
 
 on:
   pull_request:
@@ -78,7 +78,7 @@ jobs:
               ;;
           esac
           
-          echo "✅ Branch validation passed: $SOURCE_BRANCH → $TARGET_BRANCH"
+          echo "✅ Quiver loves your PR: $SOURCE_BRANCH → $TARGET_BRANCH"
         }
         
         validate_branch
