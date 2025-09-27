@@ -8,17 +8,17 @@ import (
 )
 
 type Usecases struct {
-	Arrows *arrows.ArrowsUsecase
+	Arrows  *arrows.ArrowsUsecase
 	Quivers *quivers.QuiversUsecase
-	System *system.SystemUsecase
+	System  *system.SystemUsecase
 }
 
 func NewUsecases(
 	repositories *repositories.Repositories,
 ) *Usecases {
 	return &Usecases{
-		Arrows: arrows.NewArrowsUsecase(repositories),
+		Arrows:  arrows.NewArrowsUsecase(repositories),
 		Quivers: quivers.NewQuiversUsecase(repositories),
-		System: system.NewSystemUsecase(repositories),
+		System:  system.NewSystemUsecase(repositories),
 	}
 }

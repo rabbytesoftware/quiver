@@ -3,9 +3,9 @@ package port
 type ForwardingStatus string
 
 const (
-	ForwardingStatusEnabled ForwardingStatus = "enabled"
+	ForwardingStatusEnabled  ForwardingStatus = "enabled"
 	ForwardingStatusDisabled ForwardingStatus = "disabled"
-	ForwardingStatusError ForwardingStatus = "error"
+	ForwardingStatusError    ForwardingStatus = "error"
 )
 
 func (f ForwardingStatus) String() string {

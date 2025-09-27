@@ -33,32 +33,32 @@ type Model struct {
 	// UI components
 	viewport  viewport.Model
 	textInput textinput.Model
-	
+
 	// Application state
-	logLines       []string
-	autoScroll     bool
-	status         string
-	statusExpiry   time.Time
-	ready          bool
-	quitting       bool
-	
+	logLines     []string
+	autoScroll   bool
+	status       string
+	statusExpiry time.Time
+	ready        bool
+	quitting     bool
+
 	// Command history
 	commandHistory    []string
 	historyIndex      int
 	currentInput      string
 	navigatingHistory bool
-	
+
 	// Services and handlers
 	watcher        *watcher.Watcher
 	watcherAdapter *services.WatcherAdapter
 	queryService   *queries.QueryService
 	handler        *handlers.Handler
 	theme          styles.Theme
-	
+
 	// Context and cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
-	
+
 	// Dimensions
 	width  int
 	height int
@@ -67,23 +67,23 @@ type Model struct {
 // NewModel creates a new TUI model with the provided watcher
 func NewModel(w *watcher.Watcher) *Model {
 	watcherAdapter := services.NewWatcherAdapter(w)
-	
+
 	queryService := queries.NewService(fmt.Sprintf("http://%s:%d", config.GetAPI().Host, config.GetAPI().Port))
-	
+
 	handler := handlers.NewHandler(watcherAdapter, queryService)
 	theme := styles.NewDefaultTheme()
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	ti := textinput.New()
 	ti.Placeholder = "Enter a command (e.g., help)"
 	ti.Focus()
 	ti.CharLimit = 256
 	ti.Width = 50
-	
+
 	vp := viewport.New(80, 20)
 	vp.SetContent("")
-	
+
 	model := &Model{
 		viewport:          vp,
 		textInput:         ti,
@@ -101,10 +101,10 @@ func NewModel(w *watcher.Watcher) *Model {
 		currentInput:      "",
 		navigatingHistory: false,
 	}
-	
+
 	// Subscribe to watcher for log messages
 	model.subscribeToWatcher()
-	
+
 	return model
 }
 
@@ -122,38 +122,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd  tea.Cmd
 		cmds []tea.Cmd
 	)
-	
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		
+
 		// Update viewport size (leave space for input and status)
 		viewportHeight := msg.Height - 3 // 1 for input, 1 for status, 1 for border
-		m.viewport.Width = msg.Width - 2  // Account for border
+		m.viewport.Width = msg.Width - 2 // Account for border
 		m.viewport.Height = viewportHeight
-		
+
 		// Update text input width
 		m.textInput.Width = msg.Width - 4 // Account for prompt "> "
-		
+
 		if !m.ready {
 			m.ready = true
 		}
-		
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			m.quitting = true
 			m.cancel()
 			return m, tea.Quit
-			
+
 		case "enter":
 			return m.handleCommand()
-			
+
 		case "esc":
 			m.textInput.SetValue("")
 			m.resetHistoryNavigation()
-			
+
 		case "up":
 			// If text input is focused, navigate command history
 			if m.textInput.Focused() {
@@ -163,7 +163,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
 			m.autoScroll = m.viewport.AtTop()
-			
+
 		case "down":
 			// If text input is focused, navigate command history
 			if m.textInput.Focused() {
@@ -173,49 +173,49 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
 			m.autoScroll = m.viewport.AtTop()
-			
+
 		case "pgup", "pgdown":
 			// Handle viewport scrolling
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
 			m.autoScroll = m.viewport.AtTop()
 		}
-		
+
 	case events.LogLineReceivedMsg:
 		m.addLogLine(msg.Event.LogLine)
-		
+
 	case events.FilterAppliedMsg:
 		if msg.Event.Pattern == "" {
 			m.setStatus("Filter cleared", 3*time.Second)
 		} else {
 			m.setStatus(fmt.Sprintf("Filter applied: %s", msg.Event.Pattern), 3*time.Second)
 		}
-		
+
 	case events.LevelChangedMsg:
 		m.setStatus(fmt.Sprintf("Log level set to: %s", msg.Event.Level), 3*time.Second)
-		
+
 	case events.StreamPausedMsg:
 		m.setStatus("Log streaming paused", 3*time.Second)
-		
+
 	case events.StreamResumedMsg:
 		m.setStatus("Log streaming resumed", 3*time.Second)
-		
+
 	case events.ClearedMsg:
 		m.clearLogs()
 		m.setStatus("Viewport cleared", 2*time.Second)
-		
+
 	case events.CommandErrorMsg:
 		m.setStatus(m.theme.FormatError(msg.Event.Message), 5*time.Second)
-		
+
 	case events.HelpRequestedMsg:
 		m.showHelp(msg.Event.HelpText)
-		
+
 	case events.QueryExecutedMsg:
 		m.showQueryResult(msg.Event.UserInput, msg.Event.HTTPStatus, msg.Event.ResponseBody)
-		
+
 	case events.QueryErrorMsg:
 		m.showQueryError(msg.Event.UserInput, msg.Event.HTTPStatus, msg.Event.ResponseBody)
-		
+
 	case statusTickMsg:
 		// Clear expired status messages
 		if time.Now().After(m.statusExpiry) {
@@ -223,11 +223,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.tickStatus()
 	}
-	
+
 	// Update text input
 	m.textInput, cmd = m.textInput.Update(msg)
 	cmds = append(cmds, cmd)
-	
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -236,11 +236,11 @@ func (m *Model) handleCommand() (tea.Model, tea.Cmd) {
 	input := strings.TrimSpace(m.textInput.Value())
 	m.textInput.SetValue("")
 	m.resetHistoryNavigation()
-	
+
 	if input == "" {
 		return m, nil
 	}
-	
+
 	// Add to command history (avoid duplicates)
 	if len(m.commandHistory) == 0 || m.commandHistory[len(m.commandHistory)-1] != input {
 		m.commandHistory = append(m.commandHistory, input)
@@ -249,24 +249,24 @@ func (m *Model) handleCommand() (tea.Model, tea.Cmd) {
 			m.commandHistory = m.commandHistory[1:]
 		}
 	}
-	
+
 	// Handle quit command
 	if input == "quit" || input == "q" || input == "exit" {
 		m.quitting = true
 		m.cancel()
 		return m, tea.Quit
 	}
-	
+
 	// Parse command
 	cmd, err := commands.Parse(input)
 	if err != nil {
 		m.setStatus(m.theme.FormatError(err.Error()), 5*time.Second)
 		return m, nil
 	}
-	
+
 	// Handle command
 	resultEvents := m.handler.Handle(cmd)
-	
+
 	// Convert events to tea messages and send them
 	var cmds []tea.Cmd
 	for _, event := range resultEvents {
@@ -276,7 +276,7 @@ func (m *Model) handleCommand() (tea.Model, tea.Cmd) {
 			}(teaMsg))
 		}
 	}
-	
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -284,13 +284,13 @@ func (m *Model) handleCommand() (tea.Model, tea.Cmd) {
 func (m *Model) addLogLine(logLine events.LogLine) {
 	// Format the log line with timestamp and gray styling
 	formattedLine := m.theme.FormatLogLineWithTime(logLine.Text, logLine.Level, logLine.Time)
-	
+
 	// Add to the beginning of the slice for newest-first display
 	m.logLines = append([]string{formattedLine}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
 		m.logLines = m.logLines[:maxLogLines]
 	}
-	
+
 	// Update viewport content
 	m.updateViewportContent()
 }
@@ -299,7 +299,7 @@ func (m *Model) addLogLine(logLine events.LogLine) {
 func (m *Model) updateViewportContent() {
 	content := strings.Join(m.logLines, "\n")
 	m.viewport.SetContent(content)
-	
+
 	// Auto-scroll to top for newest messages if enabled
 	if m.autoScroll {
 		m.viewport.GotoTop()
@@ -318,7 +318,7 @@ func (m *Model) showHelp(helpText string) {
 	// Add help text as a special log entry
 	formattedHelp := m.theme.FormatHelp(helpText)
 	lines := strings.Split(formattedHelp, "\n")
-	
+
 	// Reverse lines to maintain newest-first order when prepending
 	for i := len(lines) - 1; i >= 0; i-- {
 		m.logLines = append([]string{lines[i]}, m.logLines...)
@@ -326,65 +326,65 @@ func (m *Model) showHelp(helpText string) {
 			m.logLines = m.logLines[:maxLogLines]
 		}
 	}
-	
+
 	m.updateViewportContent()
 }
 
 // showQueryResult displays query result with user input and API response in the viewport
 func (m *Model) showQueryResult(userInput string, httpStatus int, responseBody string) {
 	userInputLine := fmt.Sprintf("> %s", userInput)
-	
+
 	apiResponseLine := fmt.Sprintf("[ %d ] %s", httpStatus, responseBody)
-	
+
 	// Apply success styling (green color) for successful responses
 	successStyle := lipgloss.NewStyle().
 		Foreground(m.theme.SuccessColor).
 		Bold(true)
-	
+
 	formattedUserInput := successStyle.Render(userInputLine)
 	formattedApiResponse := successStyle.Render(apiResponseLine)
-	
+
 	// Add both lines to the viewport in reverse order since we prepend to maintain newest-first display
 	// We want: command first, then response, so we add response first, then command
 	m.logLines = append([]string{formattedApiResponse}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
 		m.logLines = m.logLines[:maxLogLines]
 	}
-	
+
 	m.logLines = append([]string{formattedUserInput}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
 		m.logLines = m.logLines[:maxLogLines]
 	}
-	
+
 	m.updateViewportContent()
 }
 
 // showQueryError displays query error with user input and API response in the viewport
 func (m *Model) showQueryError(userInput string, httpStatus int, responseBody string) {
 	userInputLine := fmt.Sprintf("> %s", userInput)
-	
+
 	apiResponseLine := fmt.Sprintf("[ %d ] %s", httpStatus, responseBody)
-	
+
 	// Apply error styling (color/tint) without adding "Error: " prefix
 	errorStyle := lipgloss.NewStyle().
 		Foreground(m.theme.ErrorColor).
 		Bold(true)
-	
+
 	formattedUserInput := errorStyle.Render(userInputLine)
 	formattedApiResponse := errorStyle.Render(apiResponseLine)
-	
+
 	// Add both lines to the viewport in reverse order since we prepend to maintain newest-first display
 	// We want: command first, then response, so we add response first, then command
 	m.logLines = append([]string{formattedApiResponse}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
 		m.logLines = m.logLines[:maxLogLines]
 	}
-	
+
 	m.logLines = append([]string{formattedUserInput}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
 		m.logLines = m.logLines[:maxLogLines]
 	}
-	
+
 	m.updateViewportContent()
 }
 
@@ -409,14 +409,14 @@ func (m *Model) subscribeToWatcher() {
 	m.watcherAdapter.Subscribe(func(level logrus.Level, message string) {
 		// Convert logrus level to string
 		levelStr := level.String()
-		
+
 		// Create log line event
 		logLine := events.LogLine{
 			Text:  message,
 			Level: levelStr,
 			Time:  time.Now(),
 		}
-		
+
 		// Send the event through a goroutine to avoid blocking
 		go func() {
 			select {
@@ -436,13 +436,13 @@ func (m *Model) subscribeToWatcher() {
 func (m *Model) addLogLineFromWatcher(logLine events.LogLine) {
 	// Format the log line with timestamp and gray styling
 	formattedLine := m.theme.FormatLogLineWithTime(logLine.Text, logLine.Level, logLine.Time)
-	
+
 	// Add to the beginning of the slice for newest-first display
 	m.logLines = append([]string{formattedLine}, m.logLines...)
 	if len(m.logLines) > maxLogLines {
 		m.logLines = m.logLines[:maxLogLines]
 	}
-	
+
 	// Update viewport content
 	m.updateViewportContent()
 }
@@ -452,35 +452,35 @@ func (m *Model) View() string {
 	if !m.ready {
 		return "\n  Initializing..."
 	}
-	
+
 	if m.quitting {
 		return "\n  Goodbye!\n"
 	}
-	
+
 	// Main viewport
 	viewportView := m.theme.ViewportStyle.Render(m.viewport.View())
-	
+
 	// Status line
 	statusView := ""
 	if m.status != "" {
 		statusView = m.theme.FormatStatus(m.status)
 	}
-	
+
 	// Input line with metadata name and version
 	promptText := fmt.Sprintf("%s:%s ", metadata.GetName(), metadata.GetVersion())
 	prompt := m.theme.InputPromptStyle.Render(promptText)
 	inputView := prompt + m.theme.InputStyle.Render(m.textInput.View())
-	
+
 	// Combine all parts
 	var parts []string
 	parts = append(parts, viewportView)
-	
+
 	if statusView != "" {
 		parts = append(parts, statusView)
 	}
-	
+
 	parts = append(parts, inputView)
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 

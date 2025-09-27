@@ -3,8 +3,8 @@ package port
 type Protocol string
 
 const (
-	ProtocolTCP Protocol = "tcp"
-	ProtocolUDP Protocol = "udp"
+	ProtocolTCP    Protocol = "tcp"
+	ProtocolUDP    Protocol = "udp"
 	ProtocolTCPUDP Protocol = "tcp/udp"
 )
 

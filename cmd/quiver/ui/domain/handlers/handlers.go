@@ -52,7 +52,7 @@ func (h *Handler) Handle(cmd commands.Command) []events.Event {
 
 func (h *Handler) handleHelp() []events.Event {
 	baseHelp := commands.GetHelpText()
-	
+
 	if h.queryService != nil {
 		queryHelp := h.queryService.GetHelpText()
 		helpText := baseHelp + "\n\n" + queryHelp
@@ -62,7 +62,7 @@ func (h *Handler) handleHelp() []events.Event {
 			},
 		}
 	}
-	
+
 	return []events.Event{
 		events.HelpRequested{
 			HelpText: baseHelp,

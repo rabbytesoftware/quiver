@@ -14,8 +14,8 @@ import (
 )
 
 type API struct {
-	router *gin.Engine
-	watcher *watcher.Watcher
+	router   *gin.Engine
+	watcher  *watcher.Watcher
 	usecases *usecases.Usecases
 }
 
@@ -25,7 +25,7 @@ func NewAPI(
 ) *API {
 	gin.DefaultWriter = io.Discard
 	gin.DefaultErrorWriter = io.Discard
-	
+
 	watcherConfig := watcher.GetConfig()
 	if !watcherConfig.Enabled {
 		gin.SetMode(gin.ReleaseMode)
@@ -37,10 +37,10 @@ func NewAPI(
 			gin.SetMode(gin.ReleaseMode)
 		}
 	}
-	
+
 	return &API{
-		router: gin.New(),
-		watcher: watcher,
+		router:   gin.New(),
+		watcher:  watcher,
 		usecases: usecases,
 	}
 }

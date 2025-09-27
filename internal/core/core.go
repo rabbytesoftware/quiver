@@ -11,8 +11,8 @@ import (
 
 type Core struct {
 	metadata *metadata.Metadata
-	config *config.Config
-	watcher *watcher.Watcher
+	config   *config.Config
+	watcher  *watcher.Watcher
 }
 
 // ? Although metadata and config are independent services (global state),
@@ -22,8 +22,8 @@ type Core struct {
 func Init() *Core {
 	return &Core{
 		metadata: metadata.Get(),
-		config: config.Get(),
-		watcher: watcher.NewWatcherService(),
+		config:   config.Get(),
+		watcher:  watcher.NewWatcherService(),
 	}
 }
 

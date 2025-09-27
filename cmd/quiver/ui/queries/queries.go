@@ -10,7 +10,7 @@ import (
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/queries/matcher"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui/queries/models"
 
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 //go:embed queries.yaml
@@ -25,7 +25,7 @@ type QueryService struct {
 
 func NewService(baseURL string) *QueryService {
 	queryService := &QueryService{
-		client: client.NewClient(baseURL),
+		client:  client.NewClient(baseURL),
 		matcher: matcher.NewMatcher(nil),
 	}
 
@@ -101,7 +101,7 @@ func (s *QueryService) GetHelpText() string {
 	}
 
 	result.WriteString("\nNote: Commands with ${argN} require arguments to be provided.")
-	
+
 	return result.String()
 }
 

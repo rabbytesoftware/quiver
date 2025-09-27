@@ -18,12 +18,12 @@ func WatcherLogger(watcher *watcher.Watcher) gin.HandlerFunc {
 		c.Next()
 
 		latency := time.Since(start)
-		
+
 		clientIP := c.ClientIP()
 		method := c.Request.Method
 		statusCode := c.Writer.Status()
 		bodySize := c.Writer.Size()
-		
+
 		if raw != "" {
 			path = path + "?" + raw
 		}
@@ -38,13 +38,13 @@ func WatcherLogger(watcher *watcher.Watcher) gin.HandlerFunc {
 		)
 
 		logEntry := watcher.WithFields(logrus.Fields{
-			"method":     method,
-			"path":       path,
-			"status":     statusCode,
-			"latency":    latency,
-			"client_ip":  clientIP,
-			"body_size":  bodySize,
-			"type":       "http_request",
+			"method":    method,
+			"path":      path,
+			"status":    statusCode,
+			"latency":   latency,
+			"client_ip": clientIP,
+			"body_size": bodySize,
+			"type":      "http_request",
 		})
 
 		switch {
@@ -67,19 +67,19 @@ func WatcherRecovery(watcher *watcher.Watcher) gin.HandlerFunc {
 			if err := recover(); err != nil {
 				// Log the panic with Watcher
 				message := fmt.Sprintf("Panic recovered: %v", err)
-				
+
 				// Log with structured fields for file output
 				watcher.WithFields(logrus.Fields{
-					"method":     c.Request.Method,
-					"path":       c.Request.URL.Path,
-					"client_ip":  c.ClientIP(),
-					"type":       "panic_recovery",
-					"error":      err,
+					"method":    c.Request.Method,
+					"path":      c.Request.URL.Path,
+					"client_ip": c.ClientIP(),
+					"type":      "panic_recovery",
+					"error":     err,
 				}).Error(message)
-				
+
 				// Also send to UI via Watcher's direct method
 				watcher.Error(message)
-				
+
 				// Return 500 error
 				c.AbortWithStatus(500)
 			}

@@ -2,7 +2,7 @@ package system
 
 import "regexp"
 
-type URL string 
+type URL string
 
 func (u URL) String() string {
 	return string(u)

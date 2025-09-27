@@ -3,7 +3,7 @@ package system
 type Security string
 
 const (
-	SecurityTrusted Security = "trusted"
+	SecurityTrusted   Security = "trusted"
 	SecurityUntrusted Security = "untrusted"
 )
 

@@ -8,8 +8,8 @@ import (
 )
 
 type Repositories struct {
-	arrows arrows.ArrowsInterface
-	system system.SystemInterface
+	arrows  arrows.ArrowsInterface
+	system  system.SystemInterface
 	quivers quivers.QuiversInterface
 }
 
@@ -17,8 +17,8 @@ func NewRepositories(
 	infrastructure *infrastructure.Infrastructure,
 ) *Repositories {
 	return &Repositories{
-		arrows: arrows.NewArrowsRepository(infrastructure),
-		system: system.NewSystemRepository(infrastructure),
+		arrows:  arrows.NewArrowsRepository(infrastructure),
+		system:  system.NewSystemRepository(infrastructure),
 		quivers: quivers.NewQuiversRepository(infrastructure),
 	}
 }

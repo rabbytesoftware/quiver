@@ -78,7 +78,7 @@ type QueryResponse struct {
 
 func (r *QueryResponse) String() string {
 	var result strings.Builder
-	
+
 	result.WriteString(strconv.Itoa(r.StatusCode))
 
 	if len(r.Body) > 0 {

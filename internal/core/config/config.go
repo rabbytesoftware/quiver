@@ -6,13 +6,13 @@ import (
 	"os"
 
 	"github.com/rabbytesoftware/quiver/internal/core/metadata"
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 var (
 	//go:embed default.yaml
 	defaultConfigByte []byte
-	config *Config
+	config            *Config
 )
 
 type Netbridge struct {
@@ -26,8 +26,8 @@ type Arrows struct {
 }
 
 type API struct {
-	Host    string `yaml:"host"`
-	Port    int    `yaml:"port"`
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
 }
 
 type Database struct {
@@ -61,7 +61,7 @@ func Get() *Config {
 	}
 
 	configPath := metadata.GetDefaultConfigPath()
-	
+
 	configBytes, err := os.ReadFile(configPath)
 	if err != nil {
 		config = getDefaultConfig()
@@ -114,7 +114,7 @@ func getDefaultConfig() *Config {
 	if err == nil {
 		return config
 	}
-	
+
 	return &Config{
 		Config: ConfigData{
 			Netbridge: Netbridge{
@@ -128,8 +128,8 @@ func getDefaultConfig() *Config {
 				InstallDir: "./arrows",
 			},
 			API: API{
-				Host:    "0.0.0.0",
-				Port:    40257,
+				Host: "0.0.0.0",
+				Port: 40257,
 			},
 			Database: Database{
 				Path: "./.db",

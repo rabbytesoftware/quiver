@@ -16,11 +16,11 @@ import (
 // ? essential for the internal workings of the application and not intended to be used directly.
 
 type Internal struct {
-	core *core.Core
-	api *api.API
+	core           *core.Core
+	api            *api.API
 	infrastructure *infrastructure.Infrastructure
-	repositories *repositories.Repositories
-	usecases *usecases.Usecases
+	repositories   *repositories.Repositories
+	usecases       *usecases.Usecases
 }
 
 func NewInternal() *Internal {
@@ -31,11 +31,11 @@ func NewInternal() *Internal {
 	api := api.NewAPI(core.GetWatcher(), usecases)
 
 	return &Internal{
-		api: api,
-		core: core,
+		api:            api,
+		core:           core,
 		infrastructure: infrastructure,
-		repositories: repositories,
-		usecases: usecases,
+		repositories:   repositories,
+		usecases:       usecases,
 	}
 }
 

@@ -14,15 +14,15 @@ func RunUI(w *watcher.Watcher) error {
 		tea.WithAltScreen(),       // Use alternate screen buffer
 		tea.WithMouseCellMotion(), // Enable mouse support
 	)
-	
+
 	finalModel, err := p.Run()
 	if err != nil {
 		return fmt.Errorf("error running TUI: %w", err)
 	}
-	
+
 	if m, ok := finalModel.(*Model); ok && m.cancel != nil {
 		m.cancel()
 	}
-	
+
 	return nil
 }

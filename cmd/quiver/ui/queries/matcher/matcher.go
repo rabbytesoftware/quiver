@@ -40,7 +40,7 @@ func (m *Matcher) matchQuery(query models.Query, parts []string, partIndex int, 
 	}
 
 	syntaxParts, _ := m.parseSyntax(query.Syntax)
-	
+
 	if partIndex+len(syntaxParts) > len(parts) {
 		return nil, fmt.Errorf("invalid part index")
 	}
@@ -52,7 +52,7 @@ func (m *Matcher) matchQuery(query models.Query, parts []string, partIndex int, 
 
 	for i, syntaxPart := range syntaxParts {
 		inputPart := parts[partIndex+i]
-		
+
 		if m.isArgument(syntaxPart) {
 			argName := m.extractArgName(syntaxPart)
 			executeQuery.Variables[argName] = inputPart
@@ -138,7 +138,7 @@ func (m *Matcher) GetAvailableCommands() []string {
 
 func (m *Matcher) getCommandsFromQuery(query models.Query, prefix string) []string {
 	var commands []string
-	
+
 	currentCmd := prefix
 	if currentCmd != "" {
 		currentCmd += " "
@@ -172,7 +172,7 @@ func (m *Matcher) ValidateQuery(query models.Query) error {
 		if query.REST.Method == "" {
 			return fmt.Errorf("REST method cannot be empty for query: %s", query.Syntax)
 		}
-		
+
 		validMethods := map[string]bool{
 			"GET": true, "POST": true, "PUT": true, "DELETE": true,
 			"PATCH": true, "HEAD": true, "OPTIONS": true,

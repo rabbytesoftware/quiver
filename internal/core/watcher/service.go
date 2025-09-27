@@ -7,7 +7,7 @@ import (
 	"github.com/rabbytesoftware/quiver/internal/core/config"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher/pool"
 	"github.com/sirupsen/logrus"
-	"gopkg.in/natefinch/lumberjack.v2"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
 // ? Watcher is an logging service, focus on an
@@ -15,15 +15,15 @@ import (
 
 type Watcher struct {
 	logger *logrus.Logger
-	pool *pool.Pool
+	pool   *pool.Pool
 }
 
 func NewWatcherService() *Watcher {
 	watcherConfig := config.GetWatcher()
-	
+
 	return &Watcher{
 		logger: initLogger(watcherConfig),
-		pool: pool.NewPool(),
+		pool:   pool.NewPool(),
 	}
 }
 
@@ -75,7 +75,7 @@ func initLogger(watcherConfig config.Watcher) *logrus.Logger {
 	}
 
 	logFile := filepath.Join(watcherConfig.Folder, "quiver.log")
-	
+
 	logger.SetOutput(&lumberjack.Logger{
 		Filename:   logFile,
 		MaxSize:    watcherConfig.MaxSize,

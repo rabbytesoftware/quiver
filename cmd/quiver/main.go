@@ -18,10 +18,10 @@ func main() {
 
 	go func() {
 		time.Sleep(5 * time.Second)
-	
+
 		watcher.Info(fmt.Sprintf(
 			"%s %s - Initializing...",
-			metadata.GetName(), 
+			metadata.GetName(),
 			metadata.GetVersion(),
 		))
 	}()

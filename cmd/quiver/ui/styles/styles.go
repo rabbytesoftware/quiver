@@ -16,14 +16,14 @@ type Theme struct {
 	WarnStyle  lipgloss.Style
 	ErrorStyle lipgloss.Style
 	FatalStyle lipgloss.Style
-	
+
 	// UI components
 	ViewportStyle    lipgloss.Style
 	InputPromptStyle lipgloss.Style
 	InputStyle       lipgloss.Style
 	StatusStyle      lipgloss.Style
 	HelpStyle        lipgloss.Style
-	
+
 	// Colors
 	PrimaryColor   lipgloss.Color
 	SecondaryColor lipgloss.Color
@@ -37,13 +37,13 @@ type Theme struct {
 // NewDefaultTheme creates a new default theme
 func NewDefaultTheme() Theme {
 	// Define color palette
-	primaryColor := lipgloss.Color("#7C3AED")    // Purple
-	secondaryColor := lipgloss.Color("#64748B")  // Slate
-	accentColor := lipgloss.Color("#06B6D4")     // Cyan
-	errorColor := lipgloss.Color("#EF4444")      // Red
-	warningColor := lipgloss.Color("#F59E0B")    // Amber
-	successColor := lipgloss.Color("#10B981")    // Emerald
-	mutedColor := lipgloss.Color("#94A3B8")      // Slate light
+	primaryColor := lipgloss.Color("#7C3AED")   // Purple
+	secondaryColor := lipgloss.Color("#64748B") // Slate
+	accentColor := lipgloss.Color("#06B6D4")    // Cyan
+	errorColor := lipgloss.Color("#EF4444")     // Red
+	warningColor := lipgloss.Color("#F59E0B")   // Amber
+	successColor := lipgloss.Color("#10B981")   // Emerald
+	mutedColor := lipgloss.Color("#94A3B8")     // Slate light
 
 	return Theme{
 		// Log level styles
@@ -61,7 +61,7 @@ func NewDefaultTheme() Theme {
 		FatalStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FF8C00")). // Orange
 			Bold(true),
-		
+
 		// UI component styles
 		ViewportStyle: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -81,7 +81,7 @@ func NewDefaultTheme() Theme {
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(secondaryColor),
-		
+
 		// Colors for direct use
 		PrimaryColor:   primaryColor,
 		SecondaryColor: secondaryColor,
@@ -123,7 +123,7 @@ func (t Theme) FormatLogLineWithTime(text, level string, timestamp time.Time) st
 	timeStr := timestamp.Format("15:04:05")
 	grayStyle := lipgloss.NewStyle().Foreground(t.MutedColor)
 	formattedTime := grayStyle.Render(timeStr)
-	
+
 	// Get level color based on log level
 	var levelColor lipgloss.Color
 	switch strings.ToLower(level) {
@@ -140,14 +140,14 @@ func (t Theme) FormatLogLineWithTime(text, level string, timestamp time.Time) st
 	default:
 		levelColor = lipgloss.Color("#10B981") // Default to green
 	}
-	
+
 	// Format level with appropriate color
 	levelStyle := lipgloss.NewStyle().Foreground(levelColor).Bold(true)
 	formattedLevel := levelStyle.Render(strings.ToUpper(level))
-	
+
 	// Create the formatted log line: hh:mm:ss [ LEVEL ] Message
 	formattedLine := fmt.Sprintf("%s [ %s ] %s", formattedTime, formattedLevel, text)
-	
+
 	return formattedLine
 }
 

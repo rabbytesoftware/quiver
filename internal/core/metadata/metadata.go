@@ -3,13 +3,13 @@ package metadata
 import (
 	_ "embed"
 
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 var (
 	//go:embed metadata.yaml
 	metadataByte []byte
-	metadata *Metadata
+	metadata     *Metadata
 )
 
 type Version struct {
@@ -38,16 +38,16 @@ type Variables struct {
 }
 
 type Metadata struct {
-	Version   Version     `yaml:"version"`
+	Version   Version      `yaml:"version"`
 	Metadata  MetadataInfo `yaml:"metadata"`
-	Variables Variables   `yaml:"variables"`
+	Variables Variables    `yaml:"variables"`
 }
 
-func Get() (*Metadata) {
+func Get() *Metadata {
 	if metadata != nil {
 		return metadata
 	}
-	
+
 	metadata = &Metadata{}
 	err := yaml.Unmarshal(metadataByte, metadata)
 	if err != nil {

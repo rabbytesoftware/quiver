@@ -1,8 +1,7 @@
 package infrastructure
 
-type Infrastructure struct {}
+type Infrastructure struct{}
 
-func NewInfrastructure(
-) *Infrastructure {
+func NewInfrastructure() *Infrastructure {
 	return &Infrastructure{}
 }

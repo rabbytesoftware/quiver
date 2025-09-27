@@ -9,21 +9,21 @@ import (
 func Parse(input string) (Command, error) {
 	// Trim whitespace
 	input = strings.TrimSpace(input)
-	
+
 	// Ignore blank lines
 	if input == "" {
 		return Command{}, NewCommandError("empty command", input)
 	}
-	
+
 	// Split command and arguments
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return Command{}, NewCommandError("invalid command format", input)
 	}
-	
+
 	commandStr := strings.ToLower(parts[0])
 	args := parts[1:]
-	
+
 	// Map string to CommandKind
 	var kind CommandKind
 	switch commandStr {
@@ -43,18 +43,18 @@ func Parse(input string) (Command, error) {
 		// If it's not a base TUI command, treat it as a query command
 		kind = CmdQuery
 	}
-	
+
 	cmd := Command{
 		Kind:          kind,
 		Args:          args,
 		OriginalInput: input,
 	}
-	
+
 	// Validate the command
 	if err := cmd.Validate(); err != nil {
 		return Command{}, err
 	}
-	
+
 	// Special validation for filter regex
 	if kind == CmdFilter && len(args) > 0 {
 		pattern := strings.Join(args, " ")
@@ -62,7 +62,7 @@ func Parse(input string) (Command, error) {
 			return Command{}, NewCommandError("invalid regex pattern: "+err.Error(), pattern)
 		}
 	}
-	
+
 	return cmd, nil
 }
 

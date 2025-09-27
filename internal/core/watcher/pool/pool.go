@@ -5,7 +5,7 @@ import (
 )
 
 type Pool struct {
-	mu			sync.RWMutex
+	mu          sync.RWMutex
 	messages    chan Message
 	subscribers []Subscriber
 }
@@ -37,7 +37,7 @@ func (p *Pool) notifySubscribers(message Message) {
 		subscribers := make([]Subscriber, len(p.subscribers))
 		copy(subscribers, p.subscribers)
 		p.mu.RUnlock()
-		
+
 		for _, subscriber := range subscribers {
 			subscriber(message.Level, message.Message)
 		}
