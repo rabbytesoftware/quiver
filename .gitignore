@@ -1,5 +1,5 @@
 # Binaries and build artifacts
-bin/
+bin
 *.exe
 *.exe~
 *.dll
@@ -19,7 +19,7 @@ vendor/
 # Go workspace file
 go.work
 
-quiver
+!/cmd/quiver/
 
 # Environment variables
 .env

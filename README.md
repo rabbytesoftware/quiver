@@ -1,50 +1,20 @@
 # Quiver
 
-Quiver is an open-source game server client designed to make managing dedicated servers incredibly easy. Think of it as Steam, but for servers! With Quiver, you don't have to worry about port forwarding or networking configurations—just click "Play" and you're good to go!
+Quiver is a **multi-platform, multi-paradigm package manager** - probably the only one you'll ever need! It's designed to make complex installation processes quick and easy for both technical and non-technical users, while keeping systems well-contained and manageable.
 
 ## What is Quiver?
 
-Quiver is the base application that handles networking, publishes a REST API for server management, and (most importantly) downloads and loads packages. Each package corresponds to a specific server implementation. For example, you could have packages for CS2, Minecraft, L4D2, CSGO, and more—all managed within the same app.
+Quiver is a universal package manager that handles networking, publishes a REST API for package management, and (most importantly) downloads and manages packages across any platform. Each package (called an "Arrow") can be anything from game servers to development tools, web applications, or system utilities—all managed within the same app.
 
-However, Quiver itself cannot open any server without these packages. It acts as the foundation for server management, allowing users to easily install and run server implementations.
+Quiver makes hard and long install processes quick and easy, keeps your systems well-contained without risky custom wizard software, and provides a global, multi-OS app store that allows anyone to upload content without borders.
 
 ## Current Development Status
 
-Quiver is currently under heavy development, and we're aiming to deploy a demo by the end of **June 2025**. The demo will feature a simple real-time chat application, which will be released exclusively to our beta tester channels.
+Quiver is currently under heavy development, and we're aiming to deploy a demo by the end of **February 2026**. The demo will feature a simple real-time chat application, which will be released exclusively to our beta tester channels.
 
-## Future Plans
+## Documentation
 
-We are working on a comprehensive Wiki that will:
-
-- Explain the internal functions of Quiver.
-- Provide detailed instructions on how to create and upload Quiver packages.
-- Serve as a resource for developers, similar to the NixOS package repository.
-
-Stay tuned for updates!
-
----
-
-## Testing Workflow
-
-![1744152698206](.github/how-we-test-things.png)
-
-At Rabbyte, we follow a structured testing workflow to ensure the quality of our builds. Here's how it works:
-
-1. **Develop 'til milestone**
-   Development continues until a specific milestone is reached.
-2. **Test the build (internal)**
-   The build is tested internally to identify bugs and errors. If issues are found, we go back to fix, remake, or redevelop as needed.
-3. **Distribute to external testers**
-   A group of 4–6 external testers is selected, and the build is redistributed. It's important that the testers are always different for each round of testing.
-4. **For each tester:**
-
-   - Sit down with the tester and request to screen-share.
-   - Take notes silently without intervening.
-   - Gather all feedback from the tester.
-5. **Evaluate feedback**
-   Based on the feedback, determine if the build is "good enough." If not, the process loops back to development.
-
-This recursive workflow ensures that we catch issues early and refine the product iteratively.
+We have comprehensive documentation available on [Documentation README](docs/README.md)
 
 ---
 
@@ -65,65 +35,6 @@ Quiver is licensed under the [GPL-3.0](LICENSE). Feel free to use, modify, and d
 Follow us for updates and announcements:
 
 - [Rabbyte GitHub](https://github.com/rabbytesoftware)
-- [char2cs' X](https://x.com/char2cs)
+- [char2cs](https://char2cs.net)
 
-## API Usage
-
-### Arrow Management
-
-#### Search Arrows
-```bash
-# Search all repositories
-GET /arrows/search?q=cs2
-
-# Search specific repository
-GET /arrows/search?q=arrows/@cs2
-```
-
-#### Install Arrow
-```bash
-# Install from any repository
-POST /arrows/cs2/install
-{
-  "variables": {"key": "value"}
-}
-
-# Install from specific repository (via query parameter)
-POST /arrows/cs2/install?repository=github.com/repo
-{
-  "variables": {"key": "value"}
-}
-
-# Install from specific repository (via request body)
-POST /arrows/cs2/install
-{
-  "repository": "github.com/repo",
-  "variables": {"key": "value"}
-}
-```
-
-#### Update Arrow
-```bash
-# Update from any repository
-PUT /arrows/cs2/update
-
-# Update from specific repository
-PUT /arrows/cs2/update?repository=github.com/repo
-{
-  "repository": "github.com/repo"
-}
-```
-
-### Repository Specification Syntax
-
-Quiver supports specifying which repository to use for package operations using the `repository@package` syntax:
-
-- **Search**: `arrows/@cs2` - searches for "cs2" only in repositories containing "arrows/"
-- **Install**: `github.com/repo@cs2` - installs "cs2" from "github.com/repo" repository
-- **Update**: `arrows/@cs2` - updates "cs2" from repositories containing "arrows/"
-
-For HTTP API calls, you can specify the repository via:
-1. Query parameter: `?repository=github.com/repo`
-2. Request body: `{"repository": "github.com/repo"}`
-
-If no repository is specified, Quiver searches all configured repositories.
+For now, you can explore the codebase structure and contribute to the development. See our [Contributing Guide](docs/contributing-guide.md) for more information.
