@@ -1,5 +1,5 @@
 # Binaries and build artifacts
-bin/
+bin
 *.exe
 *.exe~
 *.dll
@@ -19,6 +19,8 @@ vendor/
 # Go workspace file
 go.work
 
+!/cmd/quiver/
+
 # Environment variables
 .env
 .env.local
@@ -26,6 +28,10 @@ go.work
 # Configuration files (keep example)
 config.json
 !config.example.json
+
+# Embedded files (copied during build)
+internal/config/config.json
+internal/metadata/metadata.json
 
 # Logs
 logs/

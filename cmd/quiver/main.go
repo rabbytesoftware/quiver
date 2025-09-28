@@ -1,68 +1,32 @@
 package main
 
 import (
-	"context"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
+	"fmt"
 
-	"github.com/rabbytesoftware/quiver/internal/config"
-	"github.com/rabbytesoftware/quiver/internal/logger"
-	"github.com/rabbytesoftware/quiver/internal/metadata"
-	"github.com/rabbytesoftware/quiver/internal/server"
-	"github.com/rabbytesoftware/quiver/internal/ui"
-	"github.com/rabbytesoftware/quiver/packages"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/assets"
+	"github.com/rabbytesoftware/quiver/cmd/quiver/ui"
+	"github.com/rabbytesoftware/quiver/internal"
+	"github.com/rabbytesoftware/quiver/internal/core/metadata"
 )
 
 func main() {
-	// Initialize metadata
-	if err := metadata.Load(); err != nil {
-		log.Fatalf("Failed to load metadata: %v", err)
-	}
+	iconManager := assets.NewIconManager()
+	defer iconManager.Cleanup()
 
-	// Initialize configuration
-	cfg, err := config.Load()
+	internal := internal.NewInternal()
+	watcher := internal.GetCore().GetWatcher()
+
+	go internal.Run()
+
+	go watcher.Info(fmt.Sprintf(
+		"%s %s '%s' - Initializing with embedded icon support...",
+		metadata.GetName(),
+		metadata.GetVersion(),
+		metadata.GetVersionCodename(),
+	))
+
+	err := ui.RunUI(watcher)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		watcher.Unforeseen(err.Error())
 	}
-
-	// Initialize logger
-	logger := logger.New(cfg.Logger)
-
-	// Show welcome message
-	ui.ShowWelcome()
-
-	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle graceful shutdown
-	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
-		logger.Info("Received shutdown signal, shutting down gracefully...")
-		cancel()
-	}()
-
-	// Initialize package manager
-	logger.Info("Initializing package manager...")
-	pkgManager := packages.NewArrowsServer(cfg.Packages.Repository, logger.WithService("pkgsServer"))
-	// if err := pkgManager.Initialize(ctx); err != nil {
-	// 	logger.Fatal("Failed to initialize package manager: %v", err)
-	// }
-	
-	pkgManager.Load("./template/cs2.yaml")
-
-	// Initialize and start server
-	logger.Info("Starting Quiver server...")
-	srv := server.New(cfg.Server, pkgManager, logger)
-	if err := srv.Start(ctx); err != nil {
-		logger.Fatal("Failed to start server: %v", err)
-	}
-
-	// Wait for context cancellation
-	<-ctx.Done()
-	logger.Info("Quiver server stopped")
-} 
+}
