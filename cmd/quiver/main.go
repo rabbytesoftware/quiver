@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui"
 	"github.com/rabbytesoftware/quiver/internal"
-
 	"github.com/rabbytesoftware/quiver/internal/core/metadata"
 )
 
@@ -16,15 +14,11 @@ func main() {
 
 	go internal.Run()
 
-	go func() {
-		time.Sleep(5 * time.Second)
-
-		watcher.Info(fmt.Sprintf(
-			"%s %s - Initializing...",
-			metadata.GetName(),
-			metadata.GetVersion(),
-		))
-	}()
+	go watcher.Info(fmt.Sprintf(
+		"%s %s - Initializing...",
+		metadata.GetName(),
+		metadata.GetVersion(),
+	))
 
 	err := ui.RunUI(watcher)
 	if err != nil {

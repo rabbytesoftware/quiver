@@ -11,7 +11,7 @@ import (
 // ? Internal DI Container
 // ? This is the initiator for internal services (Dependency Injection)
 
-// ? This is spectial, because here we only expose the core services to the outside world.
+// ? This case is spectial, because here we only expose the core services to the outside world.
 // ? All other services are internal and are not exposed to the outside world as they are
 // ? essential for the internal workings of the application and not intended to be used directly.
 

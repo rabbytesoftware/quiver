@@ -7,18 +7,21 @@ import (
 
 // Parse parses a command input string and returns a Command or an error
 func Parse(input string) (Command, error) {
-	// Trim whitespace
-	input = strings.TrimSpace(input)
+	// Store original input for the command
+	originalInput := input
+
+	// Trim whitespace for processing
+	trimmedInput := strings.TrimSpace(input)
 
 	// Ignore blank lines
-	if input == "" {
-		return Command{}, NewCommandError("empty command", input)
+	if trimmedInput == "" {
+		return Command{}, NewCommandError("empty command", originalInput)
 	}
 
 	// Split command and arguments
-	parts := strings.Fields(input)
+	parts := strings.Fields(trimmedInput)
 	if len(parts) == 0 {
-		return Command{}, NewCommandError("invalid command format", input)
+		return Command{}, NewCommandError("invalid command format", originalInput)
 	}
 
 	commandStr := strings.ToLower(parts[0])
@@ -47,7 +50,7 @@ func Parse(input string) (Command, error) {
 	cmd := Command{
 		Kind:          kind,
 		Args:          args,
-		OriginalInput: input,
+		OriginalInput: originalInput,
 	}
 
 	// Validate the command

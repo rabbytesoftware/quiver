@@ -87,7 +87,10 @@ func (c Command) Validate() error {
 			return NewCommandError("invalid log level, must be one of: debug, info, warn, error", level)
 		}
 	case CmdHelp, CmdPause, CmdResume, CmdClear:
-		// These commands don't require arguments
+		// These commands don't accept arguments
+		if len(c.Args) > 0 {
+			return NewCommandError(fmt.Sprintf("%s command does not accept arguments", c.Kind.String()), strings.Join(c.Args, " "))
+		}
 	case CmdQuery:
 		// Query commands are validated by the queries system
 	}
