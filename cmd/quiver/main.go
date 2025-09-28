@@ -24,7 +24,7 @@ func main() {
 		metadata.GetVersion(),
 		metadata.GetVersionCodename(),
 	))
-	
+
 	err := ui.RunUI(watcher)
 	if err != nil {
 		watcher.Unforeseen(err.Error())
