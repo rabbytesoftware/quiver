@@ -63,7 +63,6 @@ setup:
 	@go mod download
 	@go mod verify
 	@mkdir -p $(BINARY_DIR)
-	@mkdir -p logs
 	@echo "$(GREEN)Development environment ready!$(NC)"
 
 # Download and verify dependencies

@@ -3,6 +3,7 @@ package watcher
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/rabbytesoftware/quiver/internal/core/config"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher/pool"
@@ -68,9 +69,13 @@ func initLogger(watcherConfig config.Watcher) *logrus.Logger {
 	}
 	logger.SetLevel(level)
 
-	if err := os.MkdirAll(watcherConfig.Folder, 0755); err != nil || !watcherConfig.Enabled {
+	if !watcherConfig.Enabled || isTestEnvironment() {
 		logger.SetOutput(os.Stderr)
+		return logger
+	}
 
+	if err := os.MkdirAll(watcherConfig.Folder, 0755); err != nil {
+		logger.SetOutput(os.Stderr)
 		return logger
 	}
 
@@ -86,4 +91,14 @@ func initLogger(watcherConfig config.Watcher) *logrus.Logger {
 	})
 
 	return logger
+}
+
+func isTestEnvironment() bool {
+	for _, arg := range os.Args {
+		if strings.Contains(arg, "-test.") || strings.HasSuffix(arg, ".test") {
+			return true
+		}
+	}
+
+	return false
 }
