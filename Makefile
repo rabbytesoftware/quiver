@@ -116,9 +116,9 @@ test-coverage:
 test-docker:
 	@echo "$(BLUE)Running tests in Docker...$(NC)"
 	@docker run --rm -v $(PWD):/app -w /app golang:$(GO_VERSION)-alpine sh -c "\
-		apk add --no-cache git make && \
+		apk add --no-cache git make gcc musl-dev && \
 		go mod download && \
-		go test -race -coverprofile=coverage.out -covermode=atomic ./... && \
+		CGO_ENABLED=1 go test -race -coverprofile=coverage.out -covermode=atomic ./... && \
 		go tool cover -func=coverage.out"
 	@echo "$(GREEN)Docker tests completed!$(NC)"
 

@@ -158,9 +158,9 @@ jobs:
           -w /app \
           golang:${{ env.GO_VERSION }}-alpine \
           sh -c "
-            apk add --no-cache git make bc &&
+            apk add --no-cache git make bc gcc musl-dev &&
             go mod download &&
-            go test -race -coverprofile=coverage.out -covermode=atomic ./... &&
+            CGO_ENABLED=1 go test -race -coverprofile=coverage.out -covermode=atomic ./... &&
             go tool cover -func=coverage.out > coverage.txt &&
             go tool cover -html=coverage.out -o coverage.html
           "
