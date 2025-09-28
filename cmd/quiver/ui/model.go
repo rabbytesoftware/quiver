@@ -53,6 +53,7 @@ type Model struct {
 	watcherAdapter *services.WatcherAdapter
 	queryService   *queries.QueryService
 	handler        *handlers.Handler
+	asciiService   *services.ASCIIService
 	theme          styles.Theme
 
 	// Context and cancellation
@@ -71,6 +72,7 @@ func NewModel(w *watcher.Watcher) *Model {
 	queryService := queries.NewService(fmt.Sprintf("http://%s:%d", config.GetAPI().Host, config.GetAPI().Port))
 
 	handler := handlers.NewHandler(watcherAdapter, queryService)
+	asciiService := services.NewASCIIService()
 	theme := styles.NewDefaultTheme()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,6 +96,7 @@ func NewModel(w *watcher.Watcher) *Model {
 		watcherAdapter:    watcherAdapter,
 		queryService:      queryService,
 		handler:           handler,
+		asciiService:      asciiService,
 		ctx:               ctx,
 		cancel:            cancel,
 		commandHistory:    make([]string, 0),
@@ -104,6 +107,10 @@ func NewModel(w *watcher.Watcher) *Model {
 
 	// Subscribe to watcher for log messages
 	model.subscribeToWatcher()
+
+	// Add welcome ASCII art as initial log entry
+	welcomeLogLine := model.asciiService.GetWelcomeLogLine()
+	model.addLogLine(welcomeLogLine)
 
 	return model
 }

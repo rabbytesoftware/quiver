@@ -95,7 +95,7 @@ build: clean deps fmt vet
 # Run the application locally
 run: build
 	@echo "$(BLUE)Starting $(APP_NAME)...$(NC)"
-	@./$(BINARY_PATH)
+	@go run ./cmd/quiver
 
 # Run all tests
 test:

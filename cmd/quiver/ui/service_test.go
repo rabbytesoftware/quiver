@@ -161,8 +161,8 @@ func TestRunUIModelState(t *testing.T) {
 		t.Error("Model should have autoScroll enabled initially")
 	}
 
-	if len(model.logLines) != 0 {
-		t.Error("Model should have empty log lines initially")
+	if len(model.logLines) != 1 {
+		t.Error("Model should have one log line initially (ASCII art)")
 	}
 
 	if len(model.commandHistory) != 0 {

@@ -39,6 +39,33 @@ func TestNewModel(t *testing.T) {
 	if model.watcherAdapter == nil {
 		t.Error("Expected watcher adapter to be created")
 	}
+
+	// Test ASCII service initialization
+	if model.asciiService == nil {
+		t.Error("Expected ASCII service to be created")
+	}
+}
+
+func TestModel_ASCIIArtDisplay(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test that ASCII art is added as a log line
+	if len(model.logLines) == 0 {
+		t.Error("Expected ASCII art to be added as initial log line")
+	}
+
+	// The first log line should contain the ASCII art
+	firstLogLine := model.logLines[0]
+	if firstLogLine == "" {
+		t.Error("Expected first log line to contain ASCII art")
+	}
+
+	// Test that the ASCII service works correctly
+	welcomeLogLine := model.asciiService.GetWelcomeLogLine()
+	if welcomeLogLine.Text == "" {
+		t.Error("Expected ASCII service to return ASCII art text")
+	}
 }
 
 func TestModel_Init(t *testing.T) {
