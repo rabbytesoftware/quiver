@@ -13,6 +13,10 @@ metadata:
   version: "25.7.0"
 
 requirements:
+  cpu_cores: 1
+  ram_gb: 1
+  disk_gb: 1
+  network_mbps: 1
   system:
     - "windows/amd64"
     - "windows/arm64"
@@ -20,16 +24,6 @@ requirements:
     - "linux/arm64"
     - "darwin/amd64"
     - "darwin/arm64"
-  minimum:
-    cpu_cores: 1
-    ram_gb: 1
-    disk_gb: 1
-    network_mbps: 1
-  recommended:
-    cpu_cores: 1
-    ram_gb: 1
-    disk_gb: 1
-    network_mbps: 1
 
 netbridge: 
   - name: "CHAT_PORT"
