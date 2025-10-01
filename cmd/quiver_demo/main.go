@@ -14,7 +14,7 @@ import (
 
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
-	"gopkg.in/yaml.v3"
+	"github.com/rabbytesoftware/quiver/internal/infrastructure/requirements" // system_adapter
 )
 
 type Severity string
@@ -48,28 +48,20 @@ func NewManager() *Manager {
 	return &Manager{Rules: make(map[string]interface{})}
 }
 
-func (m *Manager) LoadRules(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return yaml.Unmarshal(data, &m.Rules)
-}
+// ---------------- Validators ----------------
 
 func (m *Manager) ValidateAll() Report {
 	var report Report
-
 	report.Results = append(report.Results, m.validateOS()...)
 	report.Results = append(report.Results, m.validateMemory()...)
 	report.Results = append(report.Results, m.validateDisk()...)
 	report.Results = append(report.Results, m.validateDependencies()...)
 	report.Results = append(report.Results, m.validateNetwork()...)
 	report.Results = append(report.Results, m.validateSecurity()...)
-
 	return report
 }
 
-// ---------------- Validators ----------------
+// ---------- OS & Architecture ----------
 
 func (m *Manager) validateOS() []ValidationResult {
 	var out []ValidationResult
@@ -86,8 +78,7 @@ func (m *Manager) validateOS() []ValidationResult {
 			Severity:  SeverityError,
 			Blocking:  true,
 			Timestamp: time.Now(),
-			Remediation: fmt.Sprintf("Supported OS: %v. Use a supported OS or update configs/requirements.yaml",
-				allowedOS),
+			Remediation: fmt.Sprintf("Supported OS: %v. Update system or config rules.", allowedOS),
 		})
 	} else {
 		out = append(out, ValidationResult{
@@ -106,8 +97,7 @@ func (m *Manager) validateOS() []ValidationResult {
 			Severity:  SeverityError,
 			Blocking:  true,
 			Timestamp: time.Now(),
-			Remediation: fmt.Sprintf("Supported architectures: %v. Use a supported CPU or update configs/requirements.yaml",
-				allowedArch),
+			Remediation: fmt.Sprintf("Supported architectures: %v. Update system or config rules.", allowedArch),
 		})
 	} else {
 		out = append(out, ValidationResult{
@@ -122,30 +112,16 @@ func (m *Manager) validateOS() []ValidationResult {
 	return out
 }
 
+// ---------- Memory ----------
+
 func (m *Manager) validateMemory() []ValidationResult {
 	var out []ValidationResult
 	res, ok := m.Rules["resources"].(map[string]interface{})
 	if !ok {
-		out = append(out, ValidationResult{
-			ID:        "memory-no-config",
-			Title:     "No memory requirement configured; skipping memory check",
-			Severity:  SeverityWarning,
-			Blocking:  false,
-			Timestamp: time.Now(),
-		})
 		return out
 	}
 	memReq := toInt(res["memory_mb"])
-	if memReq == 0 {
-		out = append(out, ValidationResult{
-			ID:        "memory-no-config",
-			Title:     "No memory requirement set; skipping memory check",
-			Severity:  SeverityWarning,
-			Blocking:  false,
-			Timestamp: time.Now(),
-		})
-		return out
-	}
+
 	vm, err := mem.VirtualMemory()
 	if err != nil {
 		out = append(out, ValidationResult{
@@ -159,6 +135,7 @@ func (m *Manager) validateMemory() []ValidationResult {
 		})
 		return out
 	}
+
 	totalMB := int(vm.Total / 1024 / 1024)
 	if totalMB < memReq {
 		out = append(out, ValidationResult{
@@ -167,7 +144,7 @@ func (m *Manager) validateMemory() []ValidationResult {
 			Severity:  SeverityError,
 			Blocking:  true,
 			Timestamp: time.Now(),
-			Remediation: "Increase RAM or run the project on a machine with larger memory.",
+			Remediation: "Increase RAM or run on a machine with larger memory.",
 			Details: map[string]int{"total_mb": totalMB, "required_mb": memReq},
 		})
 	} else {
@@ -183,32 +160,20 @@ func (m *Manager) validateMemory() []ValidationResult {
 	return out
 }
 
+// ---------- Disk ----------
+
 func (m *Manager) validateDisk() []ValidationResult {
 	var out []ValidationResult
 	res, ok := m.Rules["resources"].(map[string]interface{})
 	if !ok {
-		out = append(out, ValidationResult{
-			ID:        "disk-no-config",
-			Title:     "No disk requirement configured; skipping disk check",
-			Severity:  SeverityWarning,
-			Blocking:  false,
-			Timestamp: time.Now(),
-		})
 		return out
 	}
 	diskReqGB := toInt(res["disk_gb"])
-	if diskReqGB == 0 {
-		out = append(out, ValidationResult{
-			ID:        "disk-no-config",
-			Title:     "No disk requirement set; skipping disk check",
-			Severity:  SeverityWarning,
-			Blocking:  false,
-			Timestamp: time.Now(),
-		})
-		return out
-	}
 
-	path := rootPathForOS()
+	path := "C:\\"
+	if runtime.GOOS != "windows" {
+		path = "/"
+	}
 	usage, err := disk.Usage(path)
 	if err != nil {
 		out = append(out, ValidationResult{
@@ -217,13 +182,15 @@ func (m *Manager) validateDisk() []ValidationResult {
 			Severity:  SeverityWarning,
 			Blocking:  false,
 			Timestamp: time.Now(),
-			Remediation: "gopsutil failed to read disk usage. Try running with appropriate permissions or check mounting.",
+			Remediation: "gopsutil failed to read disk usage. Check permissions or mounts.",
 			Details:    err.Error(),
 		})
 		return out
 	}
 
 	freeGB := int(usage.Free / 1024 / 1024 / 1024)
+	totalGB := int(usage.Total / 1024 / 1024 / 1024)
+
 	if freeGB < diskReqGB {
 		out = append(out, ValidationResult{
 			ID:        "disk-check",
@@ -232,7 +199,7 @@ func (m *Manager) validateDisk() []ValidationResult {
 			Blocking:  true,
 			Timestamp: time.Now(),
 			Remediation: fmt.Sprintf("Free up %d GB or increase disk size on %s", (diskReqGB - freeGB), path),
-			Details: map[string]int{"free_gb": freeGB, "required_gb": diskReqGB},
+			Details: map[string]int{"free_gb": freeGB, "required_gb": diskReqGB, "total_gb": totalGB},
 		})
 	} else {
 		out = append(out, ValidationResult{
@@ -241,26 +208,17 @@ func (m *Manager) validateDisk() []ValidationResult {
 			Severity:  SeverityInfo,
 			Blocking:  false,
 			Timestamp: time.Now(),
-			Details:   map[string]int{"free_gb": freeGB, "required_gb": diskReqGB},
+			Details:   map[string]int{"free_gb": freeGB, "required_gb": diskReqGB, "total_gb": totalGB},
 		})
 	}
 	return out
 }
 
+// ---------- Dependencies ----------
+
 func (m *Manager) validateDependencies() []ValidationResult {
 	var out []ValidationResult
 	deps := m.getStringList("dependencies.required_bins")
-	if len(deps) == 0 {
-		out = append(out, ValidationResult{
-			ID:        "deps-no-config",
-			Title:     "No required dependencies configured; skipping dependency checks",
-			Severity:  SeverityWarning,
-			Blocking:  false,
-			Timestamp: time.Now(),
-		})
-		return out
-	}
-
 	for _, bin := range deps {
 		_, err := exec.LookPath(bin)
 		if err != nil {
@@ -270,7 +228,7 @@ func (m *Manager) validateDependencies() []ValidationResult {
 				Severity:  SeverityError,
 				Blocking:  true,
 				Timestamp: time.Now(),
-				Remediation: fmt.Sprintf("Install %s and ensure it is on PATH (or update configs/requirements.yaml).", bin),
+				Remediation: fmt.Sprintf("Install %s and ensure it is on PATH", bin),
 			})
 		} else {
 			out = append(out, ValidationResult{
@@ -285,7 +243,7 @@ func (m *Manager) validateDependencies() []ValidationResult {
 	return out
 }
 
-// ---------------- New Validators ----------------
+// ---------- Network ----------
 
 func (m *Manager) validateNetwork() []ValidationResult {
 	var out []ValidationResult
@@ -324,6 +282,8 @@ func (m *Manager) validateNetwork() []ValidationResult {
 	}
 	return out
 }
+
+// ---------- Security ----------
 
 func (m *Manager) validateSecurity() []ValidationResult {
 	var out []ValidationResult
@@ -370,7 +330,7 @@ func (m *Manager) validateSecurity() []ValidationResult {
 	return out
 }
 
-// ------------- Helpers ----------------
+// ---------- Helpers ----------
 
 func (m *Manager) getStringList(path string) []string {
 	switch path {
@@ -436,20 +396,12 @@ func contains(arr []string, s string) bool {
 	return false
 }
 
-func rootPathForOS() string {
-	if runtime.GOOS == "windows" {
-		return "C:\\"
-	}
-	return "/"
-}
+// ---------------- Main ----------------
 
 func main() {
-	cfgPath := "configs/requirements.yaml"
 	m := NewManager()
-	if err := m.LoadRules(cfgPath); err != nil {
-		fmt.Println("Error loading rules:", err)
-		return
-	}
+	m.Rules = requirements.GetSystemRules() // dynamic system rules
+
 	report := m.ValidateAll()
 
 	// -------- Terminal Table --------
@@ -471,8 +423,7 @@ func main() {
 		fmt.Println("Failed to generate JSON report:", err)
 		return
 	}
-	err = os.WriteFile(jsonFile, data, 0644)
-	if err != nil {
+	if err := os.WriteFile(jsonFile, data, 0644); err != nil {
 		fmt.Println("Failed to save JSON report:", err)
 		return
 	}
