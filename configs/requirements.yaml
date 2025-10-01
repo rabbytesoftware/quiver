@@ -1,0 +1,24 @@
+os:
+  allowed:
+    - windows
+    - linux
+  arch:
+    - amd64
+    - arm64
+
+resources:
+  memory_mb: 8000
+  disk_gb: 50
+
+dependencies:
+  required_bins:
+    - git
+    - docker
+
+network:
+  required_hosts:
+    - github.com
+    - docker.com
+
+security:
+  require_sudo: true

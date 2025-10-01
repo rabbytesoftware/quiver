@@ -1,0 +1,76 @@
+{
+  "results": [
+    {
+      "id": "os-compat",
+      "title": "OS supported: windows",
+      "severity": "info",
+      "blocking": false,
+      "timestamp": "2025-10-01T15:30:51.0934954+05:30"
+    },
+    {
+      "id": "arch-compat",
+      "title": "Architecture supported: amd64",
+      "severity": "info",
+      "blocking": false,
+      "timestamp": "2025-10-01T15:30:51.0934954+05:30"
+    },
+    {
+      "id": "memory-check",
+      "title": "Memory OK: 16026 MB",
+      "severity": "info",
+      "blocking": false,
+      "timestamp": "2025-10-01T15:30:51.0934954+05:30",
+      "details": {
+        "required_mb": 8000,
+        "total_mb": 16026
+      }
+    },
+    {
+      "id": "disk-check",
+      "title": "Disk OK: 335 GB free on C:\\",
+      "severity": "info",
+      "blocking": false,
+      "timestamp": "2025-10-01T15:30:51.0937233+05:30",
+      "details": {
+        "free_gb": 335,
+        "required_gb": 50
+      }
+    },
+    {
+      "id": "dep-ok-git",
+      "title": "Dependency available: git",
+      "severity": "info",
+      "blocking": false,
+      "timestamp": "2025-10-01T15:30:51.0962959+05:30"
+    },
+    {
+      "id": "dep-missing-docker",
+      "title": "Dependency not found: docker",
+      "severity": "error",
+      "blocking": true,
+      "timestamp": "2025-10-01T15:30:51.1011+05:30",
+      "remediation": "Install docker and ensure it is on PATH (or update configs/requirements.yaml)."
+    },
+    {
+      "id": "network-github.com",
+      "title": "Host reachable: github.com",
+      "severity": "info",
+      "blocking": false,
+      "timestamp": "2025-10-01T15:30:51.1203928+05:30"
+    },
+    {
+      "id": "network-docker.com",
+      "title": "Host reachable: docker.com",
+      "severity": "info",
+      "blocking": false,
+      "timestamp": "2025-10-01T15:30:52.0266619+05:30"
+    },
+    {
+      "id": "security-sudo",
+      "title": "Running with sufficient privileges",
+      "severity": "info",
+      "blocking": false,
+      "timestamp": "2025-10-01T15:30:52.0379553+05:30"
+    }
+  ]
+}
