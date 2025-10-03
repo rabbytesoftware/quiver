@@ -7,65 +7,65 @@ import "context"
 type REEInterface interface {
 	// Process Execution Methods
 	Execute(
-		ctx context.Context, 
+		ctx context.Context,
 		command []string,
 	) (string, error)
 	ExecuteWithTimeout(
-		ctx context.Context, 
-		command []string, 
+		ctx context.Context,
+		command []string,
 		timeout int,
 	) (string, error)
 	ExecuteWithEnvironment(
-		ctx context.Context, 
-		command []string, 
+		ctx context.Context,
+		command []string,
 		env map[string]string,
 	) (string, error)
-	
+
 	// Process Management Methods
 	StartProcess(
-		ctx context.Context, 
+		ctx context.Context,
 		command []string,
 	) (string, error)
 	StopProcess(
-		ctx context.Context, 
+		ctx context.Context,
 		processID string,
 	) error
 	KillProcess(
-		ctx context.Context, 
+		ctx context.Context,
 		processID string,
 	) error
 	GetProcessStatus(
-		ctx context.Context, 
+		ctx context.Context,
 		processID string,
 	) (string, error)
 	ListProcesses(
 		ctx context.Context,
 	) ([]string, error)
-	
+
 	// Output Capture Methods
 	CaptureOutput(
-		ctx context.Context, 
+		ctx context.Context,
 		processID string,
 	) (string, error)
 	CaptureError(
-		ctx context.Context, 
+		ctx context.Context,
 		processID string,
 	) (string, error)
 	StreamOutput(
-		ctx context.Context, 
+		ctx context.Context,
 		processID string,
 	) (<-chan string, error)
 	StreamError(
-		ctx context.Context, 
+		ctx context.Context,
 		processID string,
 	) (<-chan string, error)
-	
+
 	// Pool Management Methods
 	GetPoolSize(
 		ctx context.Context,
 	) (int, error)
 	SetPoolSize(
-		ctx context.Context, 
+		ctx context.Context,
 		size int,
 	) error
 	GetAvailableExecutors(
@@ -74,9 +74,9 @@ type REEInterface interface {
 	GetActiveExecutors(
 		ctx context.Context,
 	) (int, error)
-	
+
 	CleanupProcess(
-		ctx context.Context, 
+		ctx context.Context,
 		processID string,
 	) error
 	CleanupAllProcesses(

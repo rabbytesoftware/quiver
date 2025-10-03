@@ -21,21 +21,21 @@ func NewATL(
 }
 
 func (a *ArrowTranslationLayer) IsCompatible(
-	ctx context.Context, 
+	ctx context.Context,
 	manifestPath string,
 ) (bool, error) {
 	return false, nil
 }
 
 func (a *ArrowTranslationLayer) Translate(
-	ctx context.Context, 
+	ctx context.Context,
 	manifestPath string,
 ) (*arrow.Arrow, error) {
 	return nil, nil
 }
 
 func (a *ArrowTranslationLayer) GetManifestVersion(
-	ctx context.Context, 
+	ctx context.Context,
 	manifestPath string,
 ) (string, error) {
 	return "", nil

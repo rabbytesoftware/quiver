@@ -10,51 +10,51 @@ func NewRuntime() REEInterface {
 }
 
 func (r *Runtime) Execute(
-	ctx context.Context, 
+	ctx context.Context,
 	command []string,
 ) (string, error) {
 	return "", nil
 }
 
 func (r *Runtime) ExecuteWithTimeout(
-	ctx context.Context, 
-	command []string, 
+	ctx context.Context,
+	command []string,
 	timeout int,
 ) (string, error) {
 	return "", nil
 }
 
 func (r *Runtime) ExecuteWithEnvironment(
-	ctx context.Context, 
-	command []string, 
+	ctx context.Context,
+	command []string,
 	env map[string]string,
 ) (string, error) {
 	return "", nil
 }
 
 func (r *Runtime) StartProcess(
-	ctx context.Context, 
+	ctx context.Context,
 	command []string,
 ) (string, error) {
 	return "", nil
 }
 
 func (r *Runtime) StopProcess(
-	ctx context.Context, 
+	ctx context.Context,
 	processID string,
 ) error {
 	return nil
 }
 
 func (r *Runtime) KillProcess(
-	ctx context.Context, 
+	ctx context.Context,
 	processID string,
 ) error {
 	return nil
 }
 
 func (r *Runtime) GetProcessStatus(
-	ctx context.Context, 
+	ctx context.Context,
 	processID string,
 ) (string, error) {
 	return "", nil
@@ -67,28 +67,28 @@ func (r *Runtime) ListProcesses(
 }
 
 func (r *Runtime) CaptureOutput(
-	ctx context.Context, 
+	ctx context.Context,
 	processID string,
 ) (string, error) {
 	return "", nil
 }
 
 func (r *Runtime) CaptureError(
-	ctx context.Context, 
+	ctx context.Context,
 	processID string,
 ) (string, error) {
 	return "", nil
 }
 
 func (r *Runtime) StreamOutput(
-	ctx context.Context, 
+	ctx context.Context,
 	processID string,
 ) (<-chan string, error) {
 	return nil, nil
 }
 
 func (r *Runtime) StreamError(
-	ctx context.Context, 
+	ctx context.Context,
 	processID string,
 ) (<-chan string, error) {
 	return nil, nil
@@ -101,7 +101,7 @@ func (r *Runtime) GetPoolSize(
 }
 
 func (r *Runtime) SetPoolSize(
-	ctx context.Context, 
+	ctx context.Context,
 	size int,
 ) error {
 	return nil
@@ -120,7 +120,7 @@ func (r *Runtime) GetActiveExecutors(
 }
 
 func (r *Runtime) CleanupProcess(
-	ctx context.Context, 
+	ctx context.Context,
 	processID string,
 ) error {
 	return nil

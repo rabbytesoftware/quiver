@@ -38,21 +38,21 @@ func (n *NetbridgeImpl) LocalIP(
 }
 
 func (n *NetbridgeImpl) IsPortAvailable(
-	ctx context.Context, 
+	ctx context.Context,
 	port int,
 ) (bool, error) {
 	return true, nil
 }
 
 func (n *NetbridgeImpl) ArePortsAvailable(
-	ctx context.Context, 
+	ctx context.Context,
 	ports []int,
 ) (bool, error) {
 	return true, nil
 }
 
 func (n *NetbridgeImpl) ForwardPort(
-	ctx context.Context, 
+	ctx context.Context,
 	portNum int,
 ) (port.PortRule, error) {
 	return port.PortRule{
@@ -64,14 +64,14 @@ func (n *NetbridgeImpl) ForwardPort(
 }
 
 func (n *NetbridgeImpl) ForwardPorts(
-	ctx context.Context, 
+	ctx context.Context,
 	ports []int,
 ) ([]port.PortRule, error) {
 	return []port.PortRule{}, nil
 }
 
 func (n *NetbridgeImpl) ReversePort(
-	ctx context.Context, 
+	ctx context.Context,
 	portNum int,
 ) (port.PortRule, error) {
 	return port.PortRule{
@@ -83,21 +83,21 @@ func (n *NetbridgeImpl) ReversePort(
 }
 
 func (n *NetbridgeImpl) ReversePorts(
-	ctx context.Context, 
+	ctx context.Context,
 	ports []int,
 ) ([]port.PortRule, error) {
 	return []port.PortRule{}, nil
 }
 
 func (n *NetbridgeImpl) GetPortForwardingStatus(
-	ctx context.Context, 
+	ctx context.Context,
 	portNum int,
 ) (port.ForwardingStatus, error) {
 	return port.ForwardingStatusEnabled, nil
 }
 
 func (n *NetbridgeImpl) GetPortForwardingStatuses(
-	ctx context.Context, 
+	ctx context.Context,
 	ports []int,
 ) ([]port.ForwardingStatus, error) {
 	return []port.ForwardingStatus{}, nil

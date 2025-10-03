@@ -13,17 +13,17 @@ import (
 // TranslatorImplementation acts as DI container for the Translator module
 
 type TranslatorImplementation struct {
-	fns    fns.FNSInterface
+	fns fns.FNSInterface
 
-	atl 	 translator.TranslatorLayerInterface[arrow.Arrow]
-	qtl 	 translator.TranslatorLayerInterface[quiver.Quiver]
+	atl translator.TranslatorLayerInterface[arrow.Arrow]
+	qtl translator.TranslatorLayerInterface[quiver.Quiver]
 }
 
 func NewTranslator(fns fns.FNSInterface) translator.TranslatorInterface {
 	return TranslatorImplementation{
-		fns:    fns,
-		atl:    atl.NewATL(fns),
-		qtl:    qtl.NewQTL(fns),
+		fns: fns,
+		atl: atl.NewATL(fns),
+		qtl: qtl.NewQTL(fns),
 	}
 }
 

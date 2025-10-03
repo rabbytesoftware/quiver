@@ -18,13 +18,13 @@ type TranslatorInterface interface {
 type TranslatorLayerInterface[t any] interface {
 	// IsCompatible checks if an Arrow manifest can be translated
 	IsCompatible(ctx context.Context, manifestPath string) (bool, error)
-	
+
 	// Translate performs the complete translation magic from manifest to Arrow model
 	Translate(ctx context.Context, manifestPath string) (*t, error)
-	
+
 	// GetManifestVersion extracts the version from any Arrow manifest
 	GetManifestVersion(ctx context.Context, manifestPath string) (string, error)
-	
+
 	// GetSupportedVersions returns all supported Arrow versions
 	GetSupportedVersions(ctx context.Context) ([]string, error)
 }

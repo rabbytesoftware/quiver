@@ -21,21 +21,21 @@ func NewQTL(
 }
 
 func (a *QuiverTranslationLayer) IsCompatible(
-	ctx context.Context, 
+	ctx context.Context,
 	manifestPath string,
 ) (bool, error) {
 	return false, nil
 }
 
 func (a *QuiverTranslationLayer) Translate(
-	ctx context.Context, 
+	ctx context.Context,
 	manifestPath string,
 ) (*quiver.Quiver, error) {
 	return nil, nil
 }
 
 func (a *QuiverTranslationLayer) GetManifestVersion(
-	ctx context.Context, 
+	ctx context.Context,
 	manifestPath string,
 ) (string, error) {
 	return "", nil

@@ -12,26 +12,26 @@ import (
 	tl "github.com/rabbytesoftware/quiver/internal/infrastructure/translator/models"
 )
 
-type Infrastructure struct{
-	Netbridge netbridge.NetbridgeInterface
-	FNS fns.FNSInterface
-	Translator tl.TranslatorInterface
+type Infrastructure struct {
+	Netbridge    netbridge.NetbridgeInterface
+	FNS          fns.FNSInterface
+	Translator   tl.TranslatorInterface
 	Requirements requirements.SRVInterface
-	Runtime runtime.REEInterface
+	Runtime      runtime.REEInterface
 }
 
 func NewInfrastructure() *Infrastructure {
-	netbridge := netbridge.NewNetbridge() 		// Netbridge module
-	fns := fns.NewFNS() 					// Fetch and Share module
-	translator := translator.NewTranslator(fns) 	// Translator (ATL & QTL) module
-	requirements := requirements.NewRequirements() 	// Requirements module
-	runtime := runtime.NewRuntime() 			// Runtime module
+	netbridge := netbridge.NewNetbridge()          // Netbridge module
+	fns := fns.NewFNS()                            // Fetch and Share module
+	translator := translator.NewTranslator(fns)    // Translator (ATL & QTL) module
+	requirements := requirements.NewRequirements() // Requirements module
+	runtime := runtime.NewRuntime()                // Runtime module
 
 	return &Infrastructure{
-		Netbridge: netbridge,
-		FNS: fns,
-		Translator: translator,
+		Netbridge:    netbridge,
+		FNS:          fns,
+		Translator:   translator,
 		Requirements: requirements,
-		Runtime: runtime,
+		Runtime:      runtime,
 	}
 }
