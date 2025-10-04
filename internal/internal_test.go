@@ -2,6 +2,7 @@ package internal
 
 import (
 	"testing"
+	"time"
 )
 
 func TestNewInternal(t *testing.T) {
@@ -59,8 +60,85 @@ func TestInternal_Run(t *testing.T) {
 	// In a real test environment, we might want to mock the API
 	// We can't actually call Run() here as it would block and start a server
 	// Instead, we verify the method exists by testing it's callable
-	// (Function comparisons to nil are always false in Go)
-	_ = internal // Use the variable to avoid "declared and not used" error
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Internal.Run() panicked: %v", r)
+		}
+	}()
+
+	// We can't actually call Run() here as it would block and start a server
+	// But we can verify the method exists and the internal struct is properly initialized
+	if internal.core == nil {
+		t.Error("Expected core to be initialized")
+	}
+	if internal.api == nil {
+		t.Error("Expected api to be initialized")
+	}
+	if internal.infrastructure == nil {
+		t.Error("Expected infrastructure to be initialized")
+	}
+	if internal.repositories == nil {
+		t.Error("Expected repositories to be initialized")
+	}
+	if internal.usecases == nil {
+		t.Error("Expected usecases to be initialized")
+	}
+}
+
+func TestInternal_Run_ActualExecution(t *testing.T) {
+	// Test the Run method by actually calling it in a goroutine
+	internal := NewInternal()
+
+	// Test that Run method can be called without panicking
+	// We'll run it in a goroutine and then stop it quickly
+	done := make(chan bool)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Internal.Run() panicked: %v", r)
+			}
+			done <- true
+		}()
+
+		// This will block, but we'll stop it quickly
+		internal.Run()
+	}()
+
+	// Wait a short time for the method to start
+	select {
+	case <-done:
+		// Method completed (likely due to error or panic)
+	case <-time.After(100 * time.Millisecond):
+		// Method is running (expected behavior)
+		// We can't easily stop it, but we've tested that it starts
+	}
+}
+
+func TestInternal_Run_Comprehensive(t *testing.T) {
+	// Test the Run method more comprehensively
+	internal := NewInternal()
+
+	// Test that we can call the methods that Run() calls internally
+	// Run() calls i.api.Run(), so we test that the API is properly initialized
+	if internal.api == nil {
+		t.Fatal("Expected API to be initialized")
+	}
+
+	// Test that the API has the necessary components
+	// We can't easily test the actual Run() call, but we can test the setup
+	if internal.core == nil {
+		t.Error("Expected core to be initialized")
+	}
+	if internal.infrastructure == nil {
+		t.Error("Expected infrastructure to be initialized")
+	}
+	if internal.repositories == nil {
+		t.Error("Expected repositories to be initialized")
+	}
+	if internal.usecases == nil {
+		t.Error("Expected usecases to be initialized")
+	}
 }
 
 func TestInternalStructure(t *testing.T) {

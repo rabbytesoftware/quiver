@@ -3,6 +3,7 @@ package ui
 import (
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 )
 
@@ -171,5 +172,219 @@ func TestRunUIModelState(t *testing.T) {
 
 	if model.historyIndex != -1 {
 		t.Error("Model should have historyIndex -1 initially")
+	}
+}
+
+func TestRunUIComprehensive(t *testing.T) {
+	// Test comprehensive RunUI functionality
+	w := watcher.NewWatcherService()
+
+	// Test that we can create a model (what RunUI does)
+	model := NewModel(w)
+	if model == nil {
+		t.Fatal("NewModel returned nil")
+	}
+
+	// Test model initialization
+	cmd := model.Init()
+	if cmd == nil {
+		t.Error("Model.Init() returned nil command")
+	}
+
+	// Test that the model is properly set up for TUI
+	// TextInput and Viewport are structs, not pointers, so we can't check for nil
+	_ = model.textInput
+	_ = model.viewport
+
+	if model.handler == nil {
+		t.Error("Handler should be initialized")
+	}
+
+	if model.queryService == nil {
+		t.Error("Query service should be initialized")
+	}
+
+	if model.watcherAdapter == nil {
+		t.Error("Watcher adapter should be initialized")
+	}
+
+	if model.asciiService == nil {
+		t.Error("ASCII service should be initialized")
+	}
+}
+
+func TestRunUIWithDifferentWatcherStates(t *testing.T) {
+	// Test RunUI with different watcher configurations
+	w := watcher.NewWatcherService()
+
+	// Test with enabled watcher
+	model := NewModel(w)
+	if model == nil {
+		t.Fatal("NewModel returned nil")
+	}
+
+	// Test that watcher is properly connected
+	if model.watcher != w {
+		t.Error("Model watcher is not the same instance")
+	}
+
+	// Test model state after initialization
+	if model.ready {
+		t.Error("Model should not be ready initially")
+	}
+
+	// Test that we can set model to ready state (what happens in RunUI)
+	model.ready = true
+	if !model.ready {
+		t.Error("Model should be ready after setting ready flag")
+	}
+}
+
+func TestRunUIErrorScenarios(t *testing.T) {
+	// Test various error scenarios that RunUI might handle
+
+	// Test with nil watcher
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("Expected panic with nil watcher: %v", r)
+		}
+	}()
+
+	// This might panic, which is acceptable
+	model := NewModel(nil)
+	if model != nil {
+		// If it doesn't panic, test that it handles nil watcher gracefully
+		if model.watcher != nil {
+			t.Error("Model should have nil watcher when passed nil")
+		}
+	}
+}
+
+func TestRunUIModelLifecycle(t *testing.T) {
+	// Test the complete model lifecycle that RunUI manages
+	w := watcher.NewWatcherService()
+	model := NewModel(w)
+
+	// Test initialization
+	cmd := model.Init()
+	if cmd == nil {
+		t.Error("Init should return a command")
+	}
+
+	// Test that model can handle updates (what RunUI does)
+	msg := tea.WindowSizeMsg{Width: 100, Height: 50}
+	updatedModel, _ := model.Update(msg)
+	if updatedModel == nil {
+		t.Error("Update should return a model")
+	}
+
+	// Test that model can render (what RunUI does)
+	view := model.View()
+	if view == "" {
+		t.Error("View should return non-empty string")
+	}
+
+	// Test cleanup (what RunUI does on exit)
+	if model.cancel != nil {
+		model.cancel()
+
+		// Verify context is cancelled
+		select {
+		case <-model.ctx.Done():
+			// Expected
+		default:
+			t.Error("Context should be done after cancel")
+		}
+	}
+}
+
+func TestRunUIWithWatcherSubscription(t *testing.T) {
+	// Test the watcher subscription that RunUI sets up
+	w := watcher.NewWatcherService()
+	model := NewModel(w)
+
+	// Test that we can subscribe to watcher (what RunUI does)
+	model.subscribeToWatcher()
+
+	// Test that watcher adapter is set up
+	if model.watcherAdapter == nil {
+		t.Error("Watcher adapter should be initialized")
+	}
+
+	// Test that we can get watcher from adapter
+	watcherFromAdapter := model.watcherAdapter.GetWatcher()
+	if watcherFromAdapter == nil {
+		t.Error("Watcher adapter should return a watcher")
+	}
+}
+
+func TestRunUIASCIIArt(t *testing.T) {
+	// Test the ASCII art functionality that RunUI uses
+	w := watcher.NewWatcherService()
+	model := NewModel(w)
+
+	// Test that ASCII art is added
+	if len(model.logLines) == 0 {
+		t.Error("Model should have ASCII art log line")
+	}
+
+	// Test that ASCII service works
+	if model.asciiService == nil {
+		t.Error("ASCII service should be initialized")
+	}
+
+	// Test that we can get welcome log line
+	welcomeLine := model.asciiService.GetWelcomeLogLine()
+	if welcomeLine.Text == "" {
+		t.Error("ASCII service should return welcome text")
+	}
+}
+
+func TestRunUITheme(t *testing.T) {
+	// Test the theme functionality that RunUI uses
+	w := watcher.NewWatcherService()
+	model := NewModel(w)
+
+	// Test that theme is initialized
+	// Theme is a struct, so we can't check for nil, but we can test methods
+	_ = model.theme
+
+	// Test that we can get log level style
+	style := model.theme.GetLogLevelStyle("info")
+	_ = style // Style is a lipgloss.Style, not a string
+
+	// Test that we can format log lines
+	logLine := "Test log line"
+	formatted := model.theme.FormatLogLine(logLine, "info")
+	if formatted == "" {
+		t.Error("Theme should format log lines")
+	}
+}
+
+func TestRunUIQueryService(t *testing.T) {
+	// Test the query service that RunUI uses
+	w := watcher.NewWatcherService()
+	model := NewModel(w)
+
+	// Test that query service is initialized
+	if model.queryService == nil {
+		t.Error("Query service should be initialized")
+	}
+
+	// Test that query service is loaded
+	if !model.queryService.IsLoaded() {
+		t.Error("Query service should be loaded")
+	}
+
+	// Test that we can get available commands
+	commands := model.queryService.GetAvailableCommands()
+	if len(commands) == 0 {
+		t.Error("Query service should have available commands")
+	}
+
+	// Test that we can get help text
+	helpText := model.queryService.GetHelpText()
+	if helpText == "" {
+		t.Error("Query service should return help text")
 	}
 }

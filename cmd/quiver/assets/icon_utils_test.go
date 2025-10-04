@@ -102,3 +102,137 @@ func TestEmbeddedIcons(t *testing.T) {
 		}
 	}
 }
+
+func TestIconManager_GetIconPath(t *testing.T) {
+	manager := NewIconManager()
+
+	// Initially should be empty
+	if manager.GetIconPath() != "" {
+		t.Error("Icon path should be empty initially")
+	}
+
+	// Save icon to temp and check path
+	tempFile, err := manager.SaveIconToTemp()
+	if err != nil {
+		t.Fatalf("Failed to save icon to temp: %v", err)
+	}
+	defer manager.Cleanup()
+
+	if manager.GetIconPath() != tempFile {
+		t.Error("Icon path should match saved temp file")
+	}
+}
+
+func TestIconManager_Cleanup(t *testing.T) {
+	manager := NewIconManager()
+
+	// Test cleanup when no icon is saved
+	err := manager.Cleanup()
+	if err != nil {
+		t.Errorf("Cleanup should not error when no icon is saved: %v", err)
+	}
+
+	// Save icon and test cleanup
+	tempFile, err := manager.SaveIconToTemp()
+	if err != nil {
+		t.Fatalf("Failed to save icon to temp: %v", err)
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
+		t.Error("Icon file should exist before cleanup")
+	}
+
+	// Cleanup and verify file is removed
+	err = manager.Cleanup()
+	if err != nil {
+		t.Errorf("Cleanup should not error: %v", err)
+	}
+
+	// Verify file is removed
+	if _, err := os.Stat(tempFile); !os.IsNotExist(err) {
+		t.Error("Icon file should be removed after cleanup")
+	}
+}
+
+func TestIconManager_PlatformSpecific(t *testing.T) {
+	manager := NewIconManager()
+
+	// Test GetIconForPlatform for all platforms
+	iconData := manager.GetIconForPlatform()
+	if len(iconData) == 0 {
+		t.Error("Icon data should not be empty for any platform")
+	}
+
+	// Test GetIconSize for all platforms
+	sizeData := manager.GetIconSize()
+	if len(sizeData) == 0 {
+		t.Error("Icon size data should not be empty for any platform")
+	}
+
+	// Test platform-specific behavior
+	switch runtime.GOOS {
+	case "windows":
+		// Windows should return WindowsIcon
+		if len(WindowsIcon) == 0 {
+			t.Error("Windows icon should be embedded")
+		}
+		// Windows should use 32x32 icon size
+		if len(Icon32) == 0 {
+			t.Error("32x32 icon should be embedded")
+		}
+	case "darwin":
+		// macOS should return MacOSIcon
+		if len(MacOSIcon) == 0 {
+			t.Error("macOS icon should be embedded")
+		}
+		// macOS should use 256x256 icon size
+		if len(Icon256) == 0 {
+			t.Error("256x256 icon should be embedded")
+		}
+	case "linux":
+		// Linux should return LinuxIcon
+		if len(LinuxIcon) == 0 {
+			t.Error("Linux icon should be embedded")
+		}
+		// Linux should use 128x128 icon size
+		if len(Icon128) == 0 {
+			t.Error("128x128 icon should be embedded")
+		}
+	default:
+		// Unknown platform should default to Linux behavior
+		if len(LinuxIcon) == 0 {
+			t.Error("Linux icon should be embedded for unknown platforms")
+		}
+		if len(Icon128) == 0 {
+			t.Error("128x128 icon should be embedded for unknown platforms")
+		}
+	}
+}
+
+func TestIconManager_MultipleOperations(t *testing.T) {
+	manager := NewIconManager()
+
+	// Test multiple save operations
+	tempFile1, err := manager.SaveIconToTemp()
+	if err != nil {
+		t.Fatalf("First save failed: %v", err)
+	}
+	defer manager.Cleanup()
+
+	// Save again (should overwrite)
+	tempFile2, err := manager.SaveIconToTemp()
+	if err != nil {
+		t.Fatalf("Second save failed: %v", err)
+	}
+
+	// Paths should be the same
+	if tempFile1 != tempFile2 {
+		t.Error("Icon path should remain the same on multiple saves")
+	}
+
+	// Test that file exists and has content
+	if _, err := os.Stat(tempFile2); os.IsNotExist(err) {
+		t.Error("Icon file should exist after second save")
+	}
+}

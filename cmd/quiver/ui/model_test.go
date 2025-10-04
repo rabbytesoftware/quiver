@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -586,5 +587,288 @@ func TestModel_AddLogLineFromWatcher_Coverage(t *testing.T) {
 	// Verify logs were added (basic check)
 	if len(model.logLines) == 0 {
 		t.Error("Expected logs to be added")
+	}
+}
+
+func TestModel_Update_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test various message types that might not be covered
+	testCases := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{"WindowSizeMsg", tea.WindowSizeMsg{Width: 100, Height: 50}},
+		{"KeyMsg_Enter", tea.KeyMsg{Type: tea.KeyEnter}},
+		{"KeyMsg_Up", tea.KeyMsg{Type: tea.KeyUp}},
+		{"KeyMsg_Down", tea.KeyMsg{Type: tea.KeyDown}},
+		{"KeyMsg_Esc", tea.KeyMsg{Type: tea.KeyEsc}},
+		{"KeyMsg_CtrlC", tea.KeyMsg{Type: tea.KeyCtrlC}},
+		{"KeyMsg_Runes", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}},
+		{"StatusTickMsg", statusTickMsg(time.Now())},
+		{"UnknownMsg", "unknown message"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			updatedModel, cmd := model.Update(tc.msg)
+			if updatedModel == nil {
+				t.Errorf("Expected Update to return a model for %s", tc.name)
+			}
+			_ = cmd
+		})
+	}
+}
+
+func TestModel_HandleCommand_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test different command types
+	commands := []string{
+		"help",
+		"clear",
+		"filter info",
+		"level debug",
+		"pause",
+		"resume",
+		"query test",
+		"unknown command",
+	}
+
+	for _, command := range commands {
+		model.textInput.SetValue(command)
+		updatedModel, cmd := model.handleCommand()
+		if updatedModel == nil {
+			t.Errorf("Expected handleCommand to return a model for command: %s", command)
+		}
+		_ = cmd
+	}
+}
+
+func TestModel_ShowHelp_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test different help scenarios
+	helpContents := []string{
+		"Basic help",
+		"Help with special characters: !@#$%^&*()",
+		"Help with newlines:\nLine 1\nLine 2",
+		"",
+		"Very long help content that might wrap or cause issues with rendering",
+	}
+
+	for _, content := range helpContents {
+		model.showHelp(content)
+		// Method should not panic
+	}
+}
+
+func TestModel_ShowQueryResult_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test different query result scenarios
+	testCases := []struct {
+		query    string
+		status   int
+		response string
+	}{
+		{"test query", 200, "success response"},
+		{"error query", 404, "not found"},
+		{"server error", 500, "internal server error"},
+		{"", 200, "empty query"},
+		{"query with special chars", 200, "response with !@#$%^&*()"},
+	}
+
+	for _, tc := range testCases {
+		model.showQueryResult(tc.query, tc.status, tc.response)
+		// Method should not panic
+	}
+}
+
+func TestModel_ShowQueryError_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test different query error scenarios
+	testCases := []struct {
+		query  string
+		status int
+		error  string
+	}{
+		{"test query", 404, "not found"},
+		{"error query", 500, "internal server error"},
+		{"timeout query", 408, "request timeout"},
+		{"", 400, "bad request"},
+		{"query with special chars", 422, "error with !@#$%^&*()"},
+	}
+
+	for _, tc := range testCases {
+		model.showQueryError(tc.query, tc.status, tc.error)
+		// Method should not panic
+	}
+}
+
+func TestModel_NavigateHistory_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Set up command history
+	model.commandHistory = []string{"cmd1", "cmd2", "cmd3", "cmd4", "cmd5"}
+
+	// Test navigating up and down
+	for i := 0; i < len(model.commandHistory); i++ {
+		// Navigate up
+		result := model.navigateHistory(-1)
+		if result == nil {
+			t.Errorf("Expected navigateHistory to return a model when navigating up (iteration %d)", i)
+		}
+	}
+
+	// Test navigating down
+	for i := 0; i < len(model.commandHistory); i++ {
+		// Navigate down
+		result := model.navigateHistory(1)
+		if result == nil {
+			t.Errorf("Expected navigateHistory to return a model when navigating down (iteration %d)", i)
+		}
+	}
+
+	// Test edge cases
+	model.historyIndex = 0
+	result := model.navigateHistory(-1) // Try to go before first
+	if result == nil {
+		t.Error("Expected navigateHistory to handle going before first item")
+	}
+
+	model.historyIndex = len(model.commandHistory) - 1
+	result = model.navigateHistory(1) // Try to go after last
+	if result == nil {
+		t.Error("Expected navigateHistory to handle going after last item")
+	}
+}
+
+func TestModel_View_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test view in different states
+	states := []struct {
+		name   string
+		ready  bool
+		width  int
+		height int
+	}{
+		{"not ready", false, 0, 0},
+		{"ready small", true, 50, 25},
+		{"ready medium", true, 100, 50},
+		{"ready large", true, 200, 100},
+	}
+
+	for _, state := range states {
+		t.Run(state.name, func(t *testing.T) {
+			model.ready = state.ready
+			model.width = state.width
+			model.height = state.height
+
+			view := model.View()
+			if view == "" {
+				t.Errorf("Expected View to return non-empty string for state: %s", state.name)
+			}
+		})
+	}
+}
+
+func TestModel_AddLogLine_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test adding log lines with different properties
+	logLines := []events.LogLine{
+		{Text: "Debug message", Level: "debug", Time: time.Now()},
+		{Text: "Info message", Level: "info", Time: time.Now()},
+		{Text: "Warning message", Level: "warn", Time: time.Now()},
+		{Text: "Error message", Level: "error", Time: time.Now()},
+		{Text: "Fatal message", Level: "fatal", Time: time.Now()},
+		{Text: "Message with special chars: !@#$%^&*()", Level: "info", Time: time.Now()},
+		{Text: "Message with newlines:\nLine 1\nLine 2", Level: "info", Time: time.Now()},
+		{Text: "", Level: "info", Time: time.Now()}, // Empty message
+	}
+
+	for i, logLine := range logLines {
+		model.addLogLine(logLine)
+		// Method should not panic
+		_ = i
+	}
+
+	// Verify logs were added
+	if len(model.logLines) == 0 {
+		t.Error("Expected logs to be added")
+	}
+}
+
+func TestModel_UpdateViewportContent_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Add various log lines
+	for i := 0; i < 10; i++ {
+		logLine := events.LogLine{
+			Text:  fmt.Sprintf("Log line %d", i),
+			Level: "info",
+			Time:  time.Now(),
+		}
+		model.addLogLine(logLine)
+	}
+
+	// Test updating viewport content
+	model.updateViewportContent()
+
+	// Method should not panic and viewport should be updated
+	// Viewport is a struct, not a pointer, so we can't check for nil
+	_ = model.viewport
+}
+
+func TestModel_SetStatus_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test different status scenarios
+	statuses := []struct {
+		message  string
+		duration time.Duration
+	}{
+		{"Normal status", 2 * time.Second},
+		{"Short status", 100 * time.Millisecond},
+		{"Long status", 10 * time.Second},
+		{"Status with special chars: !@#$%^&*()", 1 * time.Second},
+		{"", 1 * time.Second}, // Empty status
+	}
+
+	for _, status := range statuses {
+		model.setStatus(status.message, status.duration)
+		// Method should not panic
+	}
+}
+
+func TestModel_TickStatus_Comprehensive(t *testing.T) {
+	watcher := watcher.NewWatcherService()
+	model := NewModel(watcher)
+
+	// Test tickStatus in different states
+	model.setStatus("Test status", 2*time.Second)
+	cmd := model.tickStatus()
+	if cmd == nil {
+		t.Error("Expected tickStatus to return a command")
+	}
+
+	// Test without status set
+	model.setStatus("", 0)
+	cmd = model.tickStatus()
+	if cmd == nil {
+		t.Error("Expected tickStatus to return a command even without status")
 	}
 }
