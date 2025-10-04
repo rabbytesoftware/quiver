@@ -92,7 +92,7 @@ func TestInternal_Run_ActualExecution(t *testing.T) {
 	// Test that Run method can be called without panicking
 	// We'll run it in a goroutine and then stop it quickly
 	done := make(chan bool)
-	
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -100,7 +100,7 @@ func TestInternal_Run_ActualExecution(t *testing.T) {
 			}
 			done <- true
 		}()
-		
+
 		// This will block, but we'll stop it quickly
 		internal.Run()
 	}()

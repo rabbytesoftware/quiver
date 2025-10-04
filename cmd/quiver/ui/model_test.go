@@ -695,9 +695,9 @@ func TestModel_ShowQueryError_Comprehensive(t *testing.T) {
 
 	// Test different query error scenarios
 	testCases := []struct {
-		query    string
-		status   int
-		error    string
+		query  string
+		status int
+		error  string
 	}{
 		{"test query", 404, "not found"},
 		{"error query", 500, "internal server error"},
@@ -838,7 +838,7 @@ func TestModel_SetStatus_Comprehensive(t *testing.T) {
 
 	// Test different status scenarios
 	statuses := []struct {
-		message string
+		message  string
 		duration time.Duration
 	}{
 		{"Normal status", 2 * time.Second},

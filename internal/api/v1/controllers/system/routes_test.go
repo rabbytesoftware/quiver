@@ -11,20 +11,20 @@ func TestSetupRoutes(t *testing.T) {
 	// Create a test router
 	router := gin.New()
 	routerGroup := router.Group("/api/v1")
-	
+
 	// Create a mock usecase
 	usecases := &usecase.SystemUsecase{}
-	
+
 	// Test that SetupRoutes doesn't panic
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("SetupRoutes() panicked: %v", r)
 		}
 	}()
-	
+
 	// Call SetupRoutes
 	SetupRoutes(routerGroup, usecases)
-	
+
 	// The function is currently empty, so we just test it doesn't panic
 	// and can be called with valid parameters
 }
@@ -33,14 +33,14 @@ func TestSetupRoutesWithNilUsecase(t *testing.T) {
 	// Create a test router
 	router := gin.New()
 	routerGroup := router.Group("/api/v1")
-	
+
 	// Test with nil usecase
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("SetupRoutes() panicked with nil usecase: %v", r)
 		}
 	}()
-	
+
 	SetupRoutes(routerGroup, nil)
 }
 
@@ -51,7 +51,7 @@ func TestSetupRoutesWithNilRouter(t *testing.T) {
 			t.Errorf("SetupRoutes() panicked with nil router: %v", r)
 		}
 	}()
-	
+
 	usecases := &usecase.SystemUsecase{}
 	SetupRoutes(nil, usecases)
 }
@@ -95,7 +95,7 @@ func TestSetupRoutes_EdgeCases(t *testing.T) {
 	// Test with different router groups
 	group1 := router.Group("/test1")
 	group2 := router.Group("/test2")
-	
+
 	SetupRoutes(group1, usecases)
 	SetupRoutes(group2, usecases)
 

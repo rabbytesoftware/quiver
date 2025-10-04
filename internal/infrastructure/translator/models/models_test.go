@@ -18,15 +18,15 @@ func TestResourceInfo(t *testing.T) {
 		Type:    fns.ResourceTypeFile,
 		ModTime: time.Now(),
 	}
-	
+
 	if info.Path != "test" {
 		t.Errorf("Expected Path to be 'test', got %s", info.Path)
 	}
-	
+
 	if info.Size != 1024 {
 		t.Errorf("Expected Size to be 1024, got %d", info.Size)
 	}
-	
+
 	if info.Type != fns.ResourceTypeFile {
 		t.Error("Expected Type to be ResourceTypeFile")
 	}
@@ -38,7 +38,7 @@ func TestResourceType(t *testing.T) {
 	if rt != "file" {
 		t.Errorf("Expected ResourceType to be 'file', got %s", rt)
 	}
-	
+
 	// Test different resource types
 	types := []fns.ResourceType{fns.ResourceTypeFile, fns.ResourceTypeDir}
 	for _, rt := range types {
@@ -52,7 +52,7 @@ func TestFNSInterface(t *testing.T) {
 	// Test that FNSInterface can be referenced
 	// We can't easily test the interface without a concrete implementation,
 	// but we can verify the interface definition exists and is valid
-	
+
 	// This test mainly verifies that the interface is properly defined
 	// and can be used in type assertions
 	var _ fns.FNSInterface = (*mockFNS)(nil)
@@ -188,159 +188,159 @@ func (m *mockFNS) Walk(ctx context.Context, root string, fn func(path string, in
 func TestFNSInterfaceMethods(t *testing.T) {
 	mock := &mockFNS{}
 	ctx := context.Background()
-	
+
 	// Test that all interface methods can be called
 	_, err := mock.GetInfo(ctx, "test")
 	if err != nil {
 		t.Errorf("GetInfo() returned error: %v", err)
 	}
-	
+
 	_, err = mock.Exists(ctx, "test")
 	if err != nil {
 		t.Errorf("Exists() returned error: %v", err)
 	}
-	
+
 	_, err = mock.IsDir(ctx, "test")
 	if err != nil {
 		t.Errorf("IsDir() returned error: %v", err)
 	}
-	
+
 	_, err = mock.IsFile(ctx, "test")
 	if err != nil {
 		t.Errorf("IsFile() returned error: %v", err)
 	}
-	
+
 	_, err = mock.Read(ctx, "test")
 	if err != nil {
 		t.Errorf("Read() returned error: %v", err)
 	}
-	
+
 	_, err = mock.ReadStream(ctx, "test")
 	if err != nil {
 		t.Errorf("ReadStream() returned error: %v", err)
 	}
-	
+
 	err = mock.Write(ctx, "test", []byte("data"))
 	if err != nil {
 		t.Errorf("Write() returned error: %v", err)
 	}
-	
+
 	err = mock.WriteStream(ctx, "test", nil)
 	if err != nil {
 		t.Errorf("WriteStream() returned error: %v", err)
 	}
-	
+
 	err = mock.Append(ctx, "test", []byte("data"))
 	if err != nil {
 		t.Errorf("Append() returned error: %v", err)
 	}
-	
+
 	_, err = mock.List(ctx, "test")
 	if err != nil {
 		t.Errorf("List() returned error: %v", err)
 	}
-	
+
 	err = mock.Mkdir(ctx, "test", 0755)
 	if err != nil {
 		t.Errorf("Mkdir() returned error: %v", err)
 	}
-	
+
 	err = mock.MkdirAll(ctx, "test", 0755)
 	if err != nil {
 		t.Errorf("MkdirAll() returned error: %v", err)
 	}
-	
+
 	err = mock.Remove(ctx, "test")
 	if err != nil {
 		t.Errorf("Remove() returned error: %v", err)
 	}
-	
+
 	err = mock.RemoveAll(ctx, "test")
 	if err != nil {
 		t.Errorf("RemoveAll() returned error: %v", err)
 	}
-	
+
 	err = mock.Copy(ctx, "src", "dst")
 	if err != nil {
 		t.Errorf("Copy() returned error: %v", err)
 	}
-	
+
 	err = mock.Move(ctx, "src", "dst")
 	if err != nil {
 		t.Errorf("Move() returned error: %v", err)
 	}
-	
+
 	err = mock.Rename(ctx, "src", "dst")
 	if err != nil {
 		t.Errorf("Rename() returned error: %v", err)
 	}
-	
+
 	err = mock.Chmod(ctx, "test", 0755)
 	if err != nil {
 		t.Errorf("Chmod() returned error: %v", err)
 	}
-	
+
 	err = mock.Chown(ctx, "test", 1000, 1000)
 	if err != nil {
 		t.Errorf("Chown() returned error: %v", err)
 	}
-	
+
 	progress := func(int) {}
 	err = mock.Download(ctx, "http://example.com", "dst", progress)
 	if err != nil {
 		t.Errorf("Download() returned error: %v", err)
 	}
-	
+
 	_, err = mock.DownloadStream(ctx, "http://example.com", progress)
 	if err != nil {
 		t.Errorf("DownloadStream() returned error: %v", err)
 	}
-	
+
 	_, err = mock.Fetch(ctx, "http://example.com")
 	if err != nil {
 		t.Errorf("Fetch() returned error: %v", err)
 	}
-	
+
 	_, err = mock.CacheGet(ctx, "key")
 	if err != nil {
 		t.Errorf("CacheGet() returned error: %v", err)
 	}
-	
+
 	err = mock.CacheSet(ctx, "key", []byte("data"), time.Hour)
 	if err != nil {
 		t.Errorf("CacheSet() returned error: %v", err)
 	}
-	
+
 	err = mock.CacheDelete(ctx, "key")
 	if err != nil {
 		t.Errorf("CacheDelete() returned error: %v", err)
 	}
-	
+
 	err = mock.CacheClear(ctx)
 	if err != nil {
 		t.Errorf("CacheClear() returned error: %v", err)
 	}
-	
+
 	_, _, err = mock.Resolve(ctx, "test")
 	if err != nil {
 		t.Errorf("Resolve() returned error: %v", err)
 	}
-	
+
 	err = mock.Validate(ctx, "test")
 	if err != nil {
 		t.Errorf("Validate() returned error: %v", err)
 	}
-	
+
 	_, err = mock.TempFile(ctx, "test-*")
 	if err != nil {
 		t.Errorf("TempFile() returned error: %v", err)
 	}
-	
+
 	_, err = mock.TempDir(ctx, "test-*")
 	if err != nil {
 		t.Errorf("TempDir() returned error: %v", err)
 	}
-	
+
 	walkFn := func(path string, info fns.ResourceInfo, err error) error {
 		return nil
 	}

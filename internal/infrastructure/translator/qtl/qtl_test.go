@@ -19,7 +19,7 @@ func TestQTL_IsCompatible(t *testing.T) {
 	mockFNS := fns.NewFNS()
 	qtl := NewQTL(mockFNS)
 	ctx := context.Background()
-	
+
 	compatible, err := qtl.IsCompatible(ctx, "test-manifest")
 	if err != nil {
 		t.Errorf("IsCompatible() returned error: %v", err)
@@ -33,7 +33,7 @@ func TestQTL_Translate(t *testing.T) {
 	mockFNS := fns.NewFNS()
 	qtl := NewQTL(mockFNS)
 	ctx := context.Background()
-	
+
 	result, err := qtl.Translate(ctx, "test-input")
 	if err != nil {
 		t.Errorf("Translate() returned error: %v", err)
@@ -47,7 +47,7 @@ func TestQTL_GetManifestVersion(t *testing.T) {
 	mockFNS := fns.NewFNS()
 	qtl := NewQTL(mockFNS)
 	ctx := context.Background()
-	
+
 	version, err := qtl.GetManifestVersion(ctx, "test-manifest")
 	if err != nil {
 		t.Errorf("GetManifestVersion() returned error: %v", err)
@@ -61,7 +61,7 @@ func TestQTL_GetSupportedVersions(t *testing.T) {
 	mockFNS := fns.NewFNS()
 	qtl := NewQTL(mockFNS)
 	ctx := context.Background()
-	
+
 	versions, err := qtl.GetSupportedVersions(ctx)
 	if err != nil {
 		t.Errorf("GetSupportedVersions() returned error: %v", err)
@@ -84,17 +84,17 @@ func TestQTL_MultipleInstances(t *testing.T) {
 	mockFNS := fns.NewFNS()
 	qtl1 := NewQTL(mockFNS)
 	qtl2 := NewQTL(mockFNS)
-	
+
 	// Both should be valid
 	if qtl1 == nil || qtl2 == nil {
 		t.Error("NewQTL() returned nil instance")
 	}
-	
+
 	// Test that both instances work correctly
 	ctx := context.Background()
 	compatible1, _ := qtl1.IsCompatible(ctx, "test")
 	compatible2, _ := qtl2.IsCompatible(ctx, "test")
-	
+
 	if compatible1 != compatible2 {
 		t.Error("Both instances should have same IsCompatible behavior")
 	}
@@ -104,7 +104,7 @@ func TestQTL_AllMethods(t *testing.T) {
 	mockFNS := fns.NewFNS()
 	qtl := NewQTL(mockFNS)
 	ctx := context.Background()
-	
+
 	// Test all methods to ensure they don't panic
 	testCases := []struct {
 		name string
@@ -127,7 +127,7 @@ func TestQTL_AllMethods(t *testing.T) {
 			return err
 		}},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.fn()

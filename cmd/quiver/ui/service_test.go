@@ -178,7 +178,7 @@ func TestRunUIModelState(t *testing.T) {
 func TestRunUIComprehensive(t *testing.T) {
 	// Test comprehensive RunUI functionality
 	w := watcher.NewWatcherService()
-	
+
 	// Test that we can create a model (what RunUI does)
 	model := NewModel(w)
 	if model == nil {
@@ -242,7 +242,7 @@ func TestRunUIWithDifferentWatcherStates(t *testing.T) {
 
 func TestRunUIErrorScenarios(t *testing.T) {
 	// Test various error scenarios that RunUI might handle
-	
+
 	// Test with nil watcher
 	defer func() {
 		if r := recover(); r != nil {
@@ -273,7 +273,7 @@ func TestRunUIModelLifecycle(t *testing.T) {
 
 	// Test that model can handle updates (what RunUI does)
 	msg := tea.WindowSizeMsg{Width: 100, Height: 50}
-	updatedModel, cmd := model.Update(msg)
+	updatedModel, _ := model.Update(msg)
 	if updatedModel == nil {
 		t.Error("Update should return a model")
 	}
@@ -287,7 +287,7 @@ func TestRunUIModelLifecycle(t *testing.T) {
 	// Test cleanup (what RunUI does on exit)
 	if model.cancel != nil {
 		model.cancel()
-		
+
 		// Verify context is cancelled
 		select {
 		case <-model.ctx.Done():

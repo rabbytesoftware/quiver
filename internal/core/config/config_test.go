@@ -384,7 +384,7 @@ func TestConfigGetMultipleCalls(t *testing.T) {
 	// Test that Get() returns the same instance (singleton behavior)
 	cfg1 := Get()
 	cfg2 := Get()
-	
+
 	if cfg1 != cfg2 {
 		t.Error("Get() should return the same instance (singleton)")
 	}

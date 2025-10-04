@@ -16,7 +16,7 @@ func TestNewNetbridge(t *testing.T) {
 
 func TestNetbridgeImpl_IsEnabled(t *testing.T) {
 	nb := NewNetbridge()
-	
+
 	enabled := nb.IsEnabled()
 	if !enabled {
 		t.Error("IsEnabled() should return true")
@@ -25,7 +25,7 @@ func TestNetbridgeImpl_IsEnabled(t *testing.T) {
 
 func TestNetbridgeImpl_IsAvailable(t *testing.T) {
 	nb := NewNetbridge()
-	
+
 	available := nb.IsAvailable()
 	if !available {
 		t.Error("IsAvailable() should return true")
@@ -35,7 +35,7 @@ func TestNetbridgeImpl_IsAvailable(t *testing.T) {
 func TestNetbridgeImpl_PublicIP(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	ip, err := nb.PublicIP(ctx)
 	if err != nil {
 		t.Errorf("PublicIP() returned error: %v", err)
@@ -48,7 +48,7 @@ func TestNetbridgeImpl_PublicIP(t *testing.T) {
 func TestNetbridgeImpl_LocalIP(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	ip, err := nb.LocalIP(ctx)
 	if err != nil {
 		t.Errorf("LocalIP() returned error: %v", err)
@@ -61,7 +61,7 @@ func TestNetbridgeImpl_LocalIP(t *testing.T) {
 func TestNetbridgeImpl_IsPortAvailable(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	available, err := nb.IsPortAvailable(ctx, 8080)
 	if err != nil {
 		t.Errorf("IsPortAvailable() returned error: %v", err)
@@ -74,7 +74,7 @@ func TestNetbridgeImpl_IsPortAvailable(t *testing.T) {
 func TestNetbridgeImpl_ArePortsAvailable(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	ports := []int{8080, 8081, 8082}
 	available, err := nb.ArePortsAvailable(ctx, ports)
 	if err != nil {
@@ -88,12 +88,12 @@ func TestNetbridgeImpl_ArePortsAvailable(t *testing.T) {
 func TestNetbridgeImpl_ForwardPort(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	rule, err := nb.ForwardPort(ctx, 8080)
 	if err != nil {
 		t.Errorf("ForwardPort() returned error: %v", err)
 	}
-	
+
 	// Check that the returned rule has expected values
 	if rule.StartPort != 8080 {
 		t.Errorf("ForwardPort() returned wrong StartPort: got %d, want %d", rule.StartPort, 8080)
@@ -112,7 +112,7 @@ func TestNetbridgeImpl_ForwardPort(t *testing.T) {
 func TestNetbridgeImpl_ForwardPorts(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	ports := []int{8080, 8081, 8082}
 	rules, err := nb.ForwardPorts(ctx, ports)
 	if err != nil {
@@ -129,12 +129,12 @@ func TestNetbridgeImpl_ForwardPorts(t *testing.T) {
 func TestNetbridgeImpl_ReversePort(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	rule, err := nb.ReversePort(ctx, 8080)
 	if err != nil {
 		t.Errorf("ReversePort() returned error: %v", err)
 	}
-	
+
 	// Check that the returned rule has expected values
 	if rule.StartPort != 8080 {
 		t.Errorf("ReversePort() returned wrong StartPort: got %d, want %d", rule.StartPort, 8080)
@@ -153,7 +153,7 @@ func TestNetbridgeImpl_ReversePort(t *testing.T) {
 func TestNetbridgeImpl_ReversePorts(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	ports := []int{8080, 8081, 8082}
 	rules, err := nb.ReversePorts(ctx, ports)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestNetbridgeImpl_ReversePorts(t *testing.T) {
 func TestNetbridgeImpl_GetPortForwardingStatus(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	status, err := nb.GetPortForwardingStatus(ctx, 8080)
 	if err != nil {
 		t.Errorf("GetPortForwardingStatus() returned error: %v", err)
@@ -183,7 +183,7 @@ func TestNetbridgeImpl_GetPortForwardingStatus(t *testing.T) {
 func TestNetbridgeImpl_GetPortForwardingStatuses(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
-	
+
 	ports := []int{8080, 8081, 8082}
 	statuses, err := nb.GetPortForwardingStatuses(ctx, ports)
 	if err != nil {
@@ -205,17 +205,17 @@ func TestNetbridgeImpl_InterfaceCompliance(t *testing.T) {
 func TestNetbridgeImpl_MultipleInstances(t *testing.T) {
 	nb1 := NewNetbridge()
 	nb2 := NewNetbridge()
-	
+
 	// Both should be valid
 	if nb1 == nil || nb2 == nil {
 		t.Error("NewNetbridge() returned nil instance")
 	}
-	
+
 	// Test that both instances work correctly
 	if nb1.IsEnabled() != nb2.IsEnabled() {
 		t.Error("Both instances should have same IsEnabled behavior")
 	}
-	
+
 	if nb1.IsAvailable() != nb2.IsAvailable() {
 		t.Error("Both instances should have same IsAvailable behavior")
 	}

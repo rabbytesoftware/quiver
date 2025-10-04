@@ -15,7 +15,7 @@ func TestNewRuntime(t *testing.T) {
 func TestRuntime_Execute(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	output, err := rt.Execute(ctx, []string{"echo", "test"})
 	if err != nil {
 		t.Errorf("Execute() returned error: %v", err)
@@ -28,7 +28,7 @@ func TestRuntime_Execute(t *testing.T) {
 func TestRuntime_ExecuteWithTimeout(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	output, err := rt.ExecuteWithTimeout(ctx, []string{"echo", "test"}, 30)
 	if err != nil {
 		t.Errorf("ExecuteWithTimeout() returned error: %v", err)
@@ -41,7 +41,7 @@ func TestRuntime_ExecuteWithTimeout(t *testing.T) {
 func TestRuntime_ExecuteWithEnvironment(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	env := map[string]string{"TEST": "value"}
 	output, err := rt.ExecuteWithEnvironment(ctx, []string{"echo", "test"}, env)
 	if err != nil {
@@ -55,7 +55,7 @@ func TestRuntime_ExecuteWithEnvironment(t *testing.T) {
 func TestRuntime_StartProcess(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	processID, err := rt.StartProcess(ctx, []string{"echo", "test"})
 	if err != nil {
 		t.Errorf("StartProcess() returned error: %v", err)
@@ -68,7 +68,7 @@ func TestRuntime_StartProcess(t *testing.T) {
 func TestRuntime_StopProcess(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	err := rt.StopProcess(ctx, "test-process-id")
 	if err != nil {
 		t.Errorf("StopProcess() returned error: %v", err)
@@ -78,7 +78,7 @@ func TestRuntime_StopProcess(t *testing.T) {
 func TestRuntime_KillProcess(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	err := rt.KillProcess(ctx, "test-process-id")
 	if err != nil {
 		t.Errorf("KillProcess() returned error: %v", err)
@@ -88,7 +88,7 @@ func TestRuntime_KillProcess(t *testing.T) {
 func TestRuntime_GetProcessStatus(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	status, err := rt.GetProcessStatus(ctx, "test-process-id")
 	if err != nil {
 		t.Errorf("GetProcessStatus() returned error: %v", err)
@@ -101,7 +101,7 @@ func TestRuntime_GetProcessStatus(t *testing.T) {
 func TestRuntime_ListProcesses(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	processes, err := rt.ListProcesses(ctx)
 	if err != nil {
 		t.Errorf("ListProcesses() returned error: %v", err)
@@ -114,7 +114,7 @@ func TestRuntime_ListProcesses(t *testing.T) {
 func TestRuntime_CaptureOutput(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	output, err := rt.CaptureOutput(ctx, "test-process-id")
 	if err != nil {
 		t.Errorf("CaptureOutput() returned error: %v", err)
@@ -127,7 +127,7 @@ func TestRuntime_CaptureOutput(t *testing.T) {
 func TestRuntime_CaptureError(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	output, err := rt.CaptureError(ctx, "test-process-id")
 	if err != nil {
 		t.Errorf("CaptureError() returned error: %v", err)
@@ -140,7 +140,7 @@ func TestRuntime_CaptureError(t *testing.T) {
 func TestRuntime_StreamOutput(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	channel, err := rt.StreamOutput(ctx, "test-process-id")
 	if err != nil {
 		t.Errorf("StreamOutput() returned error: %v", err)
@@ -153,7 +153,7 @@ func TestRuntime_StreamOutput(t *testing.T) {
 func TestRuntime_StreamError(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	channel, err := rt.StreamError(ctx, "test-process-id")
 	if err != nil {
 		t.Errorf("StreamError() returned error: %v", err)
@@ -166,7 +166,7 @@ func TestRuntime_StreamError(t *testing.T) {
 func TestRuntime_GetPoolSize(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	size, err := rt.GetPoolSize(ctx)
 	if err != nil {
 		t.Errorf("GetPoolSize() returned error: %v", err)
@@ -179,7 +179,7 @@ func TestRuntime_GetPoolSize(t *testing.T) {
 func TestRuntime_SetPoolSize(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	err := rt.SetPoolSize(ctx, 10)
 	if err != nil {
 		t.Errorf("SetPoolSize() returned error: %v", err)
@@ -189,7 +189,7 @@ func TestRuntime_SetPoolSize(t *testing.T) {
 func TestRuntime_GetAvailableExecutors(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	count, err := rt.GetAvailableExecutors(ctx)
 	if err != nil {
 		t.Errorf("GetAvailableExecutors() returned error: %v", err)
@@ -202,7 +202,7 @@ func TestRuntime_GetAvailableExecutors(t *testing.T) {
 func TestRuntime_GetActiveExecutors(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	count, err := rt.GetActiveExecutors(ctx)
 	if err != nil {
 		t.Errorf("GetActiveExecutors() returned error: %v", err)
@@ -215,7 +215,7 @@ func TestRuntime_GetActiveExecutors(t *testing.T) {
 func TestRuntime_CleanupProcess(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	err := rt.CleanupProcess(ctx, "test-process-id")
 	if err != nil {
 		t.Errorf("CleanupProcess() returned error: %v", err)
@@ -225,7 +225,7 @@ func TestRuntime_CleanupProcess(t *testing.T) {
 func TestRuntime_CleanupAllProcesses(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	err := rt.CleanupAllProcesses(ctx)
 	if err != nil {
 		t.Errorf("CleanupAllProcesses() returned error: %v", err)
@@ -235,7 +235,7 @@ func TestRuntime_CleanupAllProcesses(t *testing.T) {
 func TestRuntime_Shutdown(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	err := rt.Shutdown(ctx)
 	if err != nil {
 		t.Errorf("Shutdown() returned error: %v", err)
@@ -250,19 +250,19 @@ func TestRuntime_InterfaceCompliance(t *testing.T) {
 func TestRuntime_MultipleInstances(t *testing.T) {
 	rt1 := NewRuntime()
 	rt2 := NewRuntime()
-	
+
 	// Both should be valid
 	if rt1 == nil || rt2 == nil {
 		t.Error("NewRuntime() returned nil instance")
 	}
-	
+
 	// Test that both instances work correctly
 	ctx := context.Background()
-	
+
 	// Test that both instances can execute methods
 	_, err1 := rt1.Execute(ctx, []string{"test"})
 	_, err2 := rt2.Execute(ctx, []string{"test"})
-	
+
 	if err1 != nil || err2 != nil {
 		t.Error("Both instances should execute methods without error")
 	}
@@ -271,7 +271,7 @@ func TestRuntime_MultipleInstances(t *testing.T) {
 func TestRuntime_AllMethods(t *testing.T) {
 	rt := NewRuntime()
 	ctx := context.Background()
-	
+
 	// Test all methods to ensure they don't panic
 	testCases := []struct {
 		name string
@@ -348,7 +348,7 @@ func TestRuntime_AllMethods(t *testing.T) {
 			return rt.Shutdown(ctx)
 		}},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.fn()
