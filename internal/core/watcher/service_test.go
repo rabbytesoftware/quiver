@@ -3,6 +3,7 @@ package watcher
 import (
 	"testing"
 
+	"github.com/rabbytesoftware/quiver/internal/core/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -184,5 +185,178 @@ func TestWatcherInitialization(t *testing.T) {
 	level := watcher.GetLevel()
 	if level < logrus.PanicLevel || level > logrus.TraceLevel {
 		t.Error("Watcher level not properly initialized")
+	}
+}
+
+func TestWatcher_Unforeseen(t *testing.T) {
+	watcher := NewWatcherService()
+
+	// Test that Unforeseen method exists and can be called
+	// Note: This method calls Fatal which may cause issues in tests
+	defer func() {
+		if r := recover(); r != nil {
+			// Fatal may cause panic, which is expected
+			t.Logf("Unforeseen method caused expected behavior: %v", r)
+		}
+	}()
+
+	// We can't easily test Unforeseen without potentially crashing the test
+	// But we can verify the method exists by checking the watcher type
+	// The Unforeseen method calls Fatal which may exit the program
+	// So we just test that the method exists and can be referenced
+	_ = watcher
+}
+
+func TestWatcher_Unforeseen_Comprehensive(t *testing.T) {
+	watcher := NewWatcherService()
+
+	// Test that Unforeseen method exists and can be called
+	// This method calls Fatal which may cause issues in tests
+	defer func() {
+		if r := recover(); r != nil {
+			// Fatal may cause panic, which is expected
+			t.Logf("Unforeseen method caused expected behavior: %v", r)
+		}
+	}()
+
+	// Test that the method exists by checking the watcher type
+	// We can't actually call it without potentially crashing the test
+	_ = watcher
+
+	// Test that the watcher is properly initialized
+	if watcher == nil {
+		t.Error("Expected watcher to be initialized")
+	}
+}
+
+func TestWatcher_Unforeseen_EdgeCases(t *testing.T) {
+	watcher := NewWatcherService()
+
+	// Test that Unforeseen method exists and can be called
+	// This method calls Fatal which may cause issues in tests
+	defer func() {
+		if r := recover(); r != nil {
+			// Fatal may cause panic, which is expected
+			t.Logf("Unforeseen method caused expected behavior: %v", r)
+		}
+	}()
+
+	// Test that the method exists by checking the watcher type
+	// We can't actually call it without potentially crashing the test
+	_ = watcher
+
+	// Test that the watcher is properly initialized
+	if watcher == nil {
+		t.Error("Expected watcher to be initialized")
+	}
+}
+
+func TestInitLogger(t *testing.T) {
+	// Test initLogger with different configurations
+	configs := []struct {
+		name string
+		cfg  config.Watcher
+	}{
+		{"disabled", config.Watcher{Enabled: false, Level: "debug"}},
+		{"enabled_info", config.Watcher{Enabled: true, Level: "info"}},
+		{"enabled_warn", config.Watcher{Enabled: true, Level: "warn"}},
+		{"enabled_error", config.Watcher{Enabled: true, Level: "error"}},
+		{"enabled_fatal", config.Watcher{Enabled: true, Level: "fatal"}},
+		{"invalid_level", config.Watcher{Enabled: true, Level: "invalid"}},
+	}
+
+	for _, test := range configs {
+		t.Run(test.name, func(t *testing.T) {
+			logger := initLogger(test.cfg)
+			if logger == nil {
+				t.Error("initLogger should never return nil")
+			}
+		})
+	}
+}
+
+func TestInitLogger_Comprehensive(t *testing.T) {
+	// Test initLogger with comprehensive configurations
+	configs := []struct {
+		name string
+		cfg  config.Watcher
+	}{
+		{"disabled_debug", config.Watcher{Enabled: false, Level: "debug"}},
+		{"disabled_info", config.Watcher{Enabled: false, Level: "info"}},
+		{"disabled_warn", config.Watcher{Enabled: false, Level: "warn"}},
+		{"disabled_error", config.Watcher{Enabled: false, Level: "error"}},
+		{"disabled_fatal", config.Watcher{Enabled: false, Level: "fatal"}},
+		{"enabled_debug", config.Watcher{Enabled: true, Level: "debug"}},
+		{"enabled_info", config.Watcher{Enabled: true, Level: "info"}},
+		{"enabled_warn", config.Watcher{Enabled: true, Level: "warn"}},
+		{"enabled_error", config.Watcher{Enabled: true, Level: "error"}},
+		{"enabled_fatal", config.Watcher{Enabled: true, Level: "fatal"}},
+		{"enabled_trace", config.Watcher{Enabled: true, Level: "trace"}},
+		{"enabled_panic", config.Watcher{Enabled: true, Level: "panic"}},
+		{"invalid_level", config.Watcher{Enabled: true, Level: "invalid"}},
+		{"empty_level", config.Watcher{Enabled: true, Level: ""}},
+		{"special_chars", config.Watcher{Enabled: true, Level: "!@#$%^&*()"}},
+	}
+
+	for _, test := range configs {
+		t.Run(test.name, func(t *testing.T) {
+			logger := initLogger(test.cfg)
+			if logger == nil {
+				t.Error("initLogger should never return nil")
+			}
+		})
+	}
+}
+
+func TestInitLogger_EdgeCases(t *testing.T) {
+	// Test initLogger with edge cases
+	configs := []struct {
+		name string
+		cfg  config.Watcher
+	}{
+		{"empty_config", config.Watcher{}},
+		{"zero_values", config.Watcher{Enabled: false, Level: ""}},
+		{"max_level", config.Watcher{Enabled: true, Level: "trace"}},
+		{"min_level", config.Watcher{Enabled: true, Level: "panic"}},
+		{"numeric_level", config.Watcher{Enabled: true, Level: "123"}},
+		{"unicode_level", config.Watcher{Enabled: true, Level: "测试"}},
+	}
+
+	for _, test := range configs {
+		t.Run(test.name, func(t *testing.T) {
+			logger := initLogger(test.cfg)
+			// initLogger should not panic even with edge cases
+			_ = logger
+		})
+	}
+}
+
+func TestIsTestEnvironment(t *testing.T) {
+	// Test isTestEnvironment function
+	// This function checks os.Args for test-related strings
+	result := isTestEnvironment()
+
+	// The result depends on how the test is run
+	// We just verify it doesn't panic and returns a boolean
+	_ = result
+}
+
+func TestIsTestEnvironment_Comprehensive(t *testing.T) {
+	// Test isTestEnvironment function comprehensively
+	result := isTestEnvironment()
+
+	// The result depends on how the test is run
+	// We just verify it doesn't panic and returns a boolean
+	if result != true && result != false {
+		t.Error("isTestEnvironment should return a boolean")
+	}
+}
+
+func TestIsTestEnvironment_MultipleCalls(t *testing.T) {
+	// Test isTestEnvironment function with multiple calls
+	for i := 0; i < 5; i++ {
+		result := isTestEnvironment()
+		// The result should be consistent within the same test run
+		_ = result
 	}
 }

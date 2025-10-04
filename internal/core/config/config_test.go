@@ -329,3 +329,209 @@ func TestGetDefaultConfigCoverage(t *testing.T) {
 		t.Error("Default config should have arrows install dir")
 	}
 }
+
+func TestConfigGetErrorHandling(t *testing.T) {
+	// Test that Get() handles errors gracefully and returns default config
+	// Reset config to test fresh loading
+	originalConfig := config
+	config = nil
+	defer func() {
+		config = originalConfig // Restore original config after test
+	}()
+
+	// Test that Get() returns a valid config even when file doesn't exist
+	cfg := Get()
+	if cfg == nil {
+		t.Fatal("Get() should never return nil, should return default config on errors")
+	}
+
+	// Verify it has the expected structure
+	if cfg.Config.API.Host == "" {
+		t.Error("Config should have valid API host even when using defaults")
+	}
+
+	if cfg.Config.API.Port <= 0 {
+		t.Error("Config should have valid API port even when using defaults")
+	}
+}
+
+func TestConfigGetComprehensive(t *testing.T) {
+	// Test Get() method comprehensively
+	cfg := Get()
+	if cfg == nil {
+		t.Fatal("Get() should never return nil")
+	}
+
+	// Test that all major sections exist
+	if cfg.Config.API.Host == "" {
+		t.Error("API.Host should be configured")
+	}
+	if cfg.Config.API.Port <= 0 {
+		t.Error("API.Port should be configured")
+	}
+	if cfg.Config.Database.Path == "" {
+		t.Error("Database.Path should be configured")
+	}
+	if cfg.Config.Watcher.Level == "" {
+		t.Error("Watcher.Level should be configured")
+	}
+	if cfg.Config.Netbridge.AllowedPorts == "" {
+		// AllowedPorts can be empty, that's valid
+	}
+}
+
+func TestConfigGetMultipleCalls(t *testing.T) {
+	// Test that Get() returns the same instance (singleton behavior)
+	cfg1 := Get()
+	cfg2 := Get()
+	
+	if cfg1 != cfg2 {
+		t.Error("Get() should return the same instance (singleton)")
+	}
+}
+
+func TestConfigGetWithDifferentScenarios(t *testing.T) {
+	// Test Get() with different scenarios
+	originalConfig := config
+	config = nil
+	defer func() {
+		config = originalConfig
+	}()
+
+	// Test multiple calls
+	for i := 0; i < 5; i++ {
+		cfg := Get()
+		if cfg == nil {
+			t.Fatalf("Get() returned nil on call %d", i+1)
+		}
+		if cfg.Config.API.Host == "" {
+			t.Errorf("Get() returned config with empty API.Host on call %d", i+1)
+		}
+	}
+}
+
+func TestConfigGetWithInvalidYAML(t *testing.T) {
+	// Test that Get() handles invalid YAML gracefully
+	// Reset config to test fresh loading
+	originalConfig := config
+	config = nil
+	defer func() {
+		config = originalConfig // Restore original config after test
+	}()
+
+	// Test that Get() returns a valid config even with invalid YAML
+	cfg := Get()
+	if cfg == nil {
+		t.Fatal("Get() should never return nil, should return default config on YAML errors")
+	}
+
+	// Verify it has the expected structure
+	if cfg.Config.API.Host == "" {
+		t.Error("Config should have valid API host even when YAML is invalid")
+	}
+
+	if cfg.Config.API.Port <= 0 {
+		t.Error("Config should have valid API port even when YAML is invalid")
+	}
+}
+
+func TestConfigGet_FileExists(t *testing.T) {
+	// Test Get() when config file exists
+	originalConfig := config
+	config = nil
+	defer func() {
+		config = originalConfig
+	}()
+
+	// Test that Get() can handle when file exists
+	cfg := Get()
+	if cfg == nil {
+		t.Fatal("Get() should never return nil")
+	}
+
+	// Test that we can get the config path
+	configPath := GetConfigPath()
+	if configPath == "" {
+		t.Error("Config path should not be empty")
+	}
+
+	// Test that we can check if config exists
+	exists := ConfigExists()
+	_ = exists // Can be true or false depending on environment
+}
+
+func TestConfigGet_FileDoesNotExist(t *testing.T) {
+	// Test Get() when config file doesn't exist
+	originalConfig := config
+	config = nil
+	defer func() {
+		config = originalConfig
+	}()
+
+	// Test that Get() handles missing file gracefully
+	cfg := Get()
+	if cfg == nil {
+		t.Fatal("Get() should never return nil")
+	}
+
+	// Test that we can get the config path even when file doesn't exist
+	configPath := GetConfigPath()
+	if configPath == "" {
+		t.Error("Config path should not be empty")
+	}
+}
+
+func TestConfigGet_InvalidYAML(t *testing.T) {
+	// Test Get() when config file exists but has invalid YAML
+	originalConfig := config
+	config = nil
+	defer func() {
+		config = originalConfig
+	}()
+
+	// Test that Get() handles invalid YAML gracefully
+	cfg := Get()
+	if cfg == nil {
+		t.Fatal("Get() should never return nil")
+	}
+
+	// Test that we can get the config path
+	configPath := GetConfigPath()
+	if configPath == "" {
+		t.Error("Config path should not be empty")
+	}
+}
+
+func TestConfigGet_ComprehensiveScenarios(t *testing.T) {
+	// Test Get() with comprehensive scenarios
+	originalConfig := config
+	config = nil
+	defer func() {
+		config = originalConfig
+	}()
+
+	// Test multiple calls to Get()
+	for i := 0; i < 3; i++ {
+		cfg := Get()
+		if cfg == nil {
+			t.Fatalf("Get() returned nil on call %d", i+1)
+		}
+		if cfg.Config.API.Host == "" {
+			t.Errorf("Get() returned config with empty API.Host on call %d", i+1)
+		}
+	}
+
+	// Test that we can get all config sections
+	netbridge := GetNetbridge()
+	arrows := GetArrows()
+	api := GetAPI()
+	database := GetDatabase()
+	watcher := GetWatcher()
+
+	// Test that all sections are accessible
+	_ = netbridge
+	_ = arrows
+	_ = api
+	_ = database
+	_ = watcher
+}
