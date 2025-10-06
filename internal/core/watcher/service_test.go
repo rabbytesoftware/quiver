@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rabbytesoftware/quiver/internal/core/config"
+	"github.com/rabbytesoftware/quiver/internal/core/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -148,7 +149,8 @@ func TestWatcher_LoggingMethods(t *testing.T) {
 	watcher.Debug("debug message")
 	watcher.Info("info message")
 	watcher.Warn("warn message")
-	watcher.Error("error message")
+	watcher.Error(errors.Throw(errors.Forbidden, "error message", nil))
+	watcher.Unforeseen(errors.Throw(errors.Forbidden, "unforeseen message", nil))
 
 	// Note: Unforeseen calls Fatal which may exit the program, so we skip it in tests
 	// watcher.Unforeseen("unforeseen message")

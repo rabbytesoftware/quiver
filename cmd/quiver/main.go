@@ -6,6 +6,7 @@ import (
 	"github.com/rabbytesoftware/quiver/cmd/quiver/assets"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui"
 	"github.com/rabbytesoftware/quiver/internal"
+	"github.com/rabbytesoftware/quiver/internal/core/errors"
 	"github.com/rabbytesoftware/quiver/internal/core/metadata"
 )
 
@@ -27,6 +28,6 @@ func main() {
 
 	err := ui.RunUI(watcher)
 	if err != nil {
-		watcher.Unforeseen(err.Error())
+		watcher.Unforeseen(errors.Throw(errors.FailedDependency, err.Error(), nil))
 	}
 }
