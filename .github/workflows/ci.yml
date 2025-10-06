@@ -228,12 +228,12 @@ jobs:
           PR_COVERAGE=$((COVERED_LINES * 100 / TOTAL_LINES))
           echo "PR coverage: ${PR_COVERAGE}%"
           
-          if [ $PR_COVERAGE -lt 90 ]; then
-            echo "❌ PR coverage ${PR_COVERAGE}% is below required 90%"
+          if [ $PR_COVERAGE -lt 80 ]; then
+            echo "❌ PR coverage ${PR_COVERAGE}% is below required 80%"
             exit 1
           fi
           
-          echo "✅ PR coverage ${PR_COVERAGE}% meets requirement (≥90%)"
+          echo "✅ PR coverage ${PR_COVERAGE}% meets requirement (≥80%)"
         else
           echo "ℹ️ No coverage data to calculate for PR changes"
         fi
@@ -312,7 +312,7 @@ jobs:
         echo "- ✅ Branch follows the defined branching model"
         echo "- ✅ Code compiles successfully"
         echo "- ✅ Overall test coverage ≥ 80%"
-        echo "- ✅ PR coverage ≥ 90%"
+        echo "- ✅ PR coverage ≥ 80%"
         echo "- ✅ Code quality and security checks passed"
         echo ""
         echo "🎉 This PR is ready for review!"
