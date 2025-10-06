@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/rabbytesoftware/quiver/internal/core/config"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
@@ -118,37 +117,9 @@ func TestAPI_Run_Comprehensive(t *testing.T) {
 	}
 }
 
-func TestAPI_Run_ActualExecution(t *testing.T) {
-	// Test the Run method by actually calling it in a goroutine
-	watcherService := watcher.NewWatcherService()
-	mockUsecases := &usecases.Usecases{}
-	api := NewAPI(watcherService, mockUsecases)
-
-	// Test that Run method can be called without panicking
-	// We'll run it in a goroutine and then stop it quickly
-	done := make(chan bool)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("API.Run() panicked: %v", r)
-			}
-			done <- true
-		}()
-
-		// This will block, but we'll stop it quickly
-		api.Run()
-	}()
-
-	// Wait a short time for the method to start
-	select {
-	case <-done:
-		// Method completed (likely due to error or panic)
-	case <-time.After(100 * time.Millisecond):
-		// Method is running (expected behavior)
-		// We can't easily stop it, but we've tested that it starts
-	}
-}
+// TestAPI_Run_ActualExecution removed to avoid race conditions
+// The test was causing data races with global Gin state when running
+// concurrently with other tests that create NewAPI()
 
 func TestAPI_Run_ErrorHandling(t *testing.T) {
 	// Test Run method with different configurations

@@ -150,10 +150,9 @@ func TestWatcher_LoggingMethods(t *testing.T) {
 	watcher.Info("info message")
 	watcher.Warn("warn message")
 	watcher.Error(errors.Throw(errors.Forbidden, "error message", nil))
-	watcher.Unforeseen(errors.Throw(errors.Forbidden, "unforeseen message", nil))
 
-	// Note: Unforeseen calls Fatal which may exit the program, so we skip it in tests
-	// watcher.Unforeseen("unforeseen message")
+	// Note: Unforeseen calls Fatal which terminates the program, so we skip it in tests
+	// watcher.Unforeseen(errors.Throw(errors.Forbidden, "unforeseen message", nil))
 }
 
 func TestMultipleWatcherInstances(t *testing.T) {

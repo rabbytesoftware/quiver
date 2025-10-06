@@ -51,7 +51,7 @@ func (w *Watcher) Error(message errors.Error) {
 
 // ? Unforeseen forces you to use the errors.Error type
 func (w *Watcher) Unforeseen(message errors.Error) {
-	w.logger.Fatal(message)
+	w.logger.Fatal(message.Error())
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.FatalLevel,
 		Message: message.Error(),
