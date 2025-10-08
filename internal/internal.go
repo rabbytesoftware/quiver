@@ -28,7 +28,7 @@ func NewInternal() *Internal {
 	infrastructure := infrastructure.NewInfrastructure()
 	repositories := repositories.NewRepositories(infrastructure)
 	usecases := usecases.NewUsecases(repositories)
-	api := api.NewAPI(core.GetWatcher(), usecases)
+	api := api.NewAPI(usecases)
 
 	return &Internal{
 		api:            api,

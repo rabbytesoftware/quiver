@@ -9,7 +9,7 @@ import (
 
 func TestRunUI(t *testing.T) {
 	// Create a watcher for testing
-	w := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// We can't actually run the UI in a test environment as it would block
 	// and require terminal interaction. Instead, we test that the function exists
@@ -36,7 +36,7 @@ func TestRunUI(t *testing.T) {
 	_ = err // This would be: err = RunUI(w)
 
 	// Test that we can create a model (which RunUI does internally)
-	model := NewModel(w)
+	model := NewModel()
 	if model == nil {
 		t.Error("NewModel returned nil - RunUI would fail")
 	}
@@ -44,7 +44,7 @@ func TestRunUI(t *testing.T) {
 
 func TestRunUIFunctionSignature(t *testing.T) {
 	// Test that RunUI has the expected signature
-	w := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// This tests that the function can be called with the right parameters
 	// without actually executing it
@@ -53,21 +53,21 @@ func TestRunUIFunctionSignature(t *testing.T) {
 	_ = runUIFunc // Function variables are never nil
 
 	// Test that we can pass a watcher to the function reference
-	_ = w // Would be used like: err := runUIFunc(w)
+	_ = runUIFunc // Would be used like: err := runUIFunc(w)
 }
 
 func TestRunUIWithValidWatcher(t *testing.T) {
-	w := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// Test that we can create the model that RunUI would create
-	model := NewModel(w)
+	model := NewModel()
 	if model == nil {
 		t.Fatal("NewModel returned nil")
 	}
 
 	// Test that the model has the watcher set
-	if model.watcher != w {
-		t.Error("Model watcher is not the same instance passed to NewModel")
+	if model.watcher == nil {
+		t.Error("Model watcher should be set")
 	}
 
 	// Test that model initialization works (what RunUI does)
@@ -79,10 +79,10 @@ func TestRunUIWithValidWatcher(t *testing.T) {
 
 func TestRunUIModelCreation(t *testing.T) {
 	// Test the model creation that happens inside RunUI
-	w := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// This is what RunUI does internally
-	model := NewModel(w)
+	model := NewModel()
 
 	if model == nil {
 		t.Fatal("NewModel returned nil - RunUI would fail")
@@ -119,7 +119,7 @@ func TestRunUIErrorHandling(t *testing.T) {
 	}()
 
 	// Test model creation with nil watcher
-	model := NewModel(nil)
+	model := NewModel()
 	if model == nil {
 		t.Error("NewModel with nil watcher returned nil")
 	}
@@ -127,8 +127,8 @@ func TestRunUIErrorHandling(t *testing.T) {
 
 func TestRunUICleanup(t *testing.T) {
 	// Test the cleanup logic that RunUI performs
-	w := watcher.NewWatcherService()
-	model := NewModel(w)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test that we can call cancel (which RunUI does on exit)
 	if model.cancel != nil {
@@ -146,8 +146,8 @@ func TestRunUICleanup(t *testing.T) {
 
 func TestRunUIModelState(t *testing.T) {
 	// Test the initial state of the model that RunUI creates
-	w := watcher.NewWatcherService()
-	model := NewModel(w)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test initial state
 	if model.ready {
@@ -177,10 +177,10 @@ func TestRunUIModelState(t *testing.T) {
 
 func TestRunUIComprehensive(t *testing.T) {
 	// Test comprehensive RunUI functionality
-	w := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// Test that we can create a model (what RunUI does)
-	model := NewModel(w)
+	model := NewModel()
 	if model == nil {
 		t.Fatal("NewModel returned nil")
 	}
@@ -215,17 +215,17 @@ func TestRunUIComprehensive(t *testing.T) {
 
 func TestRunUIWithDifferentWatcherStates(t *testing.T) {
 	// Test RunUI with different watcher configurations
-	w := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// Test with enabled watcher
-	model := NewModel(w)
+	model := NewModel()
 	if model == nil {
 		t.Fatal("NewModel returned nil")
 	}
 
 	// Test that watcher is properly connected
-	if model.watcher != w {
-		t.Error("Model watcher is not the same instance")
+	if model.watcher == nil {
+		t.Error("Model watcher should be set")
 	}
 
 	// Test model state after initialization
@@ -251,19 +251,19 @@ func TestRunUIErrorScenarios(t *testing.T) {
 	}()
 
 	// This might panic, which is acceptable
-	model := NewModel(nil)
+	model := NewModel()
 	if model != nil {
 		// If it doesn't panic, test that it handles nil watcher gracefully
-		if model.watcher != nil {
-			t.Error("Model should have nil watcher when passed nil")
+		if model.watcher == nil {
+			t.Error("Model should have watcher set (singleton)")
 		}
 	}
 }
 
 func TestRunUIModelLifecycle(t *testing.T) {
 	// Test the complete model lifecycle that RunUI manages
-	w := watcher.NewWatcherService()
-	model := NewModel(w)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test initialization
 	cmd := model.Init()
@@ -300,8 +300,8 @@ func TestRunUIModelLifecycle(t *testing.T) {
 
 func TestRunUIWithWatcherSubscription(t *testing.T) {
 	// Test the watcher subscription that RunUI sets up
-	w := watcher.NewWatcherService()
-	model := NewModel(w)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test that we can subscribe to watcher (what RunUI does)
 	model.subscribeToWatcher()
@@ -320,8 +320,8 @@ func TestRunUIWithWatcherSubscription(t *testing.T) {
 
 func TestRunUIASCIIArt(t *testing.T) {
 	// Test the ASCII art functionality that RunUI uses
-	w := watcher.NewWatcherService()
-	model := NewModel(w)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test that ASCII art is added
 	if len(model.logLines) == 0 {
@@ -342,8 +342,8 @@ func TestRunUIASCIIArt(t *testing.T) {
 
 func TestRunUITheme(t *testing.T) {
 	// Test the theme functionality that RunUI uses
-	w := watcher.NewWatcherService()
-	model := NewModel(w)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test that theme is initialized
 	// Theme is a struct, so we can't check for nil, but we can test methods
@@ -363,8 +363,8 @@ func TestRunUITheme(t *testing.T) {
 
 func TestRunUIQueryService(t *testing.T) {
 	// Test the query service that RunUI uses
-	w := watcher.NewWatcherService()
-	model := NewModel(w)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test that query service is initialized
 	if model.queryService == nil {

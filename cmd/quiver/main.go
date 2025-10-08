@@ -6,7 +6,9 @@ import (
 	"github.com/rabbytesoftware/quiver/cmd/quiver/assets"
 	"github.com/rabbytesoftware/quiver/cmd/quiver/ui"
 	"github.com/rabbytesoftware/quiver/internal"
+	"github.com/rabbytesoftware/quiver/internal/core/errors"
 	"github.com/rabbytesoftware/quiver/internal/core/metadata"
+	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 )
 
 func main() {
@@ -14,7 +16,6 @@ func main() {
 	defer iconManager.Cleanup()
 
 	internal := internal.NewInternal()
-	watcher := internal.GetCore().GetWatcher()
 
 	go internal.Run()
 
@@ -25,8 +26,8 @@ func main() {
 		metadata.GetVersionCodename(),
 	))
 
-	err := ui.RunUI(watcher)
+	err := ui.RunUI(watcher.GetWatcher())
 	if err != nil {
-		watcher.Unforeseen(err.Error())
+		watcher.Unforeseen(errors.Throw(errors.FailedDependency, err.Error(), nil))
 	}
 }
