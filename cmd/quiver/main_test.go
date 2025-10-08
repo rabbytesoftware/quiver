@@ -6,6 +6,7 @@ import (
 
 	"github.com/rabbytesoftware/quiver/internal"
 	"github.com/rabbytesoftware/quiver/internal/core/metadata"
+	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 )
 
 func TestMainComponents(t *testing.T) {
@@ -35,7 +36,7 @@ func TestMainComponents(t *testing.T) {
 func TestMainLogic(t *testing.T) {
 	// Test the main logic without actually running main()
 	internal := internal.NewInternal()
-	watcher := internal.GetCore().GetWatcher()
+	_ = internal.GetCore().GetWatcher()
 
 	// Test that we can call the logging function that would be called in main
 	watcher.Info("Test message from main test")

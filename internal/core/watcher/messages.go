@@ -8,7 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func (w *Watcher) Debug(message string) {
+func Debug(message string) {
 	w.logger.Debug(message)
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.DebugLevel,
@@ -16,7 +16,7 @@ func (w *Watcher) Debug(message string) {
 	})
 }
 
-func (w *Watcher) Info(message string) {
+func Info(message string) {
 	w.logger.Info(message)
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.InfoLevel,
@@ -24,7 +24,7 @@ func (w *Watcher) Info(message string) {
 	})
 }
 
-func (w *Watcher) Warn(message string) {
+func Warn(message string) {
 	w.logger.Warning(message)
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.WarnLevel,
@@ -32,7 +32,7 @@ func (w *Watcher) Warn(message string) {
 	})
 }
 
-func (w *Watcher) Errorf(message string, args ...interface{}) {
+func Errorf(message string, args ...interface{}) {
 	w.logger.Info(fmt.Sprintf(message, args...))
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.InfoLevel,
@@ -41,7 +41,7 @@ func (w *Watcher) Errorf(message string, args ...interface{}) {
 }
 
 // ? Error forces you to use the errors.Error type
-func (w *Watcher) Error(message errors.Error) {
+func Error(message errors.Error) {
 	w.logger.Error(message.Error())
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.ErrorLevel,
@@ -50,7 +50,7 @@ func (w *Watcher) Error(message errors.Error) {
 }
 
 // ? Unforeseen forces you to use the errors.Error type
-func (w *Watcher) Unforeseen(message errors.Error) {
+func Unforeseen(message errors.Error) {
 	w.logger.Fatal(message.Error())
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.FatalLevel,

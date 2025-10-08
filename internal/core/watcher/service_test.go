@@ -9,24 +9,24 @@ import (
 )
 
 func TestNewWatcherService(t *testing.T) {
-	watcher := NewWatcherService()
+	w := NewWatcherService()
 
-	if watcher == nil {
+	if w == nil {
 		t.Fatal("NewWatcherService() returned nil")
 	}
 
 	// Test that watcher has expected fields initialized
-	if watcher.logger == nil {
+	if w.logger == nil {
 		t.Error("Watcher logger is nil")
 	}
 
-	if watcher.pool == nil {
+	if w.pool == nil {
 		t.Error("Watcher pool is nil")
 	}
 }
 
 func TestWatcher_SetLevel(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	// Test setting different levels
 	levels := []logrus.Level{
@@ -37,106 +37,106 @@ func TestWatcher_SetLevel(t *testing.T) {
 	}
 
 	for _, level := range levels {
-		watcher.SetLevel(level)
-		if watcher.GetLevel() != level {
-			t.Errorf("SetLevel(%v) failed, got %v", level, watcher.GetLevel())
+		SetLevel(level)
+		if GetLevel() != level {
+			t.Errorf("SetLevel(%v) failed, got %v", level, GetLevel())
 		}
 	}
 }
 
 func TestWatcher_GetLevel(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	// Test that GetLevel returns a valid level
-	level := watcher.GetLevel()
+	level := GetLevel()
 	if level < logrus.PanicLevel || level > logrus.TraceLevel {
 		t.Errorf("GetLevel() returned invalid level: %v", level)
 	}
 }
 
 func TestWatcher_WithFields(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	fields := logrus.Fields{
 		"key1": "value1",
 		"key2": "value2",
 	}
 
-	entry := watcher.WithFields(fields)
+	entry := WithFields(fields)
 	if entry == nil {
 		t.Error("WithFields() returned nil")
 	}
 }
 
 func TestWatcher_WithField(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
-	entry := watcher.WithField("test_key", "test_value")
+	entry := WithField("test_key", "test_value")
 	if entry == nil {
 		t.Error("WithField() returned nil")
 	}
 }
 
 func TestWatcher_Subscribe(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	// Test subscribing with a callback
 	callback := func(level logrus.Level, message string) {
 		// Callback for testing
 	}
 
-	watcher.Subscribe(callback)
+	Subscribe(callback)
 
 	// Test that subscriber count increased
-	count := watcher.GetSubscriberCount()
+	count := GetSubscriberCount()
 	if count == 0 {
 		t.Error("Subscribe() did not increase subscriber count")
 	}
 
 	// Test logging to trigger callback
-	watcher.Info("test message")
+	Info("test message")
 
 	// Note: The callback might not be called immediately due to goroutines
 	// In a real test, we might need to add synchronization
 }
 
 func TestWatcher_GetSubscriberCount(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	// Initial count should be 0
-	initialCount := watcher.GetSubscriberCount()
+	initialCount := GetSubscriberCount()
 	if initialCount < 0 {
 		t.Error("GetSubscriberCount() returned negative value")
 	}
 
 	// Add a subscriber
-	watcher.Subscribe(func(level logrus.Level, message string) {})
+	Subscribe(func(level logrus.Level, message string) {})
 
 	// Count should increase
-	newCount := watcher.GetSubscriberCount()
+	newCount := GetSubscriberCount()
 	if newCount <= initialCount {
 		t.Error("GetSubscriberCount() did not increase after Subscribe()")
 	}
 }
 
 func TestWatcher_GetConfig(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
-	config := watcher.GetConfig()
+	config := GetConfig()
 	// Config can be any value, we just test it doesn't panic
 	_ = config
 }
 
 func TestWatcher_IsEnabled(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
-	enabled := watcher.IsEnabled()
+	enabled := IsEnabled()
 	// Enabled can be true or false, we just test it doesn't panic
 	_ = enabled
 }
 
 func TestWatcher_LoggingMethods(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	// Test that logging methods don't panic (except Unforeseen which calls Fatal)
 	defer func() {
@@ -146,10 +146,10 @@ func TestWatcher_LoggingMethods(t *testing.T) {
 		}
 	}()
 
-	watcher.Debug("debug message")
-	watcher.Info("info message")
-	watcher.Warn("warn message")
-	watcher.Error(errors.Throw(errors.Forbidden, "error message", nil))
+	Debug("debug message")
+	Info("info message")
+	Warn("warn message")
+	Error(errors.Throw(errors.Forbidden, "error message", nil))
 
 	// Note: Unforeseen calls Fatal which terminates the program, so we skip it in tests
 	// watcher.Unforeseen(errors.Throw(errors.Forbidden, "unforeseen message", nil))
@@ -159,9 +159,9 @@ func TestMultipleWatcherInstances(t *testing.T) {
 	watcher1 := NewWatcherService()
 	watcher2 := NewWatcherService()
 
-	// Different instances should be created
-	if watcher1 == watcher2 {
-		t.Error("NewWatcherService() should create different instances")
+	// Watcher uses singleton pattern, so they should be the same instance
+	if watcher1 != watcher2 {
+		t.Error("NewWatcherService() should return the same singleton instance")
 	}
 
 	// But they should both be valid
@@ -171,26 +171,26 @@ func TestMultipleWatcherInstances(t *testing.T) {
 }
 
 func TestWatcherInitialization(t *testing.T) {
-	watcher := NewWatcherService()
+	w := NewWatcherService()
 
 	// Test that watcher is properly initialized
-	if watcher.logger == nil {
+	if w.logger == nil {
 		t.Error("Watcher logger not initialized")
 	}
 
-	if watcher.pool == nil {
+	if w.pool == nil {
 		t.Error("Watcher pool not initialized")
 	}
 
 	// Test that we can get the level (which means logger is working)
-	level := watcher.GetLevel()
+	level := GetLevel()
 	if level < logrus.PanicLevel || level > logrus.TraceLevel {
 		t.Error("Watcher level not properly initialized")
 	}
 }
 
 func TestWatcher_Unforeseen(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	// Test that Unforeseen method exists and can be called
 	// Note: This method calls Fatal which may cause issues in tests
@@ -205,11 +205,12 @@ func TestWatcher_Unforeseen(t *testing.T) {
 	// But we can verify the method exists by checking the watcher type
 	// The Unforeseen method calls Fatal which may exit the program
 	// So we just test that the method exists and can be referenced
-	_ = watcher
+	w := NewWatcherService()
+	_ = w
 }
 
 func TestWatcher_Unforeseen_Comprehensive(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	// Test that Unforeseen method exists and can be called
 	// This method calls Fatal which may cause issues in tests
@@ -222,16 +223,17 @@ func TestWatcher_Unforeseen_Comprehensive(t *testing.T) {
 
 	// Test that the method exists by checking the watcher type
 	// We can't actually call it without potentially crashing the test
-	_ = watcher
+	w := NewWatcherService()
+	_ = w
 
 	// Test that the watcher is properly initialized
-	if watcher == nil {
+	if w == nil {
 		t.Error("Expected watcher to be initialized")
 	}
 }
 
 func TestWatcher_Unforeseen_EdgeCases(t *testing.T) {
-	watcher := NewWatcherService()
+	_ = NewWatcherService()
 
 	// Test that Unforeseen method exists and can be called
 	// This method calls Fatal which may cause issues in tests
@@ -244,10 +246,11 @@ func TestWatcher_Unforeseen_EdgeCases(t *testing.T) {
 
 	// Test that the method exists by checking the watcher type
 	// We can't actually call it without potentially crashing the test
-	_ = watcher
+	w := NewWatcherService()
+	_ = w
 
 	// Test that the watcher is properly initialized
-	if watcher == nil {
+	if w == nil {
 		t.Error("Expected watcher to be initialized")
 	}
 }

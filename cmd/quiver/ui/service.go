@@ -8,9 +8,9 @@ import (
 )
 
 // RunUI starts the TUI application with the provided watcher service
-func RunUI(w *watcher.Watcher) error {
+func RunUI(watcher *watcher.Watcher) error {
 	p := tea.NewProgram(
-		NewModel(w),
+		NewModel(),
 		tea.WithAltScreen(),       // Use alternate screen buffer
 		tea.WithMouseCellMotion(), // Enable mouse support
 	)
