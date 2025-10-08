@@ -2,23 +2,73 @@ package fetchnshare
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 )
 
 type FNS struct {
+	watcher *watcher.Watcher
 }
 
-func NewFNS() FNSInterface {
-	return &FNS{}
+func NewFNS(
+	watcher *watcher.Watcher,
+) FNSInterface {
+	fns := &FNS{
+		watcher: watcher,
+	}
+
+	result, _ := fns.GetInfo(context.Background(), "https://github.com/rabbytesoftware/quiver/blob/develop/README.md")
+
+	watcher.Info(result.Path)
+
+	return fns
 }
 
 // GetInfo retrieves metadata information about a resource (file or directory).
 // It returns ResourceInfo containing size, permissions, modification time, and other attributes.
 // Supports both local filesystem paths and remote URLs (HTTP/HTTPS).
 func (f *FNS) GetInfo(ctx context.Context, path string) (*ResourceInfo, error) {
-	return nil, nil
+
+	info := &ResourceInfo{}
+
+	// Remote URLs
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch URL info: %w", err)
+		}
+
+		defer resp.Body.Close()
+
+		info.Type = ResourceType(http.DetectContentType([]byte(path)))
+
+		if length := resp.Header.Get("Content-Length"); length != "" {
+			fmt.Sscanf(length, "%d", &info.Size)
+		}
+		if t := resp.Header.Get("Last-Modified"); t != "" {
+			if t, err := http.ParseTime(t); err == nil {
+				info.ModTime = t
+			}
+		}
+
+		return info, nil // Success in retrieving remote URL info
+	}
+
+	return nil, fmt.Errorf("unsupported path format: %s", path)
+
 }
 
 // Exists checks whether a resource exists at the given path.

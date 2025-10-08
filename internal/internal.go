@@ -25,7 +25,7 @@ type Internal struct {
 
 func NewInternal() *Internal {
 	core := core.Init()
-	infrastructure := infrastructure.NewInfrastructure()
+	infrastructure := infrastructure.NewInfrastructure(core.GetWatcher())
 	repositories := repositories.NewRepositories(infrastructure)
 	usecases := usecases.NewUsecases(repositories)
 	api := api.NewAPI(core.GetWatcher(), usecases)
