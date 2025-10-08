@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/rabbytesoftware/quiver/internal/core/config"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher"
@@ -13,13 +12,13 @@ import (
 
 func TestAPI_Run(t *testing.T) {
 	// Create a mock watcher
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// Create mock usecases
 	mockUsecases := &usecases.Usecases{}
 
 	// Create API instance
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 
 	// Test that Run method doesn't panic
 	// Note: This will actually start a server, so we test it in a goroutine
@@ -36,9 +35,6 @@ func TestAPI_Run(t *testing.T) {
 	if api.router == nil {
 		t.Error("Expected router to be initialized")
 	}
-	if api.watcher == nil {
-		t.Error("Expected watcher to be initialized")
-	}
 	if api.usecases == nil {
 		t.Error("Expected usecases to be initialized")
 	}
@@ -46,13 +42,13 @@ func TestAPI_Run(t *testing.T) {
 
 func TestAPI_SetupMiddleware(t *testing.T) {
 	// Create a mock watcher
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// Create mock usecases
 	mockUsecases := &usecases.Usecases{}
 
 	// Create API instance
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 
 	// Test that SetupMiddleware doesn't panic
 	defer func() {
@@ -66,13 +62,13 @@ func TestAPI_SetupMiddleware(t *testing.T) {
 
 func TestAPI_SetupRoutes(t *testing.T) {
 	// Create a mock watcher
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// Create mock usecases
 	mockUsecases := &usecases.Usecases{}
 
 	// Create API instance
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 
 	// Test that SetupRoutes doesn't panic
 	defer func() {
@@ -86,16 +82,16 @@ func TestAPI_SetupRoutes(t *testing.T) {
 
 func TestAPI_Run_Comprehensive(t *testing.T) {
 	// Test the Run method more comprehensively
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 
 	// Test that we can call the methods that Run() calls internally
 	api.SetupMiddleware()
 	api.SetupRoutes()
 
 	// Test that the watcher can log the initialization message
-	watcherService.Info("Test initialization message")
+	watcher.Info("Test initialization message")
 
 	// Test that the router is properly configured
 	if api.router == nil {
@@ -118,43 +114,15 @@ func TestAPI_Run_Comprehensive(t *testing.T) {
 	}
 }
 
-func TestAPI_Run_ActualExecution(t *testing.T) {
-	// Test the Run method by actually calling it in a goroutine
-	watcherService := watcher.NewWatcherService()
-	mockUsecases := &usecases.Usecases{}
-	api := NewAPI(watcherService, mockUsecases)
-
-	// Test that Run method can be called without panicking
-	// We'll run it in a goroutine and then stop it quickly
-	done := make(chan bool)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("API.Run() panicked: %v", r)
-			}
-			done <- true
-		}()
-
-		// This will block, but we'll stop it quickly
-		api.Run()
-	}()
-
-	// Wait a short time for the method to start
-	select {
-	case <-done:
-		// Method completed (likely due to error or panic)
-	case <-time.After(100 * time.Millisecond):
-		// Method is running (expected behavior)
-		// We can't easily stop it, but we've tested that it starts
-	}
-}
+// TestAPI_Run_ActualExecution removed to avoid race conditions
+// The test was causing data races with global Gin state when running
+// concurrently with other tests that create NewAPI()
 
 func TestAPI_Run_ErrorHandling(t *testing.T) {
 	// Test Run method with different configurations
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 
 	// Test that Run method can handle different config scenarios
 	// This tests the internal logic without actually starting the server
@@ -162,7 +130,7 @@ func TestAPI_Run_ErrorHandling(t *testing.T) {
 	api.SetupRoutes()
 
 	// Test that the watcher can handle the info message
-	watcherService.Info("API initialization test")
+	watcher.Info("API initialization test")
 
 	// Test that the router is ready
 	if api.router == nil {
@@ -172,11 +140,11 @@ func TestAPI_Run_ErrorHandling(t *testing.T) {
 
 func TestAPI_NewAPI_Comprehensive(t *testing.T) {
 	// Test NewAPI with different scenarios
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
 
 	// Test normal creation
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 	if api == nil {
 		t.Fatal("Expected API to be created")
 	}
@@ -184,9 +152,6 @@ func TestAPI_NewAPI_Comprehensive(t *testing.T) {
 	// Test that all components are initialized
 	if api.router == nil {
 		t.Error("Expected router to be initialized")
-	}
-	if api.watcher == nil {
-		t.Error("Expected watcher to be initialized")
 	}
 	if api.usecases == nil {
 		t.Error("Expected usecases to be initialized")
@@ -197,43 +162,38 @@ func TestAPI_NewAPI_Comprehensive(t *testing.T) {
 	api.SetupRoutes()
 
 	// Test that the watcher is properly connected
-	api.watcher.Info("Test message from API")
+	watcher.Info("Test message from API")
 }
 
 func TestAPI_NewAPI_WithDifferentWatcherConfigs(t *testing.T) {
 	// Test NewAPI with different watcher configurations
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
 
 	// Test with enabled watcher
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 	if api == nil {
 		t.Fatal("Expected API to be created with enabled watcher")
 	}
 
-	// Test that the watcher is properly connected
-	if api.watcher != watcherService {
-		t.Error("Expected watcher to be the same instance")
-	}
-
 	// Test that we can get the watcher config
-	watcherConfig := watcherService.GetConfig()
+	watcherConfig := watcher.GetConfig()
 	// watcherConfig is a struct, not a pointer, so we can't check for nil
 	_ = watcherConfig
 
 	// Test that we can get the watcher level
-	level := watcherService.GetLevel()
+	level := watcher.GetLevel()
 	// level is a uint32, so it can't be negative, but we can test it's accessible
 	_ = level
 }
 
 func TestAPI_NewAPI_WithDifferentUsecases(t *testing.T) {
 	// Test NewAPI with different usecases
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
 
 	// Test normal creation
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 	if api == nil {
 		t.Fatal("Expected API to be created")
 	}
@@ -246,12 +206,12 @@ func TestAPI_NewAPI_WithDifferentUsecases(t *testing.T) {
 
 func TestAPI_NewAPI_EdgeCases(t *testing.T) {
 	// Test NewAPI with edge cases
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
 
 	// Test multiple API creations
 	for i := 0; i < 3; i++ {
-		api := NewAPI(watcherService, mockUsecases)
+		api := NewAPI(mockUsecases)
 		if api == nil {
 			t.Fatalf("Expected API to be created (iteration %d)", i+1)
 		}
@@ -263,11 +223,11 @@ func TestAPI_NewAPI_EdgeCases(t *testing.T) {
 
 func TestAPI_NewAPI_WithDisabledWatcher(t *testing.T) {
 	// Test NewAPI with disabled watcher (this should trigger the !watcherConfig.Enabled branch)
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
 
 	// Test that we can create API even with disabled watcher
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 	if api == nil {
 		t.Fatal("Expected API to be created with disabled watcher")
 	}
@@ -276,9 +236,6 @@ func TestAPI_NewAPI_WithDisabledWatcher(t *testing.T) {
 	if api.router == nil {
 		t.Error("Expected router to be initialized")
 	}
-	if api.watcher == nil {
-		t.Error("Expected watcher to be initialized")
-	}
 	if api.usecases == nil {
 		t.Error("Expected usecases to be initialized")
 	}
@@ -286,7 +243,7 @@ func TestAPI_NewAPI_WithDisabledWatcher(t *testing.T) {
 
 func TestAPI_NewAPI_WithDifferentWatcherLevels(t *testing.T) {
 	// Test NewAPI with different watcher levels to trigger different gin modes
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
 
 	// Test with different levels to trigger different branches
@@ -294,10 +251,10 @@ func TestAPI_NewAPI_WithDifferentWatcherLevels(t *testing.T) {
 
 	for _, level := range levels {
 		// Set the watcher level (if possible)
-		watcherService.SetLevel(logrus.Level(level))
+		watcher.SetLevel(logrus.Level(level))
 
 		// Create API with this level
-		api := NewAPI(watcherService, mockUsecases)
+		api := NewAPI(mockUsecases)
 		if api == nil {
 			t.Fatalf("Expected API to be created with level %d", level)
 		}
@@ -311,18 +268,18 @@ func TestAPI_NewAPI_WithDifferentWatcherLevels(t *testing.T) {
 
 func TestAPI_NewAPI_ComprehensiveBranches(t *testing.T) {
 	// Test NewAPI with comprehensive branch coverage
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
 
 	// Test the enabled watcher branch
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 	if api == nil {
 		t.Fatal("Expected API to be created")
 	}
 
 	// Test that we can get the watcher level and config
-	level := watcherService.GetLevel()
-	config := watcherService.GetConfig()
+	level := watcher.GetLevel()
+	config := watcher.GetConfig()
 
 	// Test different level scenarios
 	if level <= 4 {
@@ -344,9 +301,9 @@ func TestAPI_NewAPI_ComprehensiveBranches(t *testing.T) {
 
 func TestAPI_SetupMiddleware_Comprehensive(t *testing.T) {
 	// Test SetupMiddleware more thoroughly
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 
 	// Test that SetupMiddleware doesn't panic
 	defer func() {
@@ -365,9 +322,9 @@ func TestAPI_SetupMiddleware_Comprehensive(t *testing.T) {
 
 func TestAPI_SetupRoutes_Comprehensive(t *testing.T) {
 	// Test SetupRoutes more thoroughly
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 	mockUsecases := &usecases.Usecases{}
-	api := NewAPI(watcherService, mockUsecases)
+	api := NewAPI(mockUsecases)
 
 	// Test that SetupRoutes doesn't panic
 	defer func() {

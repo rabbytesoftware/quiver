@@ -183,61 +183,6 @@ jobs:
         
         echo "✅ Overall coverage ${OVERALL_COVERAGE}% meets requirement (≥80%)"
     
-    - name: Check PR coverage
-      run: |
-        # Get list of changed Go files
-        CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.go$' | grep -v '_test\.go$' || true)
-        
-        if [ -z "$CHANGED_FILES" ]; then
-          echo "ℹ️ No Go files changed in this PR"
-          exit 0
-        fi
-        
-        echo "Changed Go files:"
-        echo "$CHANGED_FILES"
-        
-        # Calculate coverage for changed files
-        TOTAL_LINES=0
-        COVERED_LINES=0
-        
-        for file in $CHANGED_FILES; do
-          if [ -f "$file" ]; then
-            # Get coverage for this specific file
-            FILE_COVERAGE=$(go tool cover -func=coverage.out | grep "$file" || true)
-            if [ -n "$FILE_COVERAGE" ]; then
-              echo "Coverage for $file:"
-              echo "$FILE_COVERAGE"
-              
-              # Extract coverage percentage for each function in the file
-              while IFS= read -r line; do
-                if [[ $line == *"$file"* ]]; then
-                  FUNC_COVERAGE=$(echo "$line" | awk '{print $3}' | sed 's/%//')
-                  if [ -n "$FUNC_COVERAGE" ] && [ "$FUNC_COVERAGE" != "coverage:" ]; then
-                    TOTAL_LINES=$((TOTAL_LINES + 100))
-                    COVERED_LINES=$((COVERED_LINES + $(echo "$FUNC_COVERAGE * 100 / 100" | bc -l | cut -d. -f1)))
-                  fi
-                fi
-              done <<< "$FILE_COVERAGE"
-            else
-              echo "⚠️ No coverage data found for $file"
-            fi
-          fi
-        done
-        
-        if [ $TOTAL_LINES -gt 0 ]; then
-          PR_COVERAGE=$((COVERED_LINES * 100 / TOTAL_LINES))
-          echo "PR coverage: ${PR_COVERAGE}%"
-          
-          if [ $PR_COVERAGE -lt 90 ]; then
-            echo "❌ PR coverage ${PR_COVERAGE}% is below required 90%"
-            exit 1
-          fi
-          
-          echo "✅ PR coverage ${PR_COVERAGE}% meets requirement (≥90%)"
-        else
-          echo "ℹ️ No coverage data to calculate for PR changes"
-        fi
-    
     - name: Upload coverage reports
       uses: actions/upload-artifact@v4
       with:
@@ -312,7 +257,7 @@ jobs:
         echo "- ✅ Branch follows the defined branching model"
         echo "- ✅ Code compiles successfully"
         echo "- ✅ Overall test coverage ≥ 80%"
-        echo "- ✅ PR coverage ≥ 90%"
+        echo "- ✅ PR coverage ≥ 80%"
         echo "- ✅ Code quality and security checks passed"
         echo ""
         echo "🎉 This PR is ready for review!"

@@ -43,7 +43,7 @@ func (wa *WatcherAdapter) SetLevel(level string) error {
 		return err
 	}
 	wa.minLevel = parsedLevel
-	wa.watcher.SetLevel(parsedLevel)
+	watcher.SetLevel(parsedLevel)
 	return nil
 }
 
@@ -69,7 +69,7 @@ func (wa *WatcherAdapter) Resume() {
 
 // Subscribe subscribes to log messages with filtering and pausing logic
 func (wa *WatcherAdapter) Subscribe(callback func(logrus.Level, string)) {
-	wa.watcher.Subscribe(func(level logrus.Level, message string) {
+	watcher.Subscribe(func(level logrus.Level, message string) {
 		// Skip if paused
 		if wa.paused {
 			return

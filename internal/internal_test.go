@@ -2,7 +2,6 @@ package internal
 
 import (
 	"testing"
-	"time"
 )
 
 func TestNewInternal(t *testing.T) {
@@ -85,38 +84,14 @@ func TestInternal_Run(t *testing.T) {
 	}
 }
 
-func TestInternal_Run_ActualExecution(t *testing.T) {
-	// Test the Run method by actually calling it in a goroutine
-	internal := NewInternal()
-
-	// Test that Run method can be called without panicking
-	// We'll run it in a goroutine and then stop it quickly
-	done := make(chan bool)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("Internal.Run() panicked: %v", r)
-			}
-			done <- true
-		}()
-
-		// This will block, but we'll stop it quickly
-		internal.Run()
-	}()
-
-	// Wait a short time for the method to start
-	select {
-	case <-done:
-		// Method completed (likely due to error or panic)
-	case <-time.After(100 * time.Millisecond):
-		// Method is running (expected behavior)
-		// We can't easily stop it, but we've tested that it starts
-	}
-}
+// TestInternal_Run_ActualExecution removed to avoid race conditions
+// The test was causing data races with global Gin state when running
+// concurrently with other tests that create NewInternal()
 
 func TestInternal_Run_Comprehensive(t *testing.T) {
 	// Test the Run method more comprehensively
+	// We need to avoid race conditions by not running multiple goroutines
+	// that access the same global state concurrently
 	internal := NewInternal()
 
 	// Test that we can call the methods that Run() calls internally

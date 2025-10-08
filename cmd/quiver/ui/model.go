@@ -66,8 +66,8 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model with the provided watcher
-func NewModel(w *watcher.Watcher) *Model {
-	watcherAdapter := services.NewWatcherAdapter(w)
+func NewModel() *Model {
+	watcherAdapter := services.NewWatcherAdapter(watcher.GetWatcher())
 
 	queryService := queries.NewService(fmt.Sprintf("http://%s:%d", config.GetAPI().Host, config.GetAPI().Port))
 
@@ -92,7 +92,6 @@ func NewModel(w *watcher.Watcher) *Model {
 		logLines:          make([]string, 0, maxLogLines),
 		autoScroll:        true,
 		theme:             theme,
-		watcher:           w,
 		watcherAdapter:    watcherAdapter,
 		queryService:      queryService,
 		handler:           handler,
@@ -103,6 +102,7 @@ func NewModel(w *watcher.Watcher) *Model {
 		historyIndex:      -1,
 		currentInput:      "",
 		navigatingHistory: false,
+		watcher:           watcher.GetWatcher(),
 	}
 
 	// Subscribe to watcher for log messages

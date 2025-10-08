@@ -252,7 +252,7 @@ type ArrowsInterface interface {
 
 ### Coverage Requirements
 - **Overall Project Coverage**: ≥ 80%
-- **Pull Request Coverage**: ≥ 90%
+- **Pull Request Coverage**: ≥ 80%
 
 ### Test Structure
 ```
