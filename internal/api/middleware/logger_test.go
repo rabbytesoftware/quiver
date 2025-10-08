@@ -13,10 +13,10 @@ func TestWatcherLogger(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Create a watcher for testing
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	// Create middleware
-	middleware := WatcherLogger(watcherService)
+	middleware := WatcherLogger()
 
 	if middleware == nil {
 		t.Fatal("WatcherLogger() returned nil")
@@ -42,8 +42,8 @@ func TestWatcherLogger(t *testing.T) {
 func TestWatcherLogger_WithQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	watcherService := watcher.NewWatcherService()
-	middleware := WatcherLogger(watcherService)
+	_ = watcher.NewWatcherService()
+	middleware := WatcherLogger()
 
 	router := gin.New()
 	router.Use(middleware)
@@ -64,8 +64,8 @@ func TestWatcherLogger_WithQuery(t *testing.T) {
 func TestWatcherLogger_ErrorStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	watcherService := watcher.NewWatcherService()
-	middleware := WatcherLogger(watcherService)
+	_ = watcher.NewWatcherService()
+	middleware := WatcherLogger()
 
 	router := gin.New()
 	router.Use(middleware)
@@ -86,8 +86,8 @@ func TestWatcherLogger_ErrorStatus(t *testing.T) {
 func TestWatcherLogger_WarningStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	watcherService := watcher.NewWatcherService()
-	middleware := WatcherLogger(watcherService)
+	_ = watcher.NewWatcherService()
+	middleware := WatcherLogger()
 
 	router := gin.New()
 	router.Use(middleware)
@@ -108,8 +108,8 @@ func TestWatcherLogger_WarningStatus(t *testing.T) {
 func TestWatcherRecovery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	watcherService := watcher.NewWatcherService()
-	middleware := WatcherRecovery(watcherService)
+	_ = watcher.NewWatcherService()
+	middleware := WatcherRecovery()
 
 	if middleware == nil {
 		t.Fatal("WatcherRecovery() returned nil")
@@ -135,8 +135,8 @@ func TestWatcherRecovery(t *testing.T) {
 func TestWatcherRecovery_NoPanic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	watcherService := watcher.NewWatcherService()
-	middleware := WatcherRecovery(watcherService)
+	_ = watcher.NewWatcherService()
+	middleware := WatcherRecovery()
 
 	router := gin.New()
 	router.Use(middleware)
@@ -157,11 +157,11 @@ func TestWatcherRecovery_NoPanic(t *testing.T) {
 func TestWatcherMiddleware_Combined(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	watcherService := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
 	router := gin.New()
-	router.Use(WatcherLogger(watcherService))
-	router.Use(WatcherRecovery(watcherService))
+	router.Use(WatcherLogger())
+	router.Use(WatcherRecovery())
 
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "combined middleware test"})
@@ -180,15 +180,8 @@ func TestWatcherMiddleware_Combined(t *testing.T) {
 func TestWatcherMiddleware_WithNilWatcher(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Test behavior with nil watcher (should panic, but we'll catch it)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil watcher, but didn't get one")
-		}
-	}()
-
-	// This should panic when trying to use nil watcher
-	middleware := WatcherLogger(nil)
+	// Test behavior with nil watcher (should not panic since we use package-level functions)
+	middleware := WatcherLogger()
 
 	router := gin.New()
 	router.Use(middleware)
@@ -199,4 +192,9 @@ func TestWatcherMiddleware_WithNilWatcher(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/test", nil)
 	router.ServeHTTP(w, req)
+
+	// Should not panic and should return 200
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
 }

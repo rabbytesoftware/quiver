@@ -13,16 +13,12 @@ import (
 )
 
 func TestNewModel(t *testing.T) {
-	watcher := watcher.NewWatcherService()
+	_ = watcher.NewWatcherService()
 
-	model := NewModel(watcher)
+	model := NewModel()
 
 	if model == nil {
 		t.Fatal("Expected model to be created")
-	}
-
-	if model.watcher != watcher {
-		t.Error("Expected watcher to be set")
 	}
 
 	if model.handler == nil {
@@ -48,8 +44,8 @@ func TestNewModel(t *testing.T) {
 }
 
 func TestModel_ASCIIArtDisplay(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test that ASCII art is added as a log line
 	if len(model.logLines) == 0 {
@@ -70,8 +66,8 @@ func TestModel_ASCIIArtDisplay(t *testing.T) {
 }
 
 func TestModel_Init(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	cmd := model.Init()
 
@@ -82,8 +78,8 @@ func TestModel_Init(t *testing.T) {
 }
 
 func TestModel_TickStatus(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test that tickStatus returns a command
 	cmd := model.tickStatus()
@@ -93,8 +89,8 @@ func TestModel_TickStatus(t *testing.T) {
 }
 
 func TestModel_SetStatus(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test setting status
 	model.setStatus("Test status", 2*time.Second)
@@ -104,8 +100,8 @@ func TestModel_SetStatus(t *testing.T) {
 }
 
 func TestModel_ClearLogs(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test clearing logs
 	model.clearLogs()
@@ -115,8 +111,8 @@ func TestModel_ClearLogs(t *testing.T) {
 }
 
 func TestModel_ResetHistoryNavigation(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test resetting history navigation
 	model.resetHistoryNavigation()
@@ -126,8 +122,8 @@ func TestModel_ResetHistoryNavigation(t *testing.T) {
 }
 
 func TestModel_AddLogLine(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test adding log lines
 	logLine1 := events.LogLine{
@@ -148,8 +144,8 @@ func TestModel_AddLogLine(t *testing.T) {
 }
 
 func TestModel_UpdateViewportContent(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Add some log lines first
 	logLine1 := events.LogLine{Text: "Line 1", Level: "info", Time: time.Now()}
@@ -164,8 +160,8 @@ func TestModel_UpdateViewportContent(t *testing.T) {
 }
 
 func TestModel_ShowHelp(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test showing help
 	model.showHelp("Test help content")
@@ -174,8 +170,8 @@ func TestModel_ShowHelp(t *testing.T) {
 }
 
 func TestModel_ShowQueryResult(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test showing query result
 	model.showQueryResult("test query", 200, "success response")
@@ -184,8 +180,8 @@ func TestModel_ShowQueryResult(t *testing.T) {
 }
 
 func TestModel_ShowQueryError(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test showing query error
 	model.showQueryError("test query", 404, "not found")
@@ -194,8 +190,8 @@ func TestModel_ShowQueryError(t *testing.T) {
 }
 
 func TestModel_AddLogLineFromWatcher(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test adding log line from watcher
 	logLine := events.LogLine{
@@ -209,8 +205,8 @@ func TestModel_AddLogLineFromWatcher(t *testing.T) {
 }
 
 func TestModel_SubscribeToWatcher(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test subscribing to watcher (method doesn't return anything)
 	model.subscribeToWatcher()
@@ -219,8 +215,8 @@ func TestModel_SubscribeToWatcher(t *testing.T) {
 }
 
 func TestModel_NavigateHistory(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Add some command history first
 	model.commandHistory = []string{"command1", "command2", "command3"}
@@ -239,8 +235,8 @@ func TestModel_NavigateHistory(t *testing.T) {
 }
 
 func TestModel_Update_WindowSize(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test window size message
 	msg := tea.WindowSizeMsg{
@@ -259,8 +255,8 @@ func TestModel_Update_WindowSize(t *testing.T) {
 }
 
 func TestModel_Update_KeyMsg(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test escape key
 	escMsg := tea.KeyMsg{
@@ -277,8 +273,8 @@ func TestModel_Update_KeyMsg(t *testing.T) {
 }
 
 func TestModel_HandleCommand(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Set some input text
 	model.textInput.SetValue("help")
@@ -294,8 +290,8 @@ func TestModel_HandleCommand(t *testing.T) {
 }
 
 func TestModel_View(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Set model as ready
 	model.ready = true
@@ -311,8 +307,8 @@ func TestModel_View(t *testing.T) {
 }
 
 func TestModel_Update_TickMsg(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test tick message
 	msg := model.tickStatus()
@@ -326,8 +322,8 @@ func TestModel_Update_TickMsg(t *testing.T) {
 }
 
 func TestModel_Update_TextInputMsg(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test text input message
 	msg := textinput.New()
@@ -341,8 +337,8 @@ func TestModel_Update_TextInputMsg(t *testing.T) {
 }
 
 func TestModel_Update_ViewportMsg(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test viewport message
 	msg := viewport.New(80, 24)
@@ -356,8 +352,8 @@ func TestModel_Update_ViewportMsg(t *testing.T) {
 }
 
 func TestModel_Update_KeyMsgEnter(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Set some input text
 	model.textInput.SetValue("help")
@@ -374,8 +370,8 @@ func TestModel_Update_KeyMsgEnter(t *testing.T) {
 }
 
 func TestModel_Update_KeyMsgUp(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Add some history
 	model.commandHistory = []string{"help", "clear"}
@@ -392,8 +388,8 @@ func TestModel_Update_KeyMsgUp(t *testing.T) {
 }
 
 func TestModel_Update_KeyMsgDown(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Add some history and navigate up first
 	model.commandHistory = []string{"help", "clear"}
@@ -411,8 +407,8 @@ func TestModel_Update_KeyMsgDown(t *testing.T) {
 }
 
 func TestModel_Update_KeyMsgCtrlC(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test Ctrl+C key
 	msg := tea.KeyMsg{Type: tea.KeyCtrlC}
@@ -432,8 +428,8 @@ func TestModel_Update_KeyMsgCtrlC(t *testing.T) {
 }
 
 func TestModel_Update_KeyMsgEsc(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Set some input text first
 	model.textInput.SetValue("test input")
@@ -456,8 +452,8 @@ func TestModel_Update_KeyMsgEsc(t *testing.T) {
 }
 
 func TestModel_Update_KeyMsgUpDown_ViewportMode(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Unfocus text input to test viewport scrolling
 	model.textInput.Blur()
@@ -484,8 +480,8 @@ func TestModel_Update_KeyMsgUpDown_ViewportMode(t *testing.T) {
 }
 
 func TestModel_Update_KeyMsgOther(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test other key (should update text input)
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
@@ -499,8 +495,8 @@ func TestModel_Update_KeyMsgOther(t *testing.T) {
 }
 
 func TestModel_Update_StatusTickMsg(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Set a status first
 	model.setStatus("Test status", 2*time.Second)
@@ -517,8 +513,8 @@ func TestModel_Update_StatusTickMsg(t *testing.T) {
 }
 
 func TestModel_Update_UnknownMsg(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test unknown message type
 	msg := "unknown message"
@@ -532,8 +528,8 @@ func TestModel_Update_UnknownMsg(t *testing.T) {
 }
 
 func TestModel_SubscribeToWatcher_WithSubscriber(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test subscribe to watcher
 	model.subscribeToWatcher()
@@ -545,8 +541,8 @@ func TestModel_SubscribeToWatcher_WithSubscriber(t *testing.T) {
 }
 
 func TestModel_SubscribeToWatcher_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Set up the model properly
 	model.ready = true
@@ -564,8 +560,8 @@ func TestModel_SubscribeToWatcher_Comprehensive(t *testing.T) {
 }
 
 func TestModel_AddLogLineFromWatcher_Coverage(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test addLogLineFromWatcher with different log lines
 	logLine1 := events.LogLine{
@@ -591,8 +587,8 @@ func TestModel_AddLogLineFromWatcher_Coverage(t *testing.T) {
 }
 
 func TestModel_Update_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test various message types that might not be covered
 	testCases := []struct {
@@ -622,8 +618,8 @@ func TestModel_Update_Comprehensive(t *testing.T) {
 }
 
 func TestModel_HandleCommand_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test different command types
 	commands := []string{
@@ -648,8 +644,8 @@ func TestModel_HandleCommand_Comprehensive(t *testing.T) {
 }
 
 func TestModel_ShowHelp_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test different help scenarios
 	helpContents := []string{
@@ -667,8 +663,8 @@ func TestModel_ShowHelp_Comprehensive(t *testing.T) {
 }
 
 func TestModel_ShowQueryResult_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test different query result scenarios
 	testCases := []struct {
@@ -690,8 +686,8 @@ func TestModel_ShowQueryResult_Comprehensive(t *testing.T) {
 }
 
 func TestModel_ShowQueryError_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test different query error scenarios
 	testCases := []struct {
@@ -713,8 +709,8 @@ func TestModel_ShowQueryError_Comprehensive(t *testing.T) {
 }
 
 func TestModel_NavigateHistory_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Set up command history
 	model.commandHistory = []string{"cmd1", "cmd2", "cmd3", "cmd4", "cmd5"}
@@ -752,8 +748,8 @@ func TestModel_NavigateHistory_Comprehensive(t *testing.T) {
 }
 
 func TestModel_View_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test view in different states
 	states := []struct {
@@ -783,8 +779,8 @@ func TestModel_View_Comprehensive(t *testing.T) {
 }
 
 func TestModel_AddLogLine_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test adding log lines with different properties
 	logLines := []events.LogLine{
@@ -811,8 +807,8 @@ func TestModel_AddLogLine_Comprehensive(t *testing.T) {
 }
 
 func TestModel_UpdateViewportContent_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Add various log lines
 	for i := 0; i < 10; i++ {
@@ -833,8 +829,8 @@ func TestModel_UpdateViewportContent_Comprehensive(t *testing.T) {
 }
 
 func TestModel_SetStatus_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test different status scenarios
 	statuses := []struct {
@@ -855,8 +851,8 @@ func TestModel_SetStatus_Comprehensive(t *testing.T) {
 }
 
 func TestModel_TickStatus_Comprehensive(t *testing.T) {
-	watcher := watcher.NewWatcherService()
-	model := NewModel(watcher)
+	_ = watcher.NewWatcherService()
+	model := NewModel()
 
 	// Test tickStatus in different states
 	model.setStatus("Test status", 2*time.Second)

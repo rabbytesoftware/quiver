@@ -15,12 +15,10 @@ import (
 
 type API struct {
 	router   *gin.Engine
-	watcher  *watcher.Watcher
 	usecases *usecases.Usecases
 }
 
 func NewAPI(
-	watcher *watcher.Watcher,
 	usecases *usecases.Usecases,
 ) *API {
 	gin.DefaultWriter = io.Discard
@@ -40,7 +38,6 @@ func NewAPI(
 
 	return &API{
 		router:   gin.New(),
-		watcher:  watcher,
 		usecases: usecases,
 	}
 }
@@ -49,7 +46,7 @@ func (a *API) Run() {
 	a.SetupMiddleware()
 	a.SetupRoutes()
 
-	a.watcher.Info(fmt.Sprintf(
+	watcher.Info(fmt.Sprintf(
 		"Initializing API on %s:%d",
 		config.GetAPI().Host,
 		config.GetAPI().Port,
@@ -61,8 +58,8 @@ func (a *API) Run() {
 }
 
 func (a *API) SetupMiddleware() {
-	a.router.Use(middleware.WatcherLogger(a.watcher))
-	a.router.Use(middleware.WatcherRecovery(a.watcher))
+	a.router.Use(middleware.WatcherLogger())
+	a.router.Use(middleware.WatcherRecovery())
 }
 
 func (a *API) SetupRoutes() {

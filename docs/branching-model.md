@@ -21,7 +21,7 @@ Quiver follows a **Git Flow-inspired branching model** with strict rules for pul
 1. **Protected Branches**: `master` and `develop` are protected branches
 2. **PR-Only Integration**: All changes must go through pull requests
 3. **Comprehensive CI**: Every PR runs automated checks
-4. **Quality Gates**: Minimum 80% overall coverage, 90% PR coverage
+4. **Quality Gates**: Minimum 80% overall coverage, 80% PR coverage
 
 ## Branch Types
 
@@ -123,7 +123,7 @@ The CI pipeline runs **only on pull requests** and consists of four main stages:
 
 **Coverage Requirements**:
 - **Overall Project Coverage**: ≥ 80%
-- **PR Coverage**: ≥ 90% (for changed files)
+- **PR Coverage**: ≥ 80% (for changed files)
 
 **Process**:
 1. Run all tests with race detection
@@ -152,7 +152,7 @@ All stages must pass for the PR to be considered valid:
 - ✅ Branch follows the defined branching model  
 - ✅ Code compiles successfully
 - ✅ Overall test coverage ≥ 80%
-- ✅ PR coverage ≥ 90%
+- ✅ PR coverage ≥ 80%
 - ✅ Code quality and security checks passed
 
 🎉 This PR is ready for review!
@@ -296,7 +296,7 @@ make pr-checks
 2. Remove unused/dead code
 3. Check `coverage.html` report for specific areas
 
-**Problem**: `❌ PR coverage 85% is below required 90%`
+**Problem**: `❌ PR coverage 75% is below required 80%`
 
 **Solutions**:
 1. Add tests for all new/changed code

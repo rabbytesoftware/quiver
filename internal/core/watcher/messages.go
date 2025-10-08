@@ -1,11 +1,14 @@
 package watcher
 
 import (
+	"fmt"
+
+	"github.com/rabbytesoftware/quiver/internal/core/errors"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher/pool"
 	"github.com/sirupsen/logrus"
 )
 
-func (w *Watcher) Debug(message string) {
+func Debug(message string) {
 	w.logger.Debug(message)
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.DebugLevel,
@@ -13,7 +16,7 @@ func (w *Watcher) Debug(message string) {
 	})
 }
 
-func (w *Watcher) Info(message string) {
+func Info(message string) {
 	w.logger.Info(message)
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.InfoLevel,
@@ -21,7 +24,7 @@ func (w *Watcher) Info(message string) {
 	})
 }
 
-func (w *Watcher) Warn(message string) {
+func Warn(message string) {
 	w.logger.Warning(message)
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.WarnLevel,
@@ -29,18 +32,28 @@ func (w *Watcher) Warn(message string) {
 	})
 }
 
-func (w *Watcher) Error(message string) {
-	w.logger.Error(message)
+func Errorf(message string, args ...interface{}) {
+	w.logger.Info(fmt.Sprintf(message, args...))
 	w.pool.AddMessage(pool.Message{
-		Level:   logrus.ErrorLevel,
-		Message: message,
+		Level:   logrus.InfoLevel,
+		Message: fmt.Sprintf(message, args...),
 	})
 }
 
-func (w *Watcher) Unforeseen(message string) {
-	w.logger.Fatal(message)
+// ? Error forces you to use the errors.Error type
+func Error(message errors.Error) {
+	w.logger.Error(message.Error())
+	w.pool.AddMessage(pool.Message{
+		Level:   logrus.ErrorLevel,
+		Message: message.Error(),
+	})
+}
+
+// ? Unforeseen forces you to use the errors.Error type
+func Unforeseen(message errors.Error) {
+	w.logger.Fatal(message.Error())
 	w.pool.AddMessage(pool.Message{
 		Level:   logrus.FatalLevel,
-		Message: message,
+		Message: message.Error(),
 	})
 }

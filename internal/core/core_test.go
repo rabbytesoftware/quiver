@@ -121,8 +121,8 @@ func TestCoreInitialization(t *testing.T) {
 		t.Error("Config should be singleton across Core instances")
 	}
 
-	// Watcher creates new instances, so they should be different
-	if core1.GetWatcher() == core2.GetWatcher() {
-		t.Error("Watcher should create new instances")
+	// Watcher uses singleton pattern, so they should be the same
+	if core1.GetWatcher() != core2.GetWatcher() {
+		t.Error("Watcher should be singleton across Core instances")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/rabbytesoftware/quiver/internal/core/config"
 	"github.com/rabbytesoftware/quiver/internal/core/watcher/pool"
@@ -14,6 +15,11 @@ import (
 // ? Watcher is an logging service, focus on an
 // ? event sourcing approach to logging.
 
+var (
+	w    *Watcher
+	once sync.Once
+)
+
 type Watcher struct {
 	logger *logrus.Logger
 	pool   *pool.Pool
@@ -22,41 +28,49 @@ type Watcher struct {
 func NewWatcherService() *Watcher {
 	watcherConfig := config.GetWatcher()
 
-	return &Watcher{
-		logger: initLogger(watcherConfig),
-		pool:   pool.NewPool(),
-	}
+	once.Do(func() {
+		w = &Watcher{
+			logger: initLogger(watcherConfig),
+			pool:   pool.NewPool(),
+		}
+	})
+
+	return w
 }
 
-func (w *Watcher) SetLevel(level logrus.Level) {
+func GetWatcher() *Watcher {
+	return w
+}
+
+func SetLevel(level logrus.Level) {
 	w.logger.SetLevel(level)
 }
 
-func (w *Watcher) GetLevel() logrus.Level {
+func GetLevel() logrus.Level {
 	return w.logger.GetLevel()
 }
 
-func (w *Watcher) WithFields(fields logrus.Fields) *logrus.Entry {
+func WithFields(fields logrus.Fields) *logrus.Entry {
 	return w.logger.WithFields(fields)
 }
 
-func (w *Watcher) WithField(key string, value interface{}) *logrus.Entry {
+func WithField(key string, value interface{}) *logrus.Entry {
 	return w.logger.WithField(key, value)
 }
 
-func (w *Watcher) Subscribe(callback pool.Subscriber) {
+func Subscribe(callback pool.Subscriber) {
 	w.pool.Subscribe(callback)
 }
 
-func (w *Watcher) GetSubscriberCount() int {
+func GetSubscriberCount() int {
 	return w.pool.GetSubscriberCount()
 }
 
-func (w *Watcher) GetConfig() config.Watcher {
+func GetConfig() config.Watcher {
 	return config.GetWatcher()
 }
 
-func (w *Watcher) IsEnabled() bool {
+func IsEnabled() bool {
 	return config.GetWatcher().Enabled
 }
 
