@@ -1,7 +1,6 @@
 package infrastructure
 
 import (
-	"github.com/rabbytesoftware/quiver/internal/core/watcher"
 	netbridge "github.com/rabbytesoftware/quiver/internal/infrastructure/netbridge"
 	"github.com/rabbytesoftware/quiver/internal/infrastructure/requirements"
 
@@ -21,11 +20,9 @@ type Infrastructure struct {
 	Runtime      runtime.REEInterface
 }
 
-func NewInfrastructure(
-	watcher *watcher.Watcher,
-) *Infrastructure {
+func NewInfrastructure() *Infrastructure {
 	netbridge := netbridge.NewNetbridge()          // Netbridge module
-	fns := fns.NewFNS(watcher)                     // Fetch and Share module
+	fns := fns.NewFNS()                            // Fetch and Share module
 	translator := translator.NewTranslator(fns)    // Translator (ATL & QTL) module
 	requirements := requirements.NewRequirements() // Requirements module
 	runtime := runtime.NewRuntime()                // Runtime module

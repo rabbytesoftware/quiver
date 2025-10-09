@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,19 +14,17 @@ import (
 )
 
 type FNS struct {
-	watcher *watcher.Watcher
 }
 
-func NewFNS(
-	watcher *watcher.Watcher,
-) FNSInterface {
-	fns := &FNS{
-		watcher: watcher,
-	}
+func NewFNS() FNSInterface {
+	fns := &FNS{}
 
-	result, _ := fns.GetInfo(context.Background(), "https://github.com/rabbytesoftware/quiver/blob/develop/README.md")
+	result, _ := fns.GetInfo(context.Background(), "C:/Users/Joaquin/Desktop/Code")
 
 	watcher.Info(result.Path)
+	watcher.Info(strconv.FormatInt(result.Size, 10))
+	watcher.Info(result.ModTime.String())
+	watcher.Info(string(result.Type))
 
 	return fns
 }
@@ -35,12 +34,12 @@ func NewFNS(
 // Supports both local filesystem paths and remote URLs (HTTP/HTTPS).
 func (f *FNS) GetInfo(ctx context.Context, path string) (*ResourceInfo, error) {
 
-	info := &ResourceInfo{}
+	info := &ResourceInfo{Path: path}
 
 	// Remote URLs
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodHead, path, nil)
+		req, err := http.NewRequest("GET", path, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 
@@ -55,20 +54,59 @@ func (f *FNS) GetInfo(ctx context.Context, path string) (*ResourceInfo, error) {
 
 		info.Type = ResourceType(http.DetectContentType([]byte(path)))
 
-		if length := resp.Header.Get("Content-Length"); length != "" {
-			fmt.Sscanf(length, "%d", &info.Size)
-		}
-		if t := resp.Header.Get("Last-Modified"); t != "" {
-			if t, err := http.ParseTime(t); err == nil {
-				info.ModTime = t
+		info.Size = resp.ContentLength // May be -1 if unknown
+		if info.Size < 0 {
+
+			var total int64 // var used in either Content-Range or full body read
+
+			// If Content-Length doesn't exist, try Content-Range
+			if cr := resp.Header.Get("Content-Range"); cr != "" {
+				req.Header.Set("Range", "bytes=0-0")
+				conRange := resp.Header.Get("Content-Range")
+
+				_, err := fmt.Sscanf(conRange, "bytes 0-0/%d", &total)
+				if err == nil {
+					info.Size = total
+				}
+			} else {
+				// As a last resort, read the entire body to determine size
+				var total int64
+				buf := make([]byte, 32*1024)
+				for {
+					n, err := resp.Body.Read(buf)
+					total += int64(n)
+					if err == io.EOF {
+						break
+					}
+				}
+				info.Size = total
 			}
 		}
 
-		return info, nil // Success in retrieving remote URL info
+		tim := resp.Header.Get("Last-Modified")
+		modT, err := http.ParseTime(tim)
+		if tim == "" || err != nil { // If parsing fails or header is missing
+			info.ModTime = time.Time{} // Unknown mod time (or could use time.Now())
+		} else {
+			info.ModTime = modT
+		}
+	} else { // Local filesystem paths
+
+		stat, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to stat path: %w", err)
+		}
+
+		info.Size = stat.Size()
+		info.ModTime = stat.ModTime()
+		if stat.IsDir() { // Maybe check for more types?
+			info.Type = ResourceType("directory")
+		} else {
+			info.Type = ResourceType("file")
+		}
 	}
 
-	return nil, fmt.Errorf("unsupported path format: %s", path)
-
+	return info, nil
 }
 
 // Exists checks whether a resource exists at the given path.
