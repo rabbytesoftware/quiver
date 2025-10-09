@@ -39,7 +39,7 @@ func (f *FNS) GetInfo(ctx context.Context, path string) (*ResourceInfo, error) {
 	// Remote URLs
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 
-		req, err := http.NewRequest("GET", path, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", path, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 
