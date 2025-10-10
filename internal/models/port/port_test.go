@@ -5,42 +5,42 @@ import "testing"
 func TestPortRule_IsStartPortValid(t *testing.T) {
 	testCases := []struct {
 		name     string
-		portRule PortRule
+		portRule Port
 		expected bool
 	}{
 		{
 			name:     "valid start port 80",
-			portRule: PortRule{StartPort: 80},
+			portRule: Port{StartPort: 80},
 			expected: true,
 		},
 		{
 			name:     "valid start port 1",
-			portRule: PortRule{StartPort: 1},
+			portRule: Port{StartPort: 1},
 			expected: true,
 		},
 		{
 			name:     "valid start port 65535",
-			portRule: PortRule{StartPort: 65535},
+			portRule: Port{StartPort: 65535},
 			expected: true,
 		},
 		{
 			name:     "invalid start port 0",
-			portRule: PortRule{StartPort: 0},
+			portRule: Port{StartPort: 0},
 			expected: false,
 		},
 		{
 			name:     "invalid start port negative",
-			portRule: PortRule{StartPort: -1},
+			portRule: Port{StartPort: -1},
 			expected: false,
 		},
 		{
 			name:     "invalid start port too high",
-			portRule: PortRule{StartPort: 65536},
+			portRule: Port{StartPort: 65536},
 			expected: false,
 		},
 		{
 			name:     "invalid start port very high",
-			portRule: PortRule{StartPort: 100000},
+			portRule: Port{StartPort: 100000},
 			expected: false,
 		},
 	}
@@ -58,42 +58,42 @@ func TestPortRule_IsStartPortValid(t *testing.T) {
 func TestPortRule_IsEndPortValid(t *testing.T) {
 	testCases := []struct {
 		name     string
-		portRule PortRule
+		portRule Port
 		expected bool
 	}{
 		{
 			name:     "valid end port 80",
-			portRule: PortRule{EndPort: 80},
+			portRule: Port{EndPort: 80},
 			expected: true,
 		},
 		{
 			name:     "valid end port 1",
-			portRule: PortRule{EndPort: 1},
+			portRule: Port{EndPort: 1},
 			expected: true,
 		},
 		{
 			name:     "valid end port 65535",
-			portRule: PortRule{EndPort: 65535},
+			portRule: Port{EndPort: 65535},
 			expected: true,
 		},
 		{
 			name:     "invalid end port 0",
-			portRule: PortRule{EndPort: 0},
+			portRule: Port{EndPort: 0},
 			expected: false,
 		},
 		{
 			name:     "invalid end port negative",
-			portRule: PortRule{EndPort: -1},
+			portRule: Port{EndPort: -1},
 			expected: false,
 		},
 		{
 			name:     "invalid end port too high",
-			portRule: PortRule{EndPort: 65536},
+			portRule: Port{EndPort: 65536},
 			expected: false,
 		},
 		{
 			name:     "invalid end port very high",
-			portRule: PortRule{EndPort: 100000},
+			portRule: Port{EndPort: 100000},
 			expected: false,
 		},
 	}
@@ -111,37 +111,37 @@ func TestPortRule_IsEndPortValid(t *testing.T) {
 func TestPortRule_BothPortsValid(t *testing.T) {
 	testCases := []struct {
 		name       string
-		portRule   PortRule
+		portRule   Port
 		startValid bool
 		endValid   bool
 	}{
 		{
 			name:       "both ports valid",
-			portRule:   PortRule{StartPort: 80, EndPort: 8080},
+			portRule:   Port{StartPort: 80, EndPort: 8080},
 			startValid: true,
 			endValid:   true,
 		},
 		{
 			name:       "start port invalid, end port valid",
-			portRule:   PortRule{StartPort: 0, EndPort: 8080},
+			portRule:   Port{StartPort: 0, EndPort: 8080},
 			startValid: false,
 			endValid:   true,
 		},
 		{
 			name:       "start port valid, end port invalid",
-			portRule:   PortRule{StartPort: 80, EndPort: 0},
+			portRule:   Port{StartPort: 80, EndPort: 0},
 			startValid: true,
 			endValid:   false,
 		},
 		{
 			name:       "both ports invalid",
-			portRule:   PortRule{StartPort: 0, EndPort: 0},
+			portRule:   Port{StartPort: 0, EndPort: 0},
 			startValid: false,
 			endValid:   false,
 		},
 		{
 			name:       "same port for both",
-			portRule:   PortRule{StartPort: 8080, EndPort: 8080},
+			portRule:   Port{StartPort: 8080, EndPort: 8080},
 			startValid: true,
 			endValid:   true,
 		},
@@ -165,16 +165,11 @@ func TestPortRule_BothPortsValid(t *testing.T) {
 
 func TestPortRule_StructFields(t *testing.T) {
 	// Test that all fields can be set and retrieved
-	portRule := PortRule{
-		ID:               "test-id",
+	portRule := Port{
 		StartPort:        80,
 		EndPort:          8080,
 		Protocol:         ProtocolTCP,
 		ForwardingStatus: ForwardingStatusEnabled,
-	}
-
-	if portRule.ID != "test-id" {
-		t.Errorf("Expected ID to be 'test-id', got %q", portRule.ID)
 	}
 
 	if portRule.StartPort != 80 {
@@ -196,11 +191,7 @@ func TestPortRule_StructFields(t *testing.T) {
 
 func TestPortRule_ZeroValue(t *testing.T) {
 	// Test zero value of PortRule
-	var portRule PortRule
-
-	if portRule.ID != "" {
-		t.Errorf("Expected zero value ID to be empty, got %q", portRule.ID)
-	}
+	var portRule Port
 
 	if portRule.StartPort != 0 {
 		t.Errorf("Expected zero value StartPort to be 0, got %d", portRule.StartPort)
@@ -244,7 +235,7 @@ func TestPortRule_EdgeCasePorts(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			portRule := PortRule{StartPort: tc.port, EndPort: tc.port}
+			portRule := Port{StartPort: tc.port, EndPort: tc.port}
 
 			startResult := portRule.IsStartPortValid()
 			endResult := portRule.IsEndPortValid()

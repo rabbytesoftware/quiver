@@ -33,7 +33,7 @@ func TestArrow_Structure(t *testing.T) {
 			CpuCores: 2,
 		},
 		Dependencies: []ArrowNamespace{ArrowNamespace("dep.namespace")},
-		Netbridge: []port.PortRule{
+		Netbridge: []port.Port{
 			{
 				StartPort: 8080,
 				EndPort:   8080,
@@ -190,7 +190,7 @@ func TestArrow_SystemTypes(t *testing.T) {
 func TestArrow_PortRules(t *testing.T) {
 	// Test port rules
 	arrow := Arrow{
-		Netbridge: []port.PortRule{
+		Netbridge: []port.Port{
 			{
 				StartPort: 80,
 				EndPort:   80,

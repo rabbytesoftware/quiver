@@ -20,36 +20,25 @@ type NetbridgeInterface interface {
 	IsPortAvailable(
 		ctx context.Context,
 		port int,
-	) (bool, error)
-	ArePortsAvailable(
-		ctx context.Context,
-		ports []int,
+		protocol port.Protocol,
 	) (bool, error)
 
+	ForwardRule(
+		ctx context.Context,
+		rule port.Rule,
+	) (port.Port, error)
 	ForwardPort(
 		ctx context.Context,
-		port int,
-	) (port.PortRule, error)
-	ForwardPorts(
-		ctx context.Context,
-		ports []int,
-	) ([]port.PortRule, error)
+		port port.Port,
+	) (port.Port, error)
 
 	ReversePort(
 		ctx context.Context,
-		port int,
-	) (port.PortRule, error)
-	ReversePorts(
-		ctx context.Context,
-		ports []int,
-	) ([]port.PortRule, error)
+		port port.Port,
+	) (port.Port, error)
 
 	GetPortForwardingStatus(
 		ctx context.Context,
-		port int,
+		port port.Port,
 	) (port.ForwardingStatus, error)
-	GetPortForwardingStatuses(
-		ctx context.Context,
-		ports []int,
-	) ([]port.ForwardingStatus, error)
 }

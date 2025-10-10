@@ -25,7 +25,7 @@ type Arrow struct {
 	Requirements requirement.Requirement `json:"requirements"`
 	Dependencies []ArrowNamespace        `json:"dependencies"`
 
-	Netbridge []port.PortRule     `json:"netbridge"`
+	Netbridge []port.Port         `json:"netbridge"`
 	Variables []variable.Variable `json:"variables"`
 
 	Methods []runtime.Method `json:"methods"`

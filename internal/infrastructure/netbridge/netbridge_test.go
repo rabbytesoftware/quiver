@@ -62,7 +62,7 @@ func TestNetbridgeImpl_IsPortAvailable(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
 
-	available, err := nb.IsPortAvailable(ctx, 8080)
+	available, err := nb.IsPortAvailable(ctx, 8080, port.ProtocolTCP)
 	if err != nil {
 		t.Errorf("IsPortAvailable() returned error: %v", err)
 	}
@@ -71,58 +71,34 @@ func TestNetbridgeImpl_IsPortAvailable(t *testing.T) {
 	}
 }
 
-func TestNetbridgeImpl_ArePortsAvailable(t *testing.T) {
-	nb := NewNetbridge()
-	ctx := context.Background()
-
-	ports := []int{8080, 8081, 8082}
-	available, err := nb.ArePortsAvailable(ctx, ports)
-	if err != nil {
-		t.Errorf("ArePortsAvailable() returned error: %v", err)
-	}
-	if !available {
-		t.Error("ArePortsAvailable() should return true for unimplemented method")
-	}
-}
-
 func TestNetbridgeImpl_ForwardPort(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
 
-	rule, err := nb.ForwardPort(ctx, 8080)
+	testPort := port.Port{
+		StartPort:        8080,
+		EndPort:          8080,
+		Protocol:         port.ProtocolTCP,
+		ForwardingStatus: port.ForwardingStatusEnabled,
+	}
+
+	result, err := nb.ForwardPort(ctx, testPort)
 	if err != nil {
 		t.Errorf("ForwardPort() returned error: %v", err)
 	}
 
-	// Check that the returned rule has expected values
-	if rule.StartPort != 8080 {
-		t.Errorf("ForwardPort() returned wrong StartPort: got %d, want %d", rule.StartPort, 8080)
+	// Check that the returned port has expected values
+	if result.StartPort != 8080 {
+		t.Errorf("ForwardPort() returned wrong StartPort: got %d, want %d", result.StartPort, 8080)
 	}
-	if rule.EndPort != 8080 {
-		t.Errorf("ForwardPort() returned wrong EndPort: got %d, want %d", rule.EndPort, 8080)
+	if result.EndPort != 8080 {
+		t.Errorf("ForwardPort() returned wrong EndPort: got %d, want %d", result.EndPort, 8080)
 	}
-	if rule.Protocol != port.ProtocolTCP {
-		t.Errorf("ForwardPort() returned wrong Protocol: got %v, want %v", rule.Protocol, port.ProtocolTCP)
+	if result.Protocol != port.ProtocolTCP {
+		t.Errorf("ForwardPort() returned wrong Protocol: got %v, want %v", result.Protocol, port.ProtocolTCP)
 	}
-	if rule.ForwardingStatus != port.ForwardingStatusEnabled {
-		t.Errorf("ForwardPort() returned wrong ForwardingStatus: got %v, want %v", rule.ForwardingStatus, port.ForwardingStatusEnabled)
-	}
-}
-
-func TestNetbridgeImpl_ForwardPorts(t *testing.T) {
-	nb := NewNetbridge()
-	ctx := context.Background()
-
-	ports := []int{8080, 8081, 8082}
-	rules, err := nb.ForwardPorts(ctx, ports)
-	if err != nil {
-		t.Errorf("ForwardPorts() returned error: %v", err)
-	}
-	if rules == nil {
-		t.Error("ForwardPorts() should return empty slice, not nil")
-	}
-	if len(rules) != 0 {
-		t.Error("ForwardPorts() should return empty slice for unimplemented method")
+	if result.ForwardingStatus != port.ForwardingStatusEnabled {
+		t.Errorf("ForwardPort() returned wrong ForwardingStatus: got %v, want %v", result.ForwardingStatus, port.ForwardingStatusEnabled)
 	}
 }
 
@@ -130,40 +106,30 @@ func TestNetbridgeImpl_ReversePort(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
 
-	rule, err := nb.ReversePort(ctx, 8080)
+	testPort := port.Port{
+		StartPort:        8080,
+		EndPort:          8080,
+		Protocol:         port.ProtocolTCP,
+		ForwardingStatus: port.ForwardingStatusEnabled,
+	}
+
+	result, err := nb.ReversePort(ctx, testPort)
 	if err != nil {
 		t.Errorf("ReversePort() returned error: %v", err)
 	}
 
-	// Check that the returned rule has expected values
-	if rule.StartPort != 8080 {
-		t.Errorf("ReversePort() returned wrong StartPort: got %d, want %d", rule.StartPort, 8080)
+	// Check that the returned port has expected values
+	if result.StartPort != 8080 {
+		t.Errorf("ReversePort() returned wrong StartPort: got %d, want %d", result.StartPort, 8080)
 	}
-	if rule.EndPort != 8080 {
-		t.Errorf("ReversePort() returned wrong EndPort: got %d, want %d", rule.EndPort, 8080)
+	if result.EndPort != 8080 {
+		t.Errorf("ReversePort() returned wrong EndPort: got %d, want %d", result.EndPort, 8080)
 	}
-	if rule.Protocol != port.ProtocolTCP {
-		t.Errorf("ReversePort() returned wrong Protocol: got %v, want %v", rule.Protocol, port.ProtocolTCP)
+	if result.Protocol != port.ProtocolTCP {
+		t.Errorf("ReversePort() returned wrong Protocol: got %v, want %v", result.Protocol, port.ProtocolTCP)
 	}
-	if rule.ForwardingStatus != port.ForwardingStatusEnabled {
-		t.Errorf("ReversePort() returned wrong ForwardingStatus: got %v, want %v", rule.ForwardingStatus, port.ForwardingStatusEnabled)
-	}
-}
-
-func TestNetbridgeImpl_ReversePorts(t *testing.T) {
-	nb := NewNetbridge()
-	ctx := context.Background()
-
-	ports := []int{8080, 8081, 8082}
-	rules, err := nb.ReversePorts(ctx, ports)
-	if err != nil {
-		t.Errorf("ReversePorts() returned error: %v", err)
-	}
-	if rules == nil {
-		t.Error("ReversePorts() should return empty slice, not nil")
-	}
-	if len(rules) != 0 {
-		t.Error("ReversePorts() should return empty slice for unimplemented method")
+	if result.ForwardingStatus != port.ForwardingStatusEnabled {
+		t.Errorf("ReversePort() returned wrong ForwardingStatus: got %v, want %v", result.ForwardingStatus, port.ForwardingStatusEnabled)
 	}
 }
 
@@ -171,29 +137,19 @@ func TestNetbridgeImpl_GetPortForwardingStatus(t *testing.T) {
 	nb := NewNetbridge()
 	ctx := context.Background()
 
-	status, err := nb.GetPortForwardingStatus(ctx, 8080)
+	testPort := port.Port{
+		StartPort:        8080,
+		EndPort:          8080,
+		Protocol:         port.ProtocolTCP,
+		ForwardingStatus: port.ForwardingStatusEnabled,
+	}
+
+	status, err := nb.GetPortForwardingStatus(ctx, testPort)
 	if err != nil {
 		t.Errorf("GetPortForwardingStatus() returned error: %v", err)
 	}
 	if status != port.ForwardingStatusEnabled {
 		t.Errorf("GetPortForwardingStatus() returned wrong status: got %v, want %v", status, port.ForwardingStatusEnabled)
-	}
-}
-
-func TestNetbridgeImpl_GetPortForwardingStatuses(t *testing.T) {
-	nb := NewNetbridge()
-	ctx := context.Background()
-
-	ports := []int{8080, 8081, 8082}
-	statuses, err := nb.GetPortForwardingStatuses(ctx, ports)
-	if err != nil {
-		t.Errorf("GetPortForwardingStatuses() returned error: %v", err)
-	}
-	if statuses == nil {
-		t.Error("GetPortForwardingStatuses() should return empty slice, not nil")
-	}
-	if len(statuses) != 0 {
-		t.Error("GetPortForwardingStatuses() should return empty slice for unimplemented method")
 	}
 }
 

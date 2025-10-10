@@ -12,6 +12,12 @@ func (f ForwardingStatus) String() string {
 	return string(f)
 }
 
+func (f ForwardingStatus) IsValid() bool {
+	return f == ForwardingStatusEnabled ||
+		f == ForwardingStatusDisabled ||
+		f == ForwardingStatusError
+}
+
 func (f ForwardingStatus) IsEnabled() bool {
 	return f == ForwardingStatusEnabled
 }
