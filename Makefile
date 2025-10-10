@@ -143,13 +143,13 @@ run:
 # Run all tests
 test:
 	@echo "$(BLUE)Running tests...$(NC)"
-	@go test -race -v ./...
+	@go test -race -ldflags="-s -w" -v ./...
 	@echo "$(GREEN)All tests passed!$(NC)"
 
 # Run tests with coverage
 test-coverage:
 	@echo "$(BLUE)Running tests with coverage...$(NC)"
-	@go test -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./...
+	@go test -race -ldflags="-s -w" -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./...
 	@go tool cover -html=$(COVERAGE_FILE) -o $(COVERAGE_HTML)
 	@go tool cover -func=$(COVERAGE_FILE)
 	@echo "$(GREEN)Coverage report generated: $(COVERAGE_HTML)$(NC)"
