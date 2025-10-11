@@ -25,7 +25,12 @@ func NewRepository[T any](
 ) (interfaces.RepositoryInterface[T], error) {
 	dbConfig := config.GetDatabase()
 
-	dbPath := filepath.Join(dbConfig.Path, fmt.Sprintf("%s.db", name))
+	dbPath := dbConfig.Path
+	if envPath := os.Getenv("QUIVER_DATABASE_PATH"); envPath != "" {
+		dbPath = envPath
+	}
+
+	dbPath = filepath.Join(dbPath, fmt.Sprintf("%s.db", name))
 
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
