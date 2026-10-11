@@ -16,6 +16,9 @@ type Applied struct {
 	Entries []AppliedEntry
 	Refused []Refusal
 	Skipped []Refusal
+	// Unclaimed are desktop entries refused only because the app already sits
+	// unmanaged where it would be placed; the arrow's own copy still runs.
+	Unclaimed []AppliedEntry
 }
 
 func (a *Applied) Record(
@@ -26,6 +29,9 @@ func (a *Applied) Record(
 ) {
 	if p.Refused != "" {
 		a.Refuse(kind, index, c.Name, p.Refused)
+		if kind == domain.ExposeKindDesktop && p.Refused == ReasonUnmanaged {
+			a.Unclaimed = append(a.Unclaimed, AppliedEntry{Kind: kind, Index: index, Name: c.Name, Target: c.Target})
+		}
 		return
 	}
 	a.Entries = append(a.Entries, AppliedEntry{
