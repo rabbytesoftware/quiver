@@ -51,15 +51,9 @@ func external(
 	if !fsguard.HasSuffixFold(target, ".exe") || fsguard.UnsafePath(target, `"%`) {
 		return nil, models.ReasonUnsafePath, nil
 	}
-	if strings.ContainsAny(filepath.Base(target), "*?") {
-		matches, err := filepath.Glob(target)
-		if err != nil || len(matches) == 0 {
-			return nil, models.ReasonNotFound, nil
-		}
-		if len(matches) > 1 {
-			return nil, models.ReasonAmbiguous, nil
-		}
-		target = matches[0]
+	target, reason := globName(target)
+	if reason != "" {
+		return nil, reason, nil
 	}
 	if _, ok := fsguard.ResolveInside(dir, target); !ok {
 		if _, err := os.Lstat(target); err == nil {
@@ -67,4 +61,21 @@ func external(
 		}
 	}
 	return []models.Candidate{{Name: entryName, Target: target, Declared: true}}, "", nil
+}
+
+// globName settles a wildcard file name to the one file it matches.
+func globName(
+	target string,
+) (string, string) {
+	if !strings.ContainsAny(filepath.Base(target), "*?") {
+		return target, ""
+	}
+	matches, err := filepath.Glob(target)
+	switch {
+	case err != nil || len(matches) == 0:
+		return target, models.ReasonNotFound
+	case len(matches) > 1:
+		return target, models.ReasonAmbiguous
+	}
+	return matches[0], ""
 }
