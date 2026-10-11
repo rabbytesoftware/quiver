@@ -10,6 +10,8 @@ type Layout struct {
 	UserHome   string
 	AppData    string
 	Apps       []string
+	// External maps each allowed external root name to its directory on this host.
+	External map[string]string
 }
 
 type Request struct {

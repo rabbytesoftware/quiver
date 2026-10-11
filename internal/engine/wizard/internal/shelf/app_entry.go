@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/shelf/internal/fsguard"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/shelf/internal/models"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/shelf/internal/ownership"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/workfs"
@@ -77,6 +78,11 @@ func appAllowed(
 ) bool {
 	if workfs.Inside(workdir, target) {
 		return true
+	}
+	for _, dir := range l.External {
+		if _, ok := fsguard.ResolveInside(dir, target); ok && fsguard.HasSuffixFold(target, ".exe") {
+			return true
+		}
 	}
 	if !strings.EqualFold(filepath.Ext(target), models.BundleExt) {
 		return false
