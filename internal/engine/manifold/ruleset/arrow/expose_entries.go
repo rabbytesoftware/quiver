@@ -94,9 +94,13 @@ func checkExposePath(
 		return nil
 	}
 
+	if _, rest, ok := domain.SplitExposeRoot(path); ok && at.kind == domain.ExposeKindDesktop && at.os.IsWindows() {
+		return checkExternalPath(at, path, rest)
+	}
+
 	var errs aerrors.RuleErrors
 	if !workdirAnchored(path) {
-		errs = append(errs, at.err("path", "invalid_path", "path %q must be %q or start with ${INSTALL_PATH} or ${WORKDIR}", path, domain.ExposeAuto)...)
+		errs = append(errs, at.err("path", "invalid_path", "path %q must be %q or start with ${INSTALL_PATH} or ${WORKDIR} (a windows desktop path may also start with ${LOCALAPPDATA}, ${PROGRAMFILES}, ${PROGRAMFILES(X86)} or ${APPDATA})", path, domain.ExposeAuto)...)
 	}
 	if containsPathTraversal(path) {
 		errs = append(errs, at.err("path", "path_traversal", "path %q must not contain \"..\"", path)...)
@@ -130,4 +134,29 @@ func workdirAnchored(
 	path string,
 ) bool {
 	return strings.HasPrefix(path, "${INSTALL_PATH}") || strings.HasPrefix(path, "${WORKDIR}")
+}
+
+// checkExternalPath holds a path below an external root to a plain .exe, with
+// a wildcard allowed only in the file name.
+func checkExternalPath(
+	at exposeAt,
+	path string,
+	rest string,
+) aerrors.RuleErrors {
+	var errs aerrors.RuleErrors
+	if containsPathTraversal(path) {
+		errs = append(errs, at.err("path", "path_traversal", "path %q must not contain \"..\"", path)...)
+	}
+	dir, file := splitLast(rest)
+	if strings.Contains(rest, "${") || strings.ContainsAny(dir, "*?[") || !strings.HasSuffix(strings.ToLower(file), ".exe") {
+		errs = append(errs, at.err("path", "invalid_desktop_path", "external path %q must end in a .exe name, may use * or ? only in that name and may not nest variables", path)...)
+	}
+	return errs
+}
+
+func splitLast(
+	p string,
+) (string, string) {
+	i := strings.LastIndexAny(p, `/\`)
+	return p[:i+1], p[i+1:]
 }

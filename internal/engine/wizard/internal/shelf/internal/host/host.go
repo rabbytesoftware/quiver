@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"github.com/rabbytesoftware/quiver.core/internal/core/paths"
+	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/shelf/internal/models"
 )
 
@@ -54,6 +55,7 @@ func (h Host) Layout() (models.Layout, error) {
 		UserHome:   userHome,
 		AppData:    h.appData(userHome),
 		Apps:       h.applicationsDirs(userHome),
+		External:   h.externalRoots(),
 	}, nil
 }
 
@@ -102,4 +104,17 @@ func (h Host) applicationsDirs(
 		return h.AppsDirs
 	}
 	return []string{"/Applications", filepath.Join(userHome, "Applications")}
+}
+
+func (h Host) externalRoots() map[string]string {
+	var roots map[string]string
+	for _, name := range domain.ExposeExternalRoots {
+		if v := h.Env(name); filepath.IsAbs(v) {
+			if roots == nil {
+				roots = map[string]string{}
+			}
+			roots[name] = filepath.Clean(v)
+		}
+	}
+	return roots
 }
