@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/shelf/internal/models"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/shelf/mocks"
 )
 
@@ -82,4 +83,27 @@ func TestBundleExecutable(t *testing.T) {
 	got, err := bundleExecutable(bundle)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "Tool"), got, "the executable named like the bundle wins")
+}
+
+func TestShelf_AppEntry_StartsTheArrowsCopyWhenTheAppExistsUnmanaged(t *testing.T) {
+	f := newFixture(t, "darwin")
+	wd := f.Workdir(t, mocks.NsA)
+	mocks.WriteBundle(t, filepath.Join(wd, "Tool.app"), "v1")
+	mocks.WriteFile(t, filepath.Join(wd, "Tool.app", "Contents", "MacOS", "Tool"), "x", 0o755)
+	existing := filepath.Join(f.Apps[0], "Tool.app")
+	mocks.WriteBundle(t, existing, "user install")
+	expose := domain.Expose{Desktop: []domain.ExposeEntry{{Name: "Tool", Path: domain.ExposeAuto}}}
+	ctx := context.Background()
+
+	got, err := f.shelf.Apply(ctx, mocks.NsA, wd, expose, domain.ArrowMedia{})
+	require.NoError(t, err)
+	require.Len(t, got.Refused, 1)
+	assert.Equal(t, models.ReasonUnmanaged, got.Refused[0].Reason)
+
+	app, err := f.shelf.AppEntry(ctx, wd)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(wd, "Tool.app", "Contents", "MacOS", "Tool"), app)
+
+	require.NoError(t, f.shelf.Remove(ctx, wd))
+	assert.Equal(t, "user install", mocks.ReadBundleVersion(t, existing), "an app Quiver never owned is left intact")
 }

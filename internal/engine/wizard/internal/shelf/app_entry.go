@@ -56,6 +56,9 @@ func (s *shelf) recordApp(
 			return os.WriteFile(marker, []byte(appPath(e)+"\n"), 0o600)
 		}
 	}
+	if len(out.Unclaimed) > 0 {
+		return os.WriteFile(marker, []byte(out.Unclaimed[0].Target+"\n"), 0o600)
+	}
 	if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
