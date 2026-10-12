@@ -10,17 +10,19 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/runtime/internal/models"
 )
 
 func TestUnixProcess_RunsInItsOwnSession(t *testing.T) {
 	proc, pid, _ := startForkingShellProcess(t, context.Background(), 5*time.Second)
 
-	childSID, err := syscall.Getsid(pid)
+	childSID, err := unix.Getsid(pid)
 	if err != nil {
 		t.Fatalf("Getsid(%d) error = %v", pid, err)
 	}
-	if parentSID, _ := syscall.Getsid(0); childSID == parentSID {
+	if parentSID, _ := unix.Getsid(0); childSID == parentSID {
 		t.Errorf("child session %d equals the daemon's: it still shares the controlling terminal", childSID)
 	}
 	if childSID != pid {
