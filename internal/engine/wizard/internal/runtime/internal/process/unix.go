@@ -40,7 +40,7 @@ func newProcess(
 		return nil, err
 	}
 
-	base.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	base.cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	// exec.CommandContext's own cancellation kills the single spawned PID,
 	// which leaks exactly what signalGroup exists to prevent: a cancelled
@@ -144,9 +144,10 @@ func (p *unixProcess) Interrupt(
 
 // signalGroup delivers sig to the whole process group led by pid.
 //
-// newProcess puts every process it spawns into a group of its own (Setpgid
-// with Pgid left at zero), so the spawned PID is always that group's leader
-// and the negative-PID form reaches it together with everything it forked.
+// newProcess puts every process it spawns into a session of its own (Setsid),
+// which also makes the spawned PID the leader of a new group, and drops the
+// daemon's controlling terminal so a terminal read or write can never stop it
+// with SIGTTIN or SIGTTOU. The spawned PID is always that group's leader and the negative-PID form reaches it together with everything it forked.
 // Signalling the bare PID is not enough once a step is shell-wrapped: /bin/sh
 // only exec-optimizes itself into a single simple command, and for anything
 // else (`a & wait`, `a; b`, `a && b`) it forks a child and stays on as its
