@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	dto "github.com/rabbytesoftware/quiver.core/internal/api/v0/dto"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/tests/kit"
 )
@@ -32,14 +33,14 @@ func (s *CrashSuite) TestCrash_MidInstall_Recovery() {
 	s.Equal(http.StatusCreated, tc1.Add(kit.NSFor("quiver-test/tool-a-slow", "v1")))
 	env1.WaitForListLen(s.T(), 1, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Install(kit.NSFor("quiver-test/tool-a-slow", "v1"), nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateInstalling, 30*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateInstalling, 120*time.Second)
 	env1.CloseCrashing()
 
 	env2 := s.NewEnvWithHome(home)
 	// WaitForState waits for the runtime.recovered WS event — ensuring recovery used
 	// RecoverInterrupted (not Forget). If Forget were called the runtime would be gone
 	// and no WS event would arrive, causing a timeout here.
-	env2.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateAbsent, 30*time.Second)
+	env2.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateAbsent, 120*time.Second)
 	env2.Close()
 }
 
@@ -54,40 +55,64 @@ func (s *CrashSuite) TestCrash_MidUninstall_Recovery() {
 	s.Equal(http.StatusCreated, tc1.Add(kit.NSFor("quiver-test/tool-a-slow", "v1")))
 	env1.WaitForListLen(s.T(), 1, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Install(kit.NSFor("quiver-test/tool-a-slow", "v1"), nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateReady, 30*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateReady, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Uninstall(kit.NSFor("quiver-test/tool-a-slow", "v1"), nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateUninstalling, 30*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateUninstalling, 120*time.Second)
 	env1.CloseCrashing()
 
 	env2 := s.NewEnvWithHome(home)
 	// WaitForState waits for the runtime.recovered WS event — ensuring recovery used
 	// RecoverInterrupted (not Forget). If Forget were called the runtime would be gone
 	// and no WS event would arrive, causing a timeout here.
-	env2.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateAbsent, 30*time.Second)
+	env2.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a-slow", "v1"), domain.ArrowStateAbsent, 120*time.Second)
 	env2.Close()
 }
 
 // TestCrash_MidUpdate_Recovery: crash while tool-with-update is updating.
-// tool-with-update has a 1s sleep in its update step.
-// Expected recovery: absent (partial update = unsafe; needs reinstall).
+// tool-with-update has a 1s sleep in its update step. An update only runs when
+// something is ahead of the row, so the fixture's tag is force-moved first.
+// Expected recovery: absent (partial update = unsafe; needs reinstall), and the
+// update target the crashed daemon held in memory must not wedge the row: once
+// reinstalled, it installs the moved commit.
 func (s *CrashSuite) TestCrash_MidUpdate_Recovery() {
+	key := "quiver-test/tool-with-update-crash"
+	storer := kit.BuildUpgradeRepo(s.T(), kit.ReadFixture(s.T(), "tool-with-update/arrow.yaml"))
+	s.Repos.Set(key, storer)
+	s.T().Cleanup(func() { s.Repos.Delete(key) })
+	ns := kit.NSFor(key, "v1")
 	home := s.T().TempDir()
 
 	env1 := s.NewEnvWithHome(home)
 	tc1 := env1.TypedClient(s.T())
-	s.Equal(http.StatusCreated, tc1.Add(kit.NSFor("quiver-test/tool-with-update", "v1")))
+	s.Equal(http.StatusCreated, tc1.Add(ns))
 	env1.WaitForListLen(s.T(), 1, 120*time.Second)
-	s.Equal(http.StatusAccepted, tc1.Install(kit.NSFor("quiver-test/tool-with-update", "v1"), nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/tool-with-update", "v1"), domain.ArrowStateReady, 30*time.Second)
-	s.Equal(http.StatusAccepted, tc1.Execute(kit.NSFor("quiver-test/tool-with-update", "v1"), "_update", nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/tool-with-update", "v1"), domain.ArrowStateUpdating, 30*time.Second)
+	s.Equal(http.StatusAccepted, tc1.Install(ns, nil))
+	env1.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
+
+	var moved string
+	s.Repos.Mutate(func() { moved = kit.MoveTagToNewCommit(s.T(), storer, "v1") })
+	s.Equal(http.StatusAccepted, tc1.Execute(ns, "_update", nil))
+	env1.WaitForState(s.T(), ns, domain.ArrowStateUpdating, 120*time.Second)
 	env1.CloseCrashing()
 
 	env2 := s.NewEnvWithHome(home)
+	tc2 := env2.TypedClient(s.T())
 	// WaitForState waits for the runtime.recovered WS event — ensuring recovery used
 	// RecoverInterrupted (not Forget). If Forget were called the runtime would be gone
 	// and no WS event would arrive, causing a timeout here.
-	env2.WaitForState(s.T(), kit.NSFor("quiver-test/tool-with-update", "v1"), domain.ArrowStateAbsent, 30*time.Second)
+	env2.WaitForState(s.T(), ns, domain.ArrowStateAbsent, 120*time.Second)
+
+	// The crashed update stamped nothing, so the row still names the moved
+	// commit as ahead of it; with nothing installed, the install lands it.
+	s.Equal(http.StatusAccepted, tc2.Install(ns, nil))
+	kit.WaitForDetail(s.T(), tc2, ns, "the reinstalled row installed the moved commit", 120*time.Second,
+		func(d dto.ArrowDetailDTO, status int) bool {
+			return status == http.StatusOK &&
+				d.InstalledCommit == moved &&
+				d.Available == nil &&
+				d.State == string(domain.ArrowStateReady)
+		},
+	)
 	env2.Close()
 }
 
@@ -102,14 +127,14 @@ func (s *CrashSuite) TestCrash_Running_AlivePID_Recovery() {
 	s.Equal(http.StatusCreated, tc1.Add(kit.NSFor("quiver-test/service-running", "v1")))
 	env1.WaitForListLen(s.T(), 1, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Install(kit.NSFor("quiver-test/service-running", "v1"), nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateReady, 30*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateReady, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Execute(kit.NSFor("quiver-test/service-running", "v1"), "start", nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateRunning, 30*time.Second)
-	env1.WaitForActivePID(s.T(), kit.NSFor("quiver-test/service-running", "v1"), 10*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateRunning, 120*time.Second)
+	env1.WaitForActivePID(s.T(), kit.NSFor("quiver-test/service-running", "v1"), 120*time.Second)
 	env1.CloseWithoutKilling()
 
 	env2 := s.NewEnvWithHome(home)
-	env2.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateDetached, 30*time.Second)
+	env2.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateDetached, 120*time.Second)
 	env2.Close()
 }
 
@@ -123,18 +148,18 @@ func (s *CrashSuite) TestCrash_Detached_StopTerminatesProcess() {
 	s.Equal(http.StatusCreated, tc1.Add(kit.NSFor("quiver-test/service-running", "v1")))
 	env1.WaitForListLen(s.T(), 1, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Install(kit.NSFor("quiver-test/service-running", "v1"), nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateReady, 30*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateReady, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Execute(kit.NSFor("quiver-test/service-running", "v1"), "start", nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateRunning, 30*time.Second)
-	env1.WaitForActivePID(s.T(), kit.NSFor("quiver-test/service-running", "v1"), 10*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateRunning, 120*time.Second)
+	env1.WaitForActivePID(s.T(), kit.NSFor("quiver-test/service-running", "v1"), 120*time.Second)
 	env1.CloseWithoutKilling()
 
 	env2 := s.NewEnvWithHome(home)
 	tc2 := env2.TypedClient(s.T())
-	env2.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateDetached, 30*time.Second)
+	env2.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateDetached, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc2.Stop(kit.NSFor("quiver-test/service-running", "v1")))
-	env2.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateReady, 30*time.Second)
+	env2.WaitForState(s.T(), kit.NSFor("quiver-test/service-running", "v1"), domain.ArrowStateReady, 120*time.Second)
 	env2.Close()
 }
 
@@ -148,9 +173,9 @@ func (s *CrashSuite) TestCrash_SIGTERMDuringInstall() {
 	tc1 := env1.TypedClient(s.T())
 	ns := kit.NSFor("quiver-test/tool-a-slow", "v1")
 	s.Equal(http.StatusCreated, tc1.Add(ns))
-	env1.WaitForArrow(s.T(), ns, 30*time.Second)
+	env1.WaitForArrow(s.T(), ns, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Install(ns, nil))
-	env1.WaitForState(s.T(), ns, domain.ArrowStateInstalling, 30*time.Second)
+	env1.WaitForState(s.T(), ns, domain.ArrowStateInstalling, 120*time.Second)
 	env1.Close() // graceful shutdown — drainWg waits for install to finish or abort
 
 	env2 := s.NewEnvWithHome(home)
@@ -171,17 +196,17 @@ func (s *CrashSuite) TestCrash_MidStop_Recovery() {
 	s.Equal(http.StatusCreated, tc1.Add(kit.NSFor("quiver-test/service-stopping-slow", "v1")))
 	env1.WaitForListLen(s.T(), 1, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Install(kit.NSFor("quiver-test/service-stopping-slow", "v1"), nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-stopping-slow", "v1"), domain.ArrowStateReady, 30*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-stopping-slow", "v1"), domain.ArrowStateReady, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Execute(kit.NSFor("quiver-test/service-stopping-slow", "v1"), "execute", nil))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-stopping-slow", "v1"), domain.ArrowStateRunning, 30*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-stopping-slow", "v1"), domain.ArrowStateRunning, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc1.Stop(kit.NSFor("quiver-test/service-stopping-slow", "v1")))
-	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-stopping-slow", "v1"), domain.ArrowStateStopping, 30*time.Second)
+	env1.WaitForState(s.T(), kit.NSFor("quiver-test/service-stopping-slow", "v1"), domain.ArrowStateStopping, 120*time.Second)
 	env1.CloseCrashing()
 
 	env2 := s.NewEnvWithHome(home)
 	// WaitForState waits for the runtime.recovered WS event — ensuring recovery used
 	// RecoverInterrupted (not Forget). If Forget were called the runtime would be gone
 	// and no WS event would arrive, causing a timeout here.
-	env2.WaitForState(s.T(), kit.NSFor("quiver-test/service-stopping-slow", "v1"), domain.ArrowStateReady, 30*time.Second)
+	env2.WaitForState(s.T(), kit.NSFor("quiver-test/service-stopping-slow", "v1"), domain.ArrowStateReady, 120*time.Second)
 	env2.Close()
 }

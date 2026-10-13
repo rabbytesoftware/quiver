@@ -21,25 +21,49 @@ type ArrowService struct {
 	GetDetailErr           error
 	GetManifestResult      *models.ArrowManifestDTO
 	GetManifestErr         error
+	GetReadmeResult        string
+	GetReadmeErr           error
 	HasDependentsResult    bool
 	HasDependentsErr       error
+	GetDependentsResult    []domain.Namespace
+	GetDependentsErr       error
+	GetDependenciesResult  models.Plan
+	GetDependenciesErr     error
 	SeedErr                error
+	AdoptInstalledErr      error
 	ValidateManifestResult *models.ValidationResult
 	ValidateManifestErr    error
+	ListChannelsResult     []models.ChannelInfo
+	ListChannelsErr        error
+
+	// AddCalls records the namespace each Add was called with.
+	AddCalls []domain.Namespace
+	// UpdateCalls records the namespace each Update was called with.
+	UpdateCalls []domain.Namespace
+	// AdoptInstalledCalls records the arguments each AdoptInstalled was
+	// called with.
+	AdoptInstalledCalls []AdoptInstalledCall
+}
+
+// AdoptInstalledCall is one recorded AdoptInstalled call.
+type AdoptInstalledCall struct {
+	Namespace   domain.Namespace
+	ResolvedRef string
 }
 
 func (m *ArrowService) Add(
 	_ context.Context,
-	_ domain.Namespace,
+	ns domain.Namespace,
 ) error {
+	m.AddCalls = append(m.AddCalls, ns)
 	return m.AddErr
 }
 
 func (m *ArrowService) Update(
 	_ context.Context,
-	_ domain.Namespace,
-	_ models.UpdateOptions,
+	ns domain.Namespace,
 ) (models.UpdateResult, error) {
+	m.UpdateCalls = append(m.UpdateCalls, ns)
 	return m.UpdateResult, m.UpdateErr
 }
 
@@ -79,12 +103,42 @@ func (m *ArrowService) GetManifest(
 	return m.GetManifestResult, m.GetManifestErr
 }
 
+func (m *ArrowService) GetReadme(
+	_ context.Context,
+	_ domain.Namespace,
+) (string, error) {
+	return m.GetReadmeResult, m.GetReadmeErr
+}
+
 func (m *ArrowService) HasDependents(
 	_ context.Context,
 	_ domain.Namespace,
 	_ domain.Namespace,
 ) (bool, error) {
 	return m.HasDependentsResult, m.HasDependentsErr
+}
+
+func (m *ArrowService) GetDependents(
+	_ context.Context,
+	_ domain.Namespace,
+) ([]domain.Namespace, error) {
+	return m.GetDependentsResult, m.GetDependentsErr
+}
+
+func (m *ArrowService) GetDependencies(
+	_ context.Context,
+	_ domain.Namespace,
+) (models.Plan, error) {
+	return m.GetDependenciesResult, m.GetDependenciesErr
+}
+
+func (m *ArrowService) AdoptInstalled(
+	_ context.Context,
+	ns domain.Namespace,
+	resolvedRef string,
+) error {
+	m.AdoptInstalledCalls = append(m.AdoptInstalledCalls, AdoptInstalledCall{Namespace: ns, ResolvedRef: resolvedRef})
+	return m.AdoptInstalledErr
 }
 
 func (m *ArrowService) Seed(
@@ -100,4 +154,11 @@ func (m *ArrowService) ValidateManifest(
 	_ []byte,
 ) (*models.ValidationResult, error) {
 	return m.ValidateManifestResult, m.ValidateManifestErr
+}
+
+func (m *ArrowService) ListChannels(
+	_ context.Context,
+	_ domain.Namespace,
+) ([]models.ChannelInfo, error) {
+	return m.ListChannelsResult, m.ListChannelsErr
 }

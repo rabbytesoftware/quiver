@@ -1,0 +1,497 @@
+// Package discovery turns a query into verified arrows: it asks every provider
+// for candidates, proves each one by fetching and parsing its manifest, and
+// writes the proven ones to the vault.
+package discovery
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/provider"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
+)
+
+const defaultFetchConcurrency = 8
+
+// Discovery searches git hosts for arrows and verifies what it finds.
+type Discovery interface {
+	// Discover streams every verified arrow to emit as it verifies, rather
+	// than collecting and returning them. The Outcome summarises the pass,
+	// including which providers failed and why; a provider failing is
+	// reported there, not returned as an error.
+	Discover(
+		ctx context.Context,
+		text string,
+		emit func(Result),
+	) (Outcome, error)
+
+	// Browse streams the best repositories of req's sources without any query
+	// text, reusing the verification, indexing and concurrency of Discover.
+	// Candidates the vault already holds are emitted without a host request and
+	// candidates it knows to hold nothing installable are dropped; at most
+	// req.Budget others are resolved, and none is dispatched once req.Want
+	// results are in hand. Outcome.Order lists the surviving
+	// candidates in search order, which is the ranking and which the emitted
+	// results, arriving as they verify, do not preserve.
+	Browse(
+		ctx context.Context,
+		req BrowseRequest,
+		emit func(Result),
+	) (Outcome, error)
+}
+
+// KnownFn reports whether the catalog already holds a bare namespace. An error
+// costs the caller the flag, never the result.
+type KnownFn func(
+	ctx context.Context,
+	ns domain.Namespace,
+) (bool, error)
+
+// Config holds the values read once at construction: the discovery markers, how
+// many candidates to take from each provider, and how many manifest fetches may
+// run at once. The fetch bound is politeness and local resource use, not a rate
+// limit — manifests come off the raw CDN, not the metered search API.
+type Config struct {
+	Topics           []string
+	PerProviderLimit int
+	FetchConcurrency int
+	Unmarked         UnmarkedConfig
+}
+
+type UnmarkedConfig struct {
+	MinStars   int
+	ProbeLimit int
+}
+
+type discovery struct {
+	providers   []provider.Provider
+	manifold    manifold.Manifold
+	vault       vault.Vault
+	known       KnownFn
+	topics      []string
+	limit       int
+	concurrency int
+	unmarked    UnmarkedConfig
+}
+
+// New builds the pipeline. known may be nil, in which case nothing is ever
+// flagged as already in the catalog.
+func New(
+	providers []provider.Provider,
+	m manifold.Manifold,
+	v vault.Vault,
+	known KnownFn,
+	cfg Config,
+) (Discovery, error) {
+	if m == nil {
+		return nil, fmt.Errorf("discovery: no manifold configured")
+	}
+	if v == nil {
+		return nil, fmt.Errorf("discovery: no vault configured")
+	}
+
+	concurrency := cfg.FetchConcurrency
+	if concurrency <= 0 {
+		concurrency = defaultFetchConcurrency
+	}
+
+	return &discovery{
+		providers:   searchable(providers),
+		manifold:    m,
+		vault:       v,
+		known:       known,
+		topics:      cfg.Topics,
+		limit:       cfg.PerProviderLimit,
+		concurrency: concurrency,
+		unmarked:    cfg.Unmarked,
+	}, nil
+}
+
+// searchable keeps the providers that can answer a query. Every platform is a
+// provider so its manifests stay fetchable, but only some hosts expose a search
+// API; asking the rest would produce a guaranteed failure reported as a
+// provider outcome, which reads as a broken host rather than one that was never
+// asked.
+func searchable(
+	providers []provider.Provider,
+) []provider.Provider {
+	found := make([]provider.Provider, 0, len(providers))
+	for _, p := range providers {
+		if !p.CanSearch() {
+			continue
+		}
+		found = append(found, p)
+	}
+	return found
+}
+
+func (d *discovery) Discover(
+	ctx context.Context,
+	text string,
+	emit func(Result),
+) (Outcome, error) {
+	query := strings.TrimSpace(text)
+	if query == "" {
+		return Outcome{}, fmt.Errorf("discovery: query text is empty")
+	}
+
+	candidates, outcomes := d.search(ctx, query)
+	unique := dedupe(candidates)
+
+	counted := d.verify(ctx, unique, emit)
+	found := len(unique)
+
+	unmarked, unmarkedOutcomes, unmarkedTally := d.discoverUnmarked(ctx, query, unique, emit)
+	found += len(unmarked)
+	outcomes = append(outcomes, unmarkedOutcomes...)
+	counted.verified += unmarkedTally.verified
+	counted.skipped += unmarkedTally.skipped
+
+	return Outcome{
+		Found:     found,
+		Verified:  counted.verified,
+		Skipped:   counted.skipped,
+		Providers: outcomes,
+	}, nil
+}
+
+func (d *discovery) discoverUnmarked(
+	ctx context.Context,
+	query string,
+	tagged []provider.Candidate,
+	emit func(Result),
+) ([]provider.Candidate, []ProviderOutcome, tally) {
+	candidates, outcomes := d.searchUnmarked(ctx, query)
+	capped := capUnmarked(candidates, tagged, d.unmarked.ProbeLimit)
+
+	return capped, outcomes, d.verify(ctx, capped, emit)
+}
+
+func capUnmarked(
+	candidates []provider.Candidate,
+	tagged []provider.Candidate,
+	limit int,
+) []provider.Candidate {
+	seen := make(map[domain.Namespace]struct{}, len(tagged))
+	for _, candidate := range tagged {
+		seen[candidate.Namespace.BareNamespace()] = struct{}{}
+	}
+
+	unique := make([]provider.Candidate, 0, len(candidates))
+	for _, candidate := range dedupe(candidates) {
+		if _, dup := seen[candidate.Namespace.BareNamespace()]; dup {
+			continue
+		}
+		unique = append(unique, candidate)
+	}
+
+	if limit > 0 && len(unique) > limit {
+		return unique[:limit]
+	}
+	return unique
+}
+
+// search fans out to every provider at once and waits for all of them. A host
+// that refuses contributes a ProviderOutcome instead of failing the pass.
+func (d *discovery) search(
+	ctx context.Context,
+	query string,
+) ([]provider.Candidate, []ProviderOutcome) {
+	return d.runSearch(ctx, provider.SearchRequest{
+		Text:   query,
+		Topics: d.topics,
+		Limit:  d.limit,
+	}, PassTagged)
+}
+
+func (d *discovery) searchUnmarked(
+	ctx context.Context,
+	query string,
+) ([]provider.Candidate, []ProviderOutcome) {
+	return d.runSearch(ctx, provider.SearchRequest{
+		Text:     query,
+		Unmarked: true,
+		MinStars: d.unmarked.MinStars,
+		Limit:    d.unmarked.ProbeLimit * 2,
+	}, PassUnmarked)
+}
+
+func (d *discovery) runSearch(
+	ctx context.Context,
+	req provider.SearchRequest,
+	pass string,
+) ([]provider.Candidate, []ProviderOutcome) {
+	return d.searchOn(ctx, d.providers, req, pass)
+}
+
+func (d *discovery) searchOn(
+	ctx context.Context,
+	providers []provider.Provider,
+	req provider.SearchRequest,
+	pass string,
+) ([]provider.Candidate, []ProviderOutcome) {
+	found := make([][]provider.Candidate, len(providers))
+	outcomes := make([]ProviderOutcome, len(providers))
+
+	var wg sync.WaitGroup
+	for i, p := range providers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			candidates, err := p.Search(ctx, req)
+			found[i] = candidates
+			outcome := outcomeOf(p.Host(), candidates, err)
+			outcome.Pass = pass
+			outcomes[i] = outcome
+		}()
+	}
+	wg.Wait()
+
+	return slices.Concat(found...), outcomes
+}
+
+// dedupe keeps the first candidate seen for each bare namespace: two hosts can
+// answer for the same repository, and a repository is one arrow regardless of
+// which ref a provider happened to name.
+func dedupe(
+	candidates []provider.Candidate,
+) []provider.Candidate {
+	seen := make(map[domain.Namespace]struct{}, len(candidates))
+	unique := make([]provider.Candidate, 0, len(candidates))
+
+	for _, candidate := range candidates {
+		bare := candidate.Namespace.BareNamespace()
+		if _, ok := seen[bare]; ok {
+			continue
+		}
+		seen[bare] = struct{}{}
+		unique = append(unique, candidate)
+	}
+	return unique
+}
+
+type tally struct {
+	verified int
+	skipped  int
+}
+
+type counters struct {
+	mu    sync.Mutex
+	tally tally
+}
+
+func (c *counters) add(
+	verified bool,
+) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if verified {
+		c.tally.verified++
+		return
+	}
+	c.tally.skipped++
+}
+
+func (c *counters) reached(
+	goal int,
+) bool {
+	if goal <= 0 {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tally.verified >= goal
+}
+
+func (c *counters) read() tally {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tally
+}
+
+// verify proves candidates with at most concurrency fetches in flight, emitting
+// each one the moment it is proven so the caller never waits for the slowest.
+func (d *discovery) verify(
+	ctx context.Context,
+	candidates []provider.Candidate,
+	emit func(Result),
+) tally {
+	return d.verifyUntil(ctx, candidates, emit, 0)
+}
+
+// verifyUntil is verify that stops dispatching once goal candidates have proven
+// to be arrows; goal zero or less means no target. Candidates already in
+// flight finish, so the count can overshoot the goal by up to concurrency-1.
+func (d *discovery) verifyUntil(
+	ctx context.Context,
+	candidates []provider.Candidate,
+	emit func(Result),
+	goal int,
+) tally {
+	slots := make(chan struct{}, d.concurrency)
+	stream := newStream(emit)
+
+	var counted counters
+	var wg sync.WaitGroup
+
+	for _, candidate := range candidates {
+		if counted.reached(goal) || !acquire(ctx, slots) {
+			break
+		}
+		if counted.reached(goal) {
+			<-slots
+			break
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			counted.add(d.verifyOne(ctx, candidate, stream))
+		}()
+	}
+
+	wg.Wait()
+	return counted.read()
+}
+
+// acquire takes a fetch slot, reporting false once the context is done. The
+// explicit Err check comes first because a select whose cases are both ready
+// picks at random, which would let a cancelled pass dispatch more work.
+func acquire(
+	ctx context.Context,
+	slots chan struct{},
+) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+
+	select {
+	case <-ctx.Done():
+		return false
+	case slots <- struct{}{}:
+		return true
+	}
+}
+
+// verifyOne fetches the candidate's manifest from the branch the search response
+// named, indexes it, and streams it. It reports whether the candidate proved to
+// be an arrow.
+func (d *discovery) verifyOne(
+	ctx context.Context,
+	candidate provider.Candidate,
+	stream *stream,
+) bool {
+	bare := candidate.Namespace.BareNamespace()
+	resolvedNs := bare.WithRef(candidate.DefaultBranch)
+
+	// Read before the manifest, so the commit it names is never newer than
+	// what was built: a tag's commit is what lets an add reuse this build.
+	snap, snapErr := d.manifold.Snapshot(ctx, bare)
+	arrow, raw, filename, err := d.manifold.ResolveArrow(ctx, resolvedNs)
+	if err != nil {
+		d.recordAbsent(ctx, resolvedNs, err)
+		return false
+	}
+
+	// The branch the manifest was fetched from is the revision a discovered
+	// arrow has: discovery runs on the metered path and never spends a request
+	// asking a host for its latest release. The namespace carries it, and nothing
+	// stores a second copy. The one exception is a manifest manifold drafted
+	// from a release tag while the branch was only where the search pointed: it
+	// names that tag itself, and the arrow lives there, where details, add and
+	// install will look for it.
+	if arrow.Namespace.BareNamespace() == bare {
+		resolvedNs = arrow.Namespace
+	}
+	arrow.Namespace = resolvedNs
+
+	// Both stores are asked before index runs. Indexing writes this very arrow
+	// to the vault, so reading the vault afterwards would have every candidate
+	// report itself as one the machine already had.
+	inCatalog := d.inCatalog(ctx, arrow.Namespace)
+	inVault := d.inVault(ctx, arrow.Namespace)
+
+	commit := ""
+	if snapErr == nil {
+		commit = snap.Tags[resolvedNs.Ref()]
+	}
+	if err := d.index(ctx, arrow, raw, filename, commit, candidate); err != nil {
+		return false
+	}
+
+	stream.send(Result{
+		Arrow:     *arrow,
+		Namespace: bare,
+		Stars:     candidate.Stars,
+		Source:    candidate.Source,
+		InCatalog: inCatalog,
+		InVault:   inVault,
+	})
+	return true
+}
+
+func (d *discovery) index(
+	ctx context.Context,
+	arrow *domain.Arrow,
+	raw []byte,
+	filename string,
+	commit string,
+	candidate provider.Candidate,
+) error {
+	return d.vault.PutArrow(ctx, arrow.Namespace, vault.ManifestFile{
+		Content:  raw,
+		Filename: filename,
+		Ref:      arrow.Namespace.Ref(),
+		Commit:   commit,
+		Meta: &vault.IndexMeta{
+			Arrow:  arrow.ArrowMeta,
+			OS:     supportedOS(arrow.Targets),
+			Stars:  candidate.Stars,
+			Source: candidate.Source,
+			Branch: candidate.DefaultBranch,
+		},
+	})
+}
+
+// inCatalog asks the catalog rather than a previous response, so the flag is
+// correct regardless of what the client did before. A lookup failure costs the
+// flag, not the result.
+func (d *discovery) inCatalog(
+	ctx context.Context,
+	ns domain.Namespace,
+) bool {
+	if d.known == nil {
+		return false
+	}
+
+	known, err := d.known(ctx, ns.BareNamespace())
+	return err == nil && known
+}
+
+// inVault asks for the exact ref, not the bare namespace: the index is per-ref,
+// and having seen one ref of a repository says nothing about the one this pass
+// resolved.
+func (d *discovery) inVault(
+	ctx context.Context,
+	ns domain.Namespace,
+) bool {
+	_, err := d.vault.GetArrow(ctx, ns)
+	return err == nil
+}
+
+func supportedOS(
+	targets map[domain.OS]domain.Target,
+) []domain.OS {
+	oses := make([]domain.OS, 0, len(targets))
+	for os := range targets {
+		oses = append(oses, os)
+	}
+	slices.Sort(oses)
+	return oses
+}

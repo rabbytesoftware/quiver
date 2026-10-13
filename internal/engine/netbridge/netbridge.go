@@ -25,6 +25,9 @@ type Netbridge interface {
 	// port in the ephemeral range (49152–65535). If forwarding fails, the port
 	// is still allocated and returned — forwarding failure is non-fatal.
 	//
+	// When router forwarding is disabled, allocation is unaffected and no
+	// router call is made.
+	//
 	// Returns ErrNoPortAvailable if no port can be found.
 	// Returns ErrPortOutOfRange if the preferred port is outside 1–65535.
 	Allocate(
@@ -35,10 +38,18 @@ type Netbridge interface {
 	) (int, error)
 
 	// DeallocateByOwner releases all ports allocated to the given owner key.
-	// Reverses router forwarding for each port before releasing.
+	// Reverses router forwarding for each port before releasing, unless router
+	// forwarding is disabled.
 	DeallocateByOwner(
 		ctx context.Context,
 		ownerKey string,
+	) error
+
+	// Shutdown drains the port-allocation aggregate, blocking until every
+	// in-flight command has been persisted or ctx expires. Router forwarding
+	// is left in place: it is owned by the router, not by this process.
+	Shutdown(
+		ctx context.Context,
 	) error
 }
 
@@ -137,6 +148,13 @@ func (n *netbridgeService) DeallocateByOwner(
 	}
 
 	return nil
+}
+
+// Shutdown drains the port-allocation aggregate.
+func (n *netbridgeService) Shutdown(
+	ctx context.Context,
+) error {
+	return n.ax.Shutdown(ctx)
 }
 
 func (n *netbridgeService) waitForProjection() {

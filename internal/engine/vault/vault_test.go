@@ -16,7 +16,11 @@ import (
 )
 
 func newTestVault(t *testing.T) Vault {
-	return New(t.TempDir(), t.TempDir(), time.Hour)
+	t.Helper()
+	v, err := New(t.TempDir(), t.TempDir(), time.Hour)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+	return v
 }
 
 var testManifest = ManifestFile{Content: []byte("# test arrow"), Filename: "ARROW.md"}
@@ -45,6 +49,33 @@ func TestGetArrow_Fresh(t *testing.T) {
 	assert.Equal(t, testManifest.Filename, got.Filename)
 }
 
+func TestGetArrow_ReturnsTheReleaseTheManifestWasReadAt(t *testing.T) {
+	testCases := []struct {
+		name   string
+		ref    string
+		commit string
+	}{
+		{name: "known release", ref: "v1.0.0", commit: "0123abc"},
+		{name: "unknown release"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newTestVault(t)
+			ns := mocks.Namespace()
+			file := testManifest
+			file.Ref = tc.ref
+			file.Commit = tc.commit
+
+			require.NoError(t, v.PutArrow(context.Background(), ns, file))
+			got, err := v.GetArrow(context.Background(), ns)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.ref, got.Ref)
+			assert.Equal(t, tc.commit, got.Commit)
+		})
+	}
+}
+
 func TestGetArrow_InvalidNamespace(t *testing.T) {
 	v := newTestVault(t)
 
@@ -57,20 +88,87 @@ func TestGetArrow_Stale(t *testing.T) {
 	vaultDir := t.TempDir()
 	nsDir := t.TempDir()
 	base := time.Now()
-	v := NewWithClock(vaultDir, nsDir, time.Hour, func() time.Time { return base })
+	v, err := NewWithClock(vaultDir, nsDir, time.Hour, func() time.Time { return base })
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
 
 	ns := mocks.Namespace()
 	require.NoError(t, v.PutArrow(context.Background(), ns, testManifest))
 
 	// Advance clock past TTL
-	vWithStaleClock := NewWithClock(vaultDir, nsDir, time.Hour, func() time.Time {
+	vWithStaleClock, err := NewWithClock(vaultDir, nsDir, time.Hour, func() time.Time {
 		return base.Add(2 * time.Hour)
 	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = vWithStaleClock.Close() })
 
 	file, err := vWithStaleClock.GetArrow(context.Background(), ns)
 	assert.ErrorIs(t, err, ErrStale)
 	// Content still returned on stale
 	assert.Equal(t, testManifest.Content, file.Content)
+}
+
+// PutArrowNotFound
+
+func TestPutArrowNotFound_ThenGetArrow_ReturnsConfirmedAbsent(t *testing.T) {
+	v := newTestVault(t)
+	ns := mocks.Namespace()
+
+	require.NoError(t, v.PutArrowNotFound(context.Background(), ns, ""))
+
+	_, err := v.GetArrow(context.Background(), ns)
+
+	assert.ErrorIs(t, err, ErrConfirmedAbsent)
+}
+
+func TestPutArrowNotFound_ReportsTheCommitItWasRecordedFor(t *testing.T) {
+	v := newTestVault(t)
+	ns := mocks.Namespace()
+
+	require.NoError(t, v.PutArrowNotFound(context.Background(), ns, "c2"))
+
+	file, err := v.GetArrow(context.Background(), ns)
+
+	assert.ErrorIs(t, err, ErrConfirmedAbsent)
+	assert.Equal(t, "c2", file.Commit)
+	assert.Empty(t, file.Content)
+}
+
+func TestPutArrowNotFound_InvalidNamespace(t *testing.T) {
+	v := newTestVault(t)
+
+	err := v.PutArrowNotFound(context.Background(), domain.Namespace(""), "")
+
+	assert.ErrorIs(t, err, ErrInvalidNamespace)
+}
+
+// TestPutArrowNotFound_ExpiresAfterTTL_RefetchIsPossibleAgain proves the
+// full loop through the public interface: a confirmed-absent marker stops
+// reporting ErrConfirmedAbsent once its TTL has passed, reporting
+// ErrNotCached instead — the same "try again live" signal a never-cached
+// namespace gives.
+func TestPutArrowNotFound_ExpiresAfterTTL_RefetchIsPossibleAgain(t *testing.T) {
+	vaultDir := t.TempDir()
+	nsDir := t.TempDir()
+	base := time.Now()
+	v, err := NewWithClock(vaultDir, nsDir, time.Hour, func() time.Time { return base })
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+
+	ns := mocks.Namespace()
+	require.NoError(t, v.PutArrowNotFound(context.Background(), ns, ""))
+
+	_, err = v.GetArrow(context.Background(), ns)
+	require.ErrorIs(t, err, ErrConfirmedAbsent)
+
+	vAfterTTL, err := NewWithClock(vaultDir, nsDir, time.Hour, func() time.Time {
+		return base.Add(2 * time.Hour)
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = vAfterTTL.Close() })
+
+	_, err = vAfterTTL.GetArrow(context.Background(), ns)
+	assert.ErrorIs(t, err, ErrNotCached)
 }
 
 // GetCollection
@@ -142,14 +240,17 @@ func TestPutArrow_InvalidNamespace(t *testing.T) {
 func TestPutArrow_CreatesWorkdir(t *testing.T) {
 	vaultDir := t.TempDir()
 	nsDir := t.TempDir()
-	v := New(vaultDir, nsDir, time.Hour)
+	v, err := New(vaultDir, nsDir, time.Hour)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
 	ns := mocks.Namespace()
 
 	require.NoError(t, v.PutArrow(context.Background(), ns, testManifest))
 
 	s := v.(*store)
-	workdir := s.workdirPath(ns)
-	_, err := os.Stat(workdir)
+	workdir, err := s.namespacePath(ns)
+	require.NoError(t, err)
+	_, err = os.Stat(workdir)
 	require.NoError(t, err, "workdir should exist on disk")
 }
 
@@ -506,55 +607,195 @@ func TestNamespaceLock_ConcurrentLockCreation(t *testing.T) {
 	assert.Same(t, firstLock, s.locks[key])
 }
 
-// RenameArrow
+// Search index
 
-func TestRenameArrow_MovesFilesAndContents(t *testing.T) {
-	v := newTestVault(t)
-
-	oldNs := domain.Namespace("github.com/org/repo@v1.0.0")
-	newNs := domain.Namespace("github.com/org/repo@v2.0.0")
-
-	require.NoError(t, v.PutArrow(context.Background(), oldNs, testManifest))
-
-	err := v.RenameArrow(context.Background(), oldNs, newNs)
+func TestVault_PutArrow_WithMeta_IsSearchable(t *testing.T) {
+	dir := t.TempDir()
+	v, err := New(filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), 24*time.Hour)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
 
-	_, err = v.GetArrow(context.Background(), oldNs)
-	assert.ErrorIs(t, err, ErrNotCached)
+	meta := IndexMeta{Arrow: domain.ArrowMeta{Name: "Chromium", Description: "browser"}}
+	require.NoError(t, v.PutArrow(context.Background(), "github.com/u/r@v1", ManifestFile{
+		Content: []byte("x"), Filename: "ARROW.md", Meta: &meta,
+	}))
 
-	got, err := v.GetArrow(context.Background(), newNs)
+	rows, err := v.SearchArrows(context.Background(), IndexQuery{Text: "chrom", Limit: 10})
 	require.NoError(t, err)
-	assert.Equal(t, testManifest.Content, got.Content)
+	require.Len(t, rows, 1)
 }
 
-func TestRenameArrow_SameNamespace_Noop(t *testing.T) {
-	v := newTestVault(t)
-	ns := domain.Namespace("github.com/org/repo@v1.0.0")
-
-	err := v.RenameArrow(context.Background(), ns, ns)
+func TestVault_PutArrow_InferredMeta_SearchKeepsGenerator(t *testing.T) {
+	dir := t.TempDir()
+	v, err := New(filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), 24*time.Hour)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+
+	generator := &domain.ArrowGenerator{Name: "fletcher/1", Confidence: "low"}
+	meta := IndexMeta{Arrow: domain.ArrowMeta{Name: "Chromium", Generator: generator}}
+	require.NoError(t, v.PutArrow(context.Background(), "github.com/u/r@v1", ManifestFile{
+		Content: []byte("x"), Filename: "ARROW.md", Meta: &meta,
+	}))
+
+	rows, err := v.SearchArrows(context.Background(), IndexQuery{Text: "chrom", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, generator, rows[0].Meta.Arrow.Generator)
+	require.Equal(t, domain.ArrowOriginInferred, domain.Arrow{ArrowMeta: rows[0].Meta.Arrow}.Origin())
 }
 
-func TestRenameArrow_SourceDoesNotExist(t *testing.T) {
-	v := newTestVault(t)
+func TestVault_PutArrow_WithoutMeta_IsNotIndexed(t *testing.T) {
+	dir := t.TempDir()
+	v, err := New(filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), 24*time.Hour)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
 
-	oldNs := domain.Namespace("github.com/org/nonexistent@v1.0.0")
-	newNs := domain.Namespace("github.com/org/new@v1.0.0")
+	require.NoError(t, v.PutArrow(context.Background(), "github.com/u/r@v1", ManifestFile{
+		Content: []byte("x"), Filename: "ARROW.md",
+	}))
 
-	err := v.RenameArrow(context.Background(), oldNs, newNs)
+	rows, err := v.SearchArrows(context.Background(), IndexQuery{Text: "chrom", Limit: 10})
+	require.NoError(t, err)
+	require.Empty(t, rows)
+
+	got, err := v.GetArrow(context.Background(), "github.com/u/r@v1")
+	require.NoError(t, err)
+	require.Equal(t, []byte("x"), got.Content, "bytes must still be cached")
+}
+
+func TestVault_PutArrow_IndexWriteError(t *testing.T) {
+	dir := t.TempDir()
+	v, err := New(filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), 24*time.Hour)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+	require.NoError(t, v.(*store).idx.db.Exec(`DROP TABLE vault_arrows`).Error)
+
+	meta := IndexMeta{Arrow: domain.ArrowMeta{Name: "Chromium"}}
+	err = v.PutArrow(context.Background(), "github.com/u/r@v1", ManifestFile{
+		Content: []byte("x"), Filename: "ARROW.md", Meta: &meta,
+	})
 	assert.Error(t, err)
 }
 
-func TestRenameArrow_WithInvalidOldNamespace(t *testing.T) {
+func TestVault_DeleteArrow_KeepsIndexRow(t *testing.T) {
+	dir := t.TempDir()
+	v, err := New(filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), 24*time.Hour)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+
+	meta := IndexMeta{Arrow: domain.ArrowMeta{Name: "Chromium"}}
+	require.NoError(t, v.PutArrow(context.Background(), "github.com/u/r@v1", ManifestFile{
+		Content: []byte("x"), Filename: "ARROW.md", Meta: &meta,
+	}))
+
+	require.NoError(t, v.DeleteArrow(context.Background(), "github.com/u/r@v1"))
+
+	rows, err := v.SearchArrows(context.Background(), IndexQuery{Text: "chrom", Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, rows, 1, "removing an arrow does not mean Quiver never saw it")
+}
+
+func TestVault_ForgetArrow_RemovesEveryRef(t *testing.T) {
+	dir := t.TempDir()
+	v, err := New(filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), 24*time.Hour)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+
+	meta := IndexMeta{Arrow: domain.ArrowMeta{Name: "Chromium"}}
+	for _, ns := range []domain.Namespace{"github.com/u/r@v1", "github.com/u/r@v2"} {
+		require.NoError(t, v.PutArrow(context.Background(), ns, ManifestFile{
+			Content: []byte("x"), Filename: "ARROW.md", Meta: &meta,
+		}))
+	}
+
+	require.NoError(t, v.ForgetArrow(context.Background(), "github.com/u/r@v1"))
+
+	rows, err := v.SearchArrows(context.Background(), IndexQuery{Text: "chrom", Limit: 10})
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
+func TestVault_ForgetArrow_InvalidNamespace(t *testing.T) {
 	v := newTestVault(t)
 
-	err := v.RenameArrow(context.Background(), domain.Namespace(""), domain.Namespace("github.com/org/new@v1.0.0"))
+	err := v.ForgetArrow(context.Background(), domain.Namespace(""))
+
 	assert.ErrorIs(t, err, ErrInvalidNamespace)
 }
 
-func TestRenameArrow_WithInvalidNewNamespace(t *testing.T) {
+func TestVault_SearchArrows_Error(t *testing.T) {
+	v := newTestVault(t)
+	require.NoError(t, v.(*store).idx.db.Exec(`DROP TABLE vault_arrows_fts`).Error)
+
+	got, err := v.SearchArrows(context.Background(), IndexQuery{Text: "chrom", Limit: 10})
+	require.Error(t, err)
+	assert.Nil(t, got)
+}
+
+// ─── Close ───────────────────────────────────────────────────────────────────
+
+// The index is a SQLite file the vault opened and nobody else owns. POSIX
+// unlinks an open file happily, so a handle left behind is invisible on macOS
+// and Linux and only fails on Windows, where the OS refuses to remove a file
+// still open. Asserting the handle itself is dead is what makes the ownership
+// verifiable on any platform.
+func TestVault_Close_ReleasesTheDatabaseHandle(t *testing.T) {
+	v := newTestVault(t)
+	s := v.(*store)
+
+	require.NoError(t, v.Close())
+
+	assert.Error(t, s.idx.db.Exec(`SELECT 1`).Error)
+	sqlDB, err := s.idx.db.DB()
+	require.NoError(t, err)
+	assert.Zero(t, sqlDB.Stats().OpenConnections)
+}
+
+func TestVault_Close_Twice_IsANoOp(t *testing.T) {
 	v := newTestVault(t)
 
-	err := v.RenameArrow(context.Background(), domain.Namespace("github.com/org/repo@v1.0.0"), domain.Namespace(""))
-	assert.ErrorIs(t, err, ErrInvalidNamespace)
+	require.NoError(t, v.Close())
+
+	assert.NoError(t, v.Close(),
+		"the daemon and a failed construction can both reach the same vault")
+}
+
+func TestVault_Close_ThenSearchArrows_ReturnsErrClosed(t *testing.T) {
+	v := newTestVault(t)
+	require.NoError(t, v.Close())
+
+	rows, err := v.SearchArrows(context.Background(), IndexQuery{Text: "chrom", Limit: 10})
+
+	assert.ErrorIs(t, err, ErrClosed)
+	assert.Nil(t, rows)
+}
+
+func TestVault_Close_ThenForgetArrow_ReturnsErrClosed(t *testing.T) {
+	v := newTestVault(t)
+	require.NoError(t, v.Close())
+
+	err := v.ForgetArrow(context.Background(), "github.com/u/r@v1")
+
+	assert.ErrorIs(t, err, ErrClosed)
+}
+
+func TestVault_Close_ThenPutArrow_ReturnsErrClosed(t *testing.T) {
+	v := newTestVault(t)
+	require.NoError(t, v.Close())
+
+	meta := IndexMeta{Arrow: domain.ArrowMeta{Name: "Chromium"}}
+	err := v.PutArrow(context.Background(), "github.com/u/r@v1", ManifestFile{
+		Content: []byte("x"), Filename: "ARROW.md", Meta: &meta,
+	})
+
+	assert.ErrorIs(t, err, ErrClosed)
+}
+
+// A manifest with no Meta never touches the index, so caching one after Close
+// still works — the bytes are files, not rows.
+func TestVault_Close_ThenPutUnindexedArrow_Succeeds(t *testing.T) {
+	v := newTestVault(t)
+	require.NoError(t, v.Close())
+
+	assert.NoError(t, v.PutArrow(context.Background(), "github.com/u/r@v1", testManifest))
 }

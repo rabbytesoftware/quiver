@@ -3,29 +3,37 @@ package resolver
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/hosts"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/resolver/resolvers"
 )
 
 func TestNew_WithZeroTimeout(t *testing.T) {
-	r := New(0)
+	r := New(0, nil)
 	if r == nil {
 		t.Fatal("New(0) returned nil")
 	}
 }
 
 func TestNew_WithCustomTimeout(t *testing.T) {
-	r := New(10 * time.Second)
+	r := New(10*time.Second, nil)
 	if r == nil {
 		t.Fatal("New(10s) returned nil")
 	}
 }
 
 func TestResolveArrow_InvalidNamespace_Empty(t *testing.T) {
-	r := New(5 * time.Second)
+	r := New(5*time.Second, nil)
 	_, _, err := r.ResolveArrow(context.Background(), domain.Namespace(""))
 	if err == nil {
 		t.Fatal("expected error for empty namespace")
@@ -33,7 +41,7 @@ func TestResolveArrow_InvalidNamespace_Empty(t *testing.T) {
 }
 
 func TestResolveArrow_InvalidNamespace_TwoSegments(t *testing.T) {
-	r := New(5 * time.Second)
+	r := New(5*time.Second, nil)
 	_, _, err := r.ResolveArrow(context.Background(), domain.Namespace("github.com/user"))
 	if err == nil {
 		t.Fatal("expected error for two-segment namespace")
@@ -41,7 +49,7 @@ func TestResolveArrow_InvalidNamespace_TwoSegments(t *testing.T) {
 }
 
 func TestResolveCollection_InvalidNamespace_Empty(t *testing.T) {
-	r := New(5 * time.Second)
+	r := New(5*time.Second, nil)
 	_, err := r.ResolveCollection(context.Background(), domain.Namespace(""))
 	if err == nil {
 		t.Fatal("expected error for empty namespace")
@@ -49,7 +57,7 @@ func TestResolveCollection_InvalidNamespace_Empty(t *testing.T) {
 }
 
 func TestResolveCollection_InvalidNamespace_TwoSegments(t *testing.T) {
-	r := New(5 * time.Second)
+	r := New(5*time.Second, nil)
 	_, err := r.ResolveCollection(context.Background(), domain.Namespace("github.com/user"))
 	if err == nil {
 		t.Fatal("expected error for two-segment namespace")
@@ -63,6 +71,7 @@ type stubFetcher struct {
 	data        []byte
 	err         error
 	acceptPaths map[string]bool
+	called      bool
 }
 
 func (s *stubFetcher) CanResolve(_ domain.Namespace) bool {
@@ -72,15 +81,22 @@ func (s *stubFetcher) CanResolve(_ domain.Namespace) bool {
 func (s *stubFetcher) Fetch(
 	_ context.Context,
 	_ domain.Namespace,
-	filePath string,
+	filePaths []string,
 	_ time.Duration,
-) ([]byte, error) {
-	if s.acceptPaths != nil {
-		if !s.acceptPaths[filePath] {
-			return nil, resolvers.ErrNotFound
+) ([]byte, string, error) {
+	s.called = true
+	if s.acceptPaths == nil {
+		if s.err != nil {
+			return nil, "", s.err
+		}
+		return s.data, filePaths[0], nil
+	}
+	for _, filePath := range filePaths {
+		if s.acceptPaths[filePath] {
+			return s.data, filePath, s.err
 		}
 	}
-	return s.data, s.err
+	return nil, "", resolvers.ErrNotFound
 }
 
 // ─── Orchestrator tests with stub fetchers ────────────────────────────────────
@@ -157,7 +173,7 @@ func TestFetchManifest_CanResolveFalse_Skipped(t *testing.T) {
 	}
 }
 
-func TestFetchManifest_AllFail_ReturnsLastError(t *testing.T) {
+func TestFetchManifest_AllFail_ReturnsFirstNonNotFoundError(t *testing.T) {
 	fetcher1 := &stubFetcher{
 		canResolve: true,
 		data:       nil,
@@ -175,11 +191,11 @@ func TestFetchManifest_AllFail_ReturnsLastError(t *testing.T) {
 	}
 
 	_, _, err := r.fetchManifest(context.Background(), domain.Namespace("github.com/user/repo"), []string{"arrow.yaml"})
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if !errors.Is(err, resolvers.ErrFetchFailed) {
+		t.Errorf("error = %v, want resolvers.ErrFetchFailed", err)
 	}
-	if !errors.Is(err, resolvers.ErrNotFound) {
-		t.Errorf("error = %v, want resolvers.ErrNotFound", err)
+	if errors.Is(err, ErrManifestNotFound) {
+		t.Errorf("error = %v, must not be ErrManifestNotFound", err)
 	}
 }
 
@@ -267,7 +283,7 @@ func TestResolveArrow_WithAUID(t *testing.T) {
 }
 
 func TestResolveArrow_InvalidNamespace_BadFormat(t *testing.T) {
-	r := New(5 * time.Second)
+	r := New(5*time.Second, nil)
 	_, _, err := r.ResolveArrow(context.Background(), domain.Namespace("invalid"))
 	if err == nil {
 		t.Fatal("expected error for invalid namespace format")
@@ -316,29 +332,6 @@ func TestResolveArrow_ReturnsFilename_MarkdownFirst(t *testing.T) {
 	}
 }
 
-func TestResolveArrow_AUID_MarkdownFirst(t *testing.T) {
-	fetcher := &stubFetcher{
-		canResolve:  true,
-		data:        []byte("auid-md-manifest"),
-		err:         nil,
-		acceptPaths: map[string]bool{"cs2.md": true},
-	}
-	r := &resolver{
-		timeout:  5 * time.Second,
-		fetchers: []resolvers.Fetcher{fetcher},
-	}
-	data, filename, err := r.ResolveArrow(context.Background(), domain.Namespace("github.com/char2cs/gaming.quiver/cs2"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(data) != "auid-md-manifest" {
-		t.Errorf("data = %q, want auid-md-manifest", data)
-	}
-	if filename != "cs2.md" {
-		t.Errorf("filename = %q, want cs2.md", filename)
-	}
-}
-
 func TestResolveArrow_FallsBackToYAML_WhenMarkdownNotFound(t *testing.T) {
 	fetcher := &stubFetcher{
 		canResolve:  true,
@@ -360,4 +353,215 @@ func TestResolveArrow_FallsBackToYAML_WhenMarkdownNotFound(t *testing.T) {
 	if filename != "arrow.yaml" {
 		t.Errorf("filename = %q, want arrow.yaml", filename)
 	}
+}
+
+func TestResolveArrowAt_Success(t *testing.T) {
+	fetcher := &stubFetcher{
+		canResolve:  true,
+		data:        []byte("nested-manifest"),
+		err:         nil,
+		acceptPaths: map[string]bool{"tools/appimage-runtime.yaml": true},
+	}
+	r := &resolver{
+		timeout:  5 * time.Second,
+		fetchers: []resolvers.Fetcher{fetcher},
+	}
+	data, filename, err := r.ResolveArrowAt(
+		context.Background(),
+		domain.Namespace("github.com/rabbytesoftware/quiver.essentials/appimage-runtime"),
+		"tools/appimage-runtime",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != "nested-manifest" {
+		t.Errorf("data = %q, want nested-manifest", data)
+	}
+	if filename != "tools/appimage-runtime.yaml" {
+		t.Errorf("filename = %q, want tools/appimage-runtime.yaml", filename)
+	}
+}
+
+func TestResolveArrowAt_MarkdownFirst(t *testing.T) {
+	fetcher := &stubFetcher{
+		canResolve:  true,
+		data:        []byte("nested-md-manifest"),
+		err:         nil,
+		acceptPaths: map[string]bool{"tools/appimage-runtime.md": true},
+	}
+	r := &resolver{
+		timeout:  5 * time.Second,
+		fetchers: []resolvers.Fetcher{fetcher},
+	}
+	_, filename, err := r.ResolveArrowAt(
+		context.Background(),
+		domain.Namespace("github.com/rabbytesoftware/quiver.essentials/appimage-runtime"),
+		"tools/appimage-runtime",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if filename != "tools/appimage-runtime.md" {
+		t.Errorf("filename = %q, want tools/appimage-runtime.md", filename)
+	}
+}
+
+func TestResolveArrowAt_EmptyPath_ReturnsError(t *testing.T) {
+	r := New(5*time.Second, nil)
+	_, _, err := r.ResolveArrowAt(
+		context.Background(),
+		domain.Namespace("github.com/rabbytesoftware/quiver.essentials/appimage-runtime"),
+		"",
+	)
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+}
+
+func TestResolveArrowAt_InvalidNamespace_ReturnsError(t *testing.T) {
+	r := New(5*time.Second, nil)
+	_, _, err := r.ResolveArrowAt(context.Background(), domain.Namespace("invalid"), "tools/x")
+	if err == nil {
+		t.Fatal("expected error for invalid namespace format")
+	}
+}
+
+type rawHost struct {
+	base string
+}
+
+func (h rawHost) RawFileURL(
+	ns domain.Namespace,
+	ref string,
+	file string,
+) (string, error) {
+	segments := strings.Split(string(ns.BareNamespace()), "/")
+	return h.base + "/" + segments[1] + "/" + segments[2] + "/" + ref + "/" + file, nil
+}
+
+func (h rawHost) BlobFileURL(
+	_ domain.Namespace,
+	_ string,
+	_ string,
+) (string, error) {
+	return "", nil
+}
+
+func (h rawHost) OwnerAvatarURL(
+	_ domain.Namespace,
+) string {
+	return ""
+}
+
+func (h rawHost) RepoPageURL(
+	_ domain.Namespace,
+) string {
+	return ""
+}
+
+func (h rawHost) RepoMetadata(
+	_ context.Context,
+	_ domain.Namespace,
+) (domain.RepoMetadata, error) {
+	return domain.RepoMetadata{}, nil
+}
+
+func (h rawHost) ReleaseAssets(
+	_ context.Context,
+	_ domain.Namespace,
+	_ string,
+) ([]domain.ReleaseAsset, error) {
+	return nil, nil
+}
+
+func (h rawHost) DefaultBranches() []string {
+	return []string{"main"}
+}
+
+func statusServer(
+	t *testing.T,
+	status int,
+) hosts.Lookup {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(server.Close)
+	return func(_ domain.Namespace) (hosts.Host, bool) {
+		return rawHost{base: server.URL}, true
+	}
+}
+
+func TestFetchManifest_ClassifiesAbsence(t *testing.T) {
+	gitNoneFound := fmt.Errorf("%w: none of [ARROW.md arrow.yaml] found", resolvers.ErrNotFound)
+	gitCloneFailed := fmt.Errorf("%w: clone https://example: dial tcp: i/o timeout", resolvers.ErrFetchFailed)
+
+	testCases := []struct {
+		name              string
+		namespace         domain.Namespace
+		httpStatus        int
+		gitErr            error
+		wantManifestMiss  bool
+		wantIs            error
+		wantGitErr        error
+		wantGitFetcherRan bool
+	}{
+		{name: "http 404 and git none found", namespace: "github.com/user/repo", httpStatus: http.StatusNotFound, gitErr: gitNoneFound, wantManifestMiss: true, wantIs: resolvers.ErrNotFound, wantGitFetcherRan: true},
+		{name: "http 500 and git not found", namespace: "github.com/user/repo@v1.0.0", httpStatus: http.StatusInternalServerError, gitErr: gitNoneFound, wantIs: resolvers.ErrFetchFailed, wantGitFetcherRan: true},
+		{name: "http 503 and git not found", namespace: "github.com/user/repo@v1.0.0", httpStatus: http.StatusServiceUnavailable, gitErr: gitNoneFound, wantIs: resolvers.ErrFetchFailed, wantGitFetcherRan: true},
+		{name: "http rate limited and git not found", namespace: "github.com/user/repo@v1.0.0", httpStatus: http.StatusTooManyRequests, gitErr: gitNoneFound, wantIs: resolvers.ErrFetchFailed, wantGitFetcherRan: true},
+		{name: "refless http 404 and git transport failure", namespace: "github.com/user/repo", httpStatus: http.StatusNotFound, gitErr: gitCloneFailed, wantIs: resolvers.ErrFetchFailed, wantGitErr: gitCloneFailed, wantGitFetcherRan: true},
+		{name: "pinned ref http 404 skips git transport failure", namespace: "github.com/user/repo@v1.0.0", httpStatus: http.StatusNotFound, gitErr: gitCloneFailed, wantManifestMiss: true, wantIs: resolvers.ErrNotFound, wantGitFetcherRan: false},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gitFetcher := &stubFetcher{canResolve: true, err: tc.gitErr}
+			r := &resolver{
+				timeout: 5 * time.Second,
+				fetchers: []resolvers.Fetcher{
+					resolvers.NewHTTP(statusServer(t, tc.httpStatus)),
+					gitFetcher,
+				},
+			}
+
+			_, _, err := r.ResolveArrow(context.Background(), tc.namespace)
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tc.wantIs)
+			assert.Equal(t, tc.wantManifestMiss, errors.Is(err, ErrManifestNotFound))
+			assert.Equal(t, tc.wantGitFetcherRan, gitFetcher.called,
+				"a pinned ref absent at the http fetcher must short-circuit before trying git")
+			if tc.wantGitErr != nil {
+				assert.ErrorIs(t, err, tc.wantGitErr)
+			}
+		})
+	}
+}
+
+func TestFetchManifest_OnlyGitRanAndFoundNothing_IsManifestNotFound(t *testing.T) {
+	r := &resolver{
+		timeout: 5 * time.Second,
+		fetchers: []resolvers.Fetcher{
+			&stubFetcher{canResolve: false},
+			&stubFetcher{canResolve: true, err: resolvers.ErrNotFound},
+		},
+	}
+
+	_, _, err := r.ResolveArrow(context.Background(), domain.Namespace("example.org/user/repo"))
+
+	assert.ErrorIs(t, err, ErrManifestNotFound)
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestFetchManifest_CollectionAbsence_IsManifestNotFound(t *testing.T) {
+	r := &resolver{
+		timeout: 5 * time.Second,
+		fetchers: []resolvers.Fetcher{
+			&stubFetcher{canResolve: true, err: resolvers.ErrNotFound},
+		},
+	}
+
+	_, err := r.ResolveCollection(context.Background(), domain.Namespace("github.com/user/repo"))
+
+	assert.ErrorIs(t, err, ErrManifestNotFound)
 }

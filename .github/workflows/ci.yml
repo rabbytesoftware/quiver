@@ -42,14 +42,15 @@ jobs:
         echo "✅ PR is ready for review"
 
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - name: Validate branching model
+      env:
+        SOURCE_BRANCH: ${{ github.head_ref }}
+        TARGET_BRANCH: ${{ github.base_ref }}
       run: |
-        SOURCE_BRANCH="${{ github.head_ref }}"
-        TARGET_BRANCH="${{ github.base_ref }}"
         
         echo "Source branch: $SOURCE_BRANCH"
         echo "Target branch: $TARGET_BRANCH"
@@ -130,10 +131,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       
     - name: Set up Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ env.GO_VERSION }}
         cache: true
@@ -175,7 +176,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
         
@@ -209,7 +210,7 @@ jobs:
         OVERALL_COVERAGE=$(grep "total:" coverage.txt | awk '{print $3}' | sed 's/%//')
         echo "Overall coverage: ${OVERALL_COVERAGE}%"
         
-        if [ $(echo "$OVERALL_COVERAGE < 90" | bc -l) -eq 1 ]; then
+        if [ "$(echo "$OVERALL_COVERAGE < 90" | bc -l)" -eq 1 ]; then
           echo "❌ Overall coverage ${OVERALL_COVERAGE}% is below required 90%"
           cat coverage.txt
           exit 1
@@ -230,13 +231,19 @@ jobs:
           const threshold = 90;
           const passed = parseFloat(total) >= threshold;
           const icon = passed ? '✅' : '❌';
-          
+
+          // GitHub rejects comments over 65,536 characters; keep the tail, which ends with the total line.
+          const limit = 60000;
+          const detail = coverage.length > limit
+            ? `… ${coverage.length - limit} characters omitted, full report in the coverage-reports artifact …\n` + coverage.slice(-limit)
+            : coverage;
+
           const body = `## 📊 Test Coverage Report\n\n` +
                        `${icon} **Total Coverage:** ${total}%\n` +
                        `**Threshold:** ${threshold}%\n` +
                        `**Status:** ${passed ? 'PASSED' : 'FAILED'}\n\n` +
                        `<details><summary>📋 View Detailed Report</summary>\n\n` +
-                       `\`\`\`\n${coverage}\n\`\`\`\n</details>`;
+                       `\`\`\`\n${detail}\n\`\`\`\n</details>`;
           
           github.rest.issues.createComment({
             issue_number: context.issue.number,
@@ -256,6 +263,34 @@ jobs:
         retention-days: 7
 
   # Multi-platform testing - tests on Linux, macOS, and Windows
+  # Integration tests run the daemon end to end: real HTTP, real WebSocket,
+  # real SQLite, real spawned processes. They are behind the `integration` build
+  # tag, so `go test ./...` in the jobs above never compiles them — this job is
+  # the only thing that exercises tests/integration at all.
+  #
+  # -p 1 because each suite binds its own daemon and temp home; running packages
+  # in parallel makes them contend rather than isolate.
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: validate-branch
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run integration tests
+      run: make test-integration
+
   test-multi-platform:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -267,10 +302,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Set up Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ env.GO_VERSION }}
         cache: true
@@ -289,10 +324,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       
     - name: Set up Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ env.GO_VERSION }}
         cache: true

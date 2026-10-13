@@ -19,11 +19,16 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/adapter"
 	"github.com/rabbytesoftware/quiver.core/internal/api"
 	apiv0 "github.com/rabbytesoftware/quiver.core/internal/api/v0"
+	wshandler "github.com/rabbytesoftware/quiver.core/internal/api/v0/ws"
 	"github.com/rabbytesoftware/quiver.core/internal/app"
+	"github.com/rabbytesoftware/quiver.core/internal/core/logring"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/engine"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/hosts"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/provider"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard"
 )
 
 // Env is a fully wired test server.
@@ -32,6 +37,8 @@ type Env struct {
 	Home                  string
 	Vault                 vault.Vault
 	socketPath            string
+	ws                    *wshandler.Handler
+	wizard                wizard.Wizard
 	closeOnce             sync.Once
 	closeFn               func()
 	closeWithoutKillingFn func()
@@ -40,6 +47,92 @@ type Env struct {
 	arrows                *arrowWatcher
 	catalog               *catalogWatcher
 	collections           *collectionWatcher
+}
+
+// envConfig collects the pieces a test may swap into the wiring before the
+// containers are built.
+type envConfig struct {
+	providers []provider.Provider
+	manifold  func(manifold.Manifold) manifold.Manifold
+	clock     func() time.Time
+	build     buildStamp
+	cloneOnly bool
+	fletcher  hosts.Lookup
+	logs      logring.Ring
+}
+
+// WithLogRing sets the ring the console's log stream reads from, so a test can
+// tee the process logger into it.
+func WithLogRing(
+	ring logring.Ring,
+) EnvOption {
+	return func(
+		c *envConfig,
+	) {
+		c.logs = ring
+	}
+}
+
+// buildStamp is what the release pipeline injects into a daemon binary.
+type buildStamp struct {
+	version string
+	commit  string
+	channel string
+}
+
+// EnvOption customises how BuildEnv wires the daemon.
+type EnvOption func(*envConfig)
+
+// WithProviders installs the discovery providers the daemon will query.
+//
+// BuildEnv installs none by default: engine.New builds real providers pointed at
+// live git hosts, and an integration test must never reach one.
+func WithProviders(providers ...provider.Provider) EnvOption {
+	return func(c *envConfig) { c.providers = providers }
+}
+
+// WithManifoldWrapper wraps the fixture-backed manifold, so a test can observe
+// what the daemon resolved without replacing the resolver itself.
+func WithManifoldWrapper(wrap func(manifold.Manifold) manifold.Manifold) EnvOption {
+	return func(c *envConfig) { c.manifold = wrap }
+}
+
+// WithClock overrides the clock the fixture-backed manifold uses to judge
+// its own resolution-cache TTL (Snapshot/ListChannels), so a test
+// can advance time deterministically — including past the real,
+// config-derived production TTL — without a real sleep. Nil (the default)
+// uses the real clock.
+func WithClock(clock func() time.Time) EnvOption {
+	return func(c *envConfig) { c.clock = clock }
+}
+
+// WithCloneOnlyHost serves every fixture repo the way a host reachable only
+// by cloning does: a manifest is fetched at a tag or branch name, never at a
+// commit SHA.
+func WithCloneOnlyHost() EnvOption {
+	return func(c *envConfig) { c.cloneOnly = true }
+}
+
+func WithFletcher(
+	lookup hosts.Lookup,
+) EnvOption {
+	return func(c *envConfig) { c.fletcher = lookup }
+}
+
+// WithBuild stamps the daemon as a released build, so it registers itself into
+// its own catalog on boot the way a real release does.
+func WithBuild(version, commit, channel string) EnvOption {
+	return func(c *envConfig) {
+		c.build = buildStamp{version: version, commit: commit, channel: channel}
+	}
+}
+
+// WaitDiscoveryRegistered blocks until the first client subscribes to the
+// discovery stream of this Env. The broadcaster signals only its first
+// subscriber, so a test that needs a second one must order it behind an
+// observable effect of the first.
+func (e *Env) WaitDiscoveryRegistered() {
+	e.ws.Discovery.WaitRegistered()
 }
 
 // Close tears down the test server idempotently.
@@ -89,11 +182,35 @@ func (e *Env) TypedClient(t *testing.T) *TypedClient {
 	return NewTypedClient(t, e.URL, e.socketPath)
 }
 
+// ProcessAlive reports whether pid is still a live OS process — a raw check,
+// needed because RecordDetached clears Execution the moment an arrow lands
+// Detached, leaving no read-model field left to compare a captured PID against.
+func (e *Env) ProcessAlive(pid int) bool {
+	return e.wizard.ProcessAlive(pid)
+}
+
+// KillDetachedProcess force-kills pid directly at the OS level: a Detached
+// arrow has no PID left in the read model for the normal Stop API to use, so
+// a test that captured the PID before detaching must clean it up this way.
+func (e *Env) KillDetachedProcess(t *testing.T, pid int) {
+	t.Helper()
+	if !e.wizard.ProcessAlive(pid) {
+		return
+	}
+	killProcessGroup(pid)
+}
+
 // WaitForState blocks until ns reaches want state or timeout elapses.
 // Uses the global WebSocket runtime stream — no polling, no timing dependency.
 func (e *Env) WaitForState(t *testing.T, ns string, want domain.ArrowState, timeout time.Duration) {
 	t.Helper()
 	e.states.WaitFor(t, ns, want, timeout)
+}
+
+// StateHistory returns every runtime state the stream reported for ns, in
+// the order the runtime aggregate went through them.
+func (e *Env) StateHistory(ns string) []string {
+	return e.states.statesOf(ns)
 }
 
 // WaitForActivePID blocks until a non-zero PID is recorded for ns or timeout elapses.
@@ -126,34 +243,93 @@ func (e *Env) WaitForCatalogLen(t *testing.T, wantLen int, timeout time.Duration
 }
 
 // WaitForCollectionFollowed blocks until ns is reported as followed=true on the
-// collection WebSocket stream. Because store.Save is registered before
-// BroadcastCollection in the projection chain, the REST list is already updated
-// by the time this returns.
+// collection WebSocket stream. A single subscriber owns collection.followed: it
+// writes the read model and only then runs the callbacks that broadcast, so the
+// REST list already serves the row by the time this returns.
 func (e *Env) WaitForCollectionFollowed(t *testing.T, ns string, timeout time.Duration) {
 	t.Helper()
 	e.collections.WaitForFollowed(t, ns, timeout)
 }
 
+// stubEngines replaces every engine that would otherwise reach the network with
+// its fixture-backed counterpart, then applies the test's own overrides.
+func stubEngines(
+	engines *engine.Container,
+	arrowRepos *FixtureRepos,
+	collectionRepos *FixtureRepos,
+	cfg envConfig,
+) {
+	// A fixture repo is bare git behind no host at all: nothing serves it raw
+	// files and nothing publishes a release for it, so the manifold is wired to
+	// no hosts and every question falls through to the fixture resolver.
+	rsv := newTestResolver(arrowRepos, collectionRepos)
+	rsv.cloneOnly = cfg.cloneOnly
+	withFletcher := manifold.WithFletcher(cfg.fletcher != nil)
+	if cfg.clock != nil {
+		engines.Manifold = manifold.NewWithResolversAndClock(rsv, rsv, cfg.fletcher, cfg.clock, withFletcher)
+	} else {
+		engines.Manifold = manifold.NewWithResolvers(rsv, rsv, cfg.fletcher, withFletcher)
+	}
+	if cfg.manifold != nil {
+		engines.Manifold = cfg.manifold(engines.Manifold)
+	}
+
+	// engine.New builds providers from the real platform metadata. Keeping only
+	// what the test asked for is what stops a discovery pass reaching github.com.
+	engines.Providers = cfg.providers
+}
+
 // BuildEnv wires a full test server using the given homeDir for path isolation.
 // It registers e.Close via t.Cleanup so explicit Close calls are optional.
-func BuildEnv(t *testing.T, arrowRepos *FixtureRepos, collectionRepos *FixtureRepos, home string) *Env {
+func BuildEnv(
+	t *testing.T,
+	arrowRepos *FixtureRepos,
+	collectionRepos *FixtureRepos,
+	home string,
+	opts ...EnvOption,
+) *Env {
 	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background()) // #nosec G118 -- cancel is called inside closeFn, which is invoked by e.Close()
+
+	cfg := envConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 
 	engines, err := engine.New(ctx, engine.WithHomeDir(home))
 	require.NoError(t, err)
+	stubEngines(engines, arrowRepos, collectionRepos, cfg)
 
-	rsv := newTestResolver(arrowRepos, collectionRepos)
-	engines.Manifold = manifold.NewWithResolvers(rsv, rsv)
+	// Wraps engines.Wizard before app.New sees it; see pidCapturingWizard.
+	pids := newPIDRegistry()
+	engines.Wizard = newPIDCapturingWizard(engines.Wizard, pids)
 
 	adapters, err := adapter.New(adapter.WithHomeDir(home))
 	require.NoError(t, err)
 
-	appContainer, err := app.New(engines, adapters, app.WithHomeDir(home))
+	appContainer, err := app.New(
+		engines,
+		adapters,
+		app.WithHomeDir(home),
+		app.WithVersion(cfg.build.version),
+		app.WithCommit(cfg.build.commit),
+		app.WithChannel(cfg.build.channel),
+		app.WithVersionCheckInterval(0),
+	)
 	require.NoError(t, err)
 
+	logs := cfg.logs
+	if logs == nil {
+		logs = logring.New()
+	}
 	v0Container, err := apiv0.New(appContainer)
 	require.NoError(t, err)
+	v0Container.ConsoleLogs = logs
+	v0Container.ConsoleVersion = cfg.build.version
+
+	wsHandler, ok := v0Container.WSHandler().(*wshandler.Handler)
+	require.True(t, ok, "v0 must expose the concrete websocket handler")
 
 	apiContainer, err := api.New(appContainer.Hub, api.BuildInfo{}, v0Container)
 	require.NoError(t, err)
@@ -198,17 +374,25 @@ func BuildEnv(t *testing.T, arrowRepos *FixtureRepos, collectionRepos *FixtureRe
 		Home:        home,
 		Vault:       engines.Vault,
 		socketPath:  socketPath,
+		ws:          wsHandler,
+		wizard:      engines.Wizard,
 		states:      states,
 		arrows:      arrows,
 		catalog:     catalog,
 		collections: collections,
-		// Graceful shutdown: cancel processes, then wait for app to drain.
+		// Graceful shutdown, in the same order as internal.Container.Shutdown:
+		// cancel processes, drain every aggregate, then release the handles.
 		closeFn: func() {
+			// Runs before appContainer.Shutdown: wizard.Shutdown doesn't cancel
+			// a surviving _execute/custom-method process, and killing it here,
+			// while drainExecution is still reading, avoids racing shutdown.
+			killSurvivingProcesses(states, pids, engines.Wizard)
 			closeHTTP()
 			cancel()
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer shutdownCancel()
 			_ = appContainer.Shutdown(shutdownCtx)
+			_ = engines.Shutdown(shutdownCtx)
 			_ = adapters.Close()
 		},
 		// Simulate alive-PID crash: skip cancel and Shutdown so OS processes survive.
@@ -227,8 +411,8 @@ func BuildEnv(t *testing.T, arrowRepos *FixtureRepos, collectionRepos *FixtureRe
 }
 
 // NewEnv creates an Env with a fresh temp directory as its home.
-func (s *IntegrationSuite) NewEnv() *Env {
-	return BuildEnv(s.T(), s.Repos, s.CollectionRepos, s.T().TempDir())
+func (s *IntegrationSuite) NewEnv(opts ...EnvOption) *Env {
+	return BuildEnv(s.T(), s.Repos, s.CollectionRepos, s.T().TempDir(), opts...)
 }
 
 // NewEnvWithHome creates an Env using an explicit home directory.
@@ -257,7 +441,8 @@ type activeRunFields struct {
 type stateWatcher struct {
 	mu         sync.Mutex
 	current    map[string]string // latest state per namespace
-	currentPID map[string]int    // latest active PID per namespace
+	history    map[string][]string
+	currentPID map[string]int // latest active PID per namespace
 	subs       []chan struct{}
 	done       chan struct{}
 }
@@ -266,6 +451,7 @@ func newStateWatcher(t *testing.T, baseURL, socketPath string) *stateWatcher {
 	t.Helper()
 	w := &stateWatcher{
 		current:    make(map[string]string),
+		history:    make(map[string][]string),
 		currentPID: make(map[string]int),
 		done:       make(chan struct{}),
 	}
@@ -302,6 +488,7 @@ func (w *stateWatcher) readLoop(conn *websocket.Conn) {
 		if json.Unmarshal(msg, &evt) == nil && evt.State != "" {
 			w.mu.Lock()
 			w.current[evt.Namespace] = evt.State
+			w.history[evt.Namespace] = append(w.history[evt.Namespace], evt.State)
 			if evt.ActiveRun != nil && evt.ActiveRun.PID > 0 {
 				w.currentPID[evt.Namespace] = evt.ActiveRun.PID
 			}
@@ -369,6 +556,20 @@ func (w *stateWatcher) WaitForActivePID(
 	}
 }
 
+// namespacesInState returns every namespace whose most recently observed
+// state equals want.
+func (w *stateWatcher) namespacesInState(want domain.ArrowState) []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []string
+	for ns, state := range w.current {
+		if state == string(want) {
+			out = append(out, ns)
+		}
+	}
+	return out
+}
+
 // WaitFor blocks until ns reaches want state or timeout elapses.
 // Checks current state before waiting so it never misses an event that already arrived.
 func (w *stateWatcher) WaitFor(
@@ -420,6 +621,13 @@ func (w *stateWatcher) WaitFor(
 			return
 		}
 	}
+}
+
+// statesOf returns every state ns was observed in, in order.
+func (w *stateWatcher) statesOf(ns string) []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.history[ns]...)
 }
 
 func (w *stateWatcher) close() {

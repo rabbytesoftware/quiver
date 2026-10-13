@@ -10,7 +10,6 @@ type quiverV0 struct {
 
 type metadataV0 struct {
 	Name        string   `yaml:"name"`
-	Version     string   `yaml:"version"`
 	Description string   `yaml:"description"`
 	URL         string   `yaml:"url"`
 	Maintainers []string `yaml:"maintainers"`
@@ -26,6 +25,7 @@ type mediaV0 struct {
 type arrowEntryV0 struct {
 	Path      string
 	Namespace string
+	AUID      string
 }
 
 func (e *arrowEntryV0) UnmarshalYAML(value *yaml.Node) error {
@@ -36,6 +36,7 @@ func (e *arrowEntryV0) UnmarshalYAML(value *yaml.Node) error {
 	type alias struct {
 		Path      string `yaml:"path"`
 		Namespace string `yaml:"namespace"`
+		AUID      string `yaml:"auid"`
 	}
 	var a alias
 	if err := value.Decode(&a); err != nil {
@@ -43,5 +44,6 @@ func (e *arrowEntryV0) UnmarshalYAML(value *yaml.Node) error {
 	}
 	e.Path = a.Path
 	e.Namespace = a.Namespace
+	e.AUID = a.AUID
 	return nil
 }

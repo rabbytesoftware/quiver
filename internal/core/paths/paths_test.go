@@ -62,6 +62,20 @@ func TestLogs_ReturnsAbsolutePath(t *testing.T) {
 	assert.True(t, filepath.IsAbs(got))
 }
 
+func TestSelf_CreatesDir(t *testing.T) {
+	ensureCreatesDir(t, paths.Self)
+}
+
+func TestSelf_ReturnsAbsolutePath(t *testing.T) {
+	got, err := paths.Self()
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(got))
+}
+
+func TestBin_CreatesDir(t *testing.T) {
+	ensureCreatesDir(t, paths.Bin)
+}
+
 func TestEvents_Idempotent(t *testing.T) {
 	first, err := paths.Events()
 	require.NoError(t, err)
@@ -116,6 +130,36 @@ func TestNamespacesAt_CreatesDir(t *testing.T) {
 	assert.Contains(t, got, home)
 }
 
+func TestLogsAt_CreatesDir(t *testing.T) {
+	home := t.TempDir()
+	got, err := paths.LogsAt(home)
+	require.NoError(t, err)
+	info, statErr := os.Stat(got)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+	assert.Contains(t, got, home)
+}
+
+func TestSelfAt_CreatesDir(t *testing.T) {
+	home := t.TempDir()
+	got, err := paths.SelfAt(home)
+	require.NoError(t, err)
+	info, statErr := os.Stat(got)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+	assert.Contains(t, got, home)
+}
+
+func TestBinAt_CreatesDir(t *testing.T) {
+	home := t.TempDir()
+	got, err := paths.BinAt(home)
+	require.NoError(t, err)
+	info, statErr := os.Stat(got)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+	assert.Contains(t, got, home)
+}
+
 func TestEnsure_MkdirAllError_ReturnsError(t *testing.T) {
 	// Create a regular file, then try to mkdir under it — guaranteed to fail.
 	f, err := os.CreateTemp("", "paths-test-*")
@@ -126,4 +170,35 @@ func TestEnsure_MkdirAllError_ReturnsError(t *testing.T) {
 	badPath := filepath.Join(f.Name(), "subdir")
 	_, gotErr := paths.Ensure(badPath)
 	assert.Error(t, gotErr)
+}
+
+func TestSweepSelfAsides_RemovesOnlyAsides(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{paths.SelfAsidePrefix + "1", paths.SelfAsidePrefix + "20", "quiver", "quiver.new-1"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644))
+	}
+
+	paths.SweepSelfAsides(dir)
+
+	left, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	names := []string{}
+	for _, e := range left {
+		names = append(names, e.Name())
+	}
+	assert.ElementsMatch(t, []string{"quiver", "quiver.new-1"}, names)
+}
+
+func TestSweepSelfAsides_MissingDirIsFine(t *testing.T) {
+	assert.NotPanics(t, func() { paths.SweepSelfAsides(filepath.Join(t.TempDir(), "nope")) })
+}
+
+func TestRunAt_CreatesDir(t *testing.T) {
+	home := t.TempDir()
+	got, err := paths.RunAt(home)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "run"), got)
+	info, statErr := os.Stat(got)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
 }

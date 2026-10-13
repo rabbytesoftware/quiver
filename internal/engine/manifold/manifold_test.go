@@ -3,6 +3,9 @@ package manifold
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,21 +18,41 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/ruleset"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/translator"
 	v0 "github.com/rabbytesoftware/quiver.core/internal/engine/manifold/translator/arrow/v0"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/versioning"
 )
 
 type stubResolver struct {
-	arrowData     []byte
-	arrowFilename string
-	arrowErr      error
-	quiverData    []byte
-	quiverErr     error
+	arrowRequests   []domain.Namespace
+	arrowFn         func(ns domain.Namespace) ([]byte, string, error)
+	arrowData       []byte
+	arrowFilename   string
+	arrowErr        error
+	arrowAtData     []byte
+	arrowAtFilename string
+	arrowAtErr      error
+	arrowAtPath     string // captures the path ResolveArrowAt was called with
+	quiverData      []byte
+	quiverErr       error
 }
 
 func (s *stubResolver) ResolveArrow(
 	_ context.Context,
-	_ domain.Namespace,
+	ns domain.Namespace,
 ) ([]byte, string, error) {
+	s.arrowRequests = append(s.arrowRequests, ns)
+	if s.arrowFn != nil {
+		return s.arrowFn(ns)
+	}
 	return s.arrowData, s.arrowFilename, s.arrowErr
+}
+
+func (s *stubResolver) ResolveArrowAt(
+	_ context.Context,
+	_ domain.Namespace,
+	path string,
+) ([]byte, string, error) {
+	s.arrowAtPath = path
+	return s.arrowAtData, s.arrowAtFilename, s.arrowAtErr
 }
 
 func (s *stubResolver) ResolveCollection(
@@ -46,6 +69,8 @@ type stubTranslator struct {
 	quiverErr     error
 	quiver        *domain.Collection
 	quiverEntries []domain.CollectionArrowEntry
+	readme        string
+	readmeOK      bool
 }
 
 func (s *stubTranslator) Arrow(data []byte) (translator.Module, error) {
@@ -74,12 +99,137 @@ func (s *stubTranslator) ReadSchemaInfo(data []byte) (*translator.ManifestInfo, 
 	return nil, nil
 }
 
+func (s *stubTranslator) ExtractReadme(data []byte) (string, bool) {
+	return s.readme, s.readmeOK
+}
+
 func TestNew_ReturnsManifoldInterface(t *testing.T) {
-	_ = New(0)
+	_ = New(0, hostedBy(&stubHost{}), 0)
 }
 
 func TestNew_CustomTimeout(t *testing.T) {
-	_ = New(10 * time.Second)
+	_ = New(10*time.Second, hostedBy(&stubHost{}), 0)
+}
+
+func TestNewWithClock_UsesInjectedClock(t *testing.T) {
+	fixed := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, ok := NewWithClock(time.Second, nil, 0, func() time.Time { return fixed }).(*manifold); !ok {
+		t.Fatal("NewWithClock(...).(*manifold) assertion failed")
+	}
+	crs := &stubConstraintResolver{}
+	clock := &fakeClock{now: fixed}
+	assertCacheExpiresAfter(t, newManifold(time.Second, nil, crs, 0, clock.Now, nil), crs, clock, defaultManifoldCacheTTL)
+}
+
+func TestNewWithResolversAndClock_UsesInjectedClock(t *testing.T) {
+	fixed := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	crs := &stubConstraintResolver{}
+	clock := &fakeClock{now: fixed}
+	m := NewWithResolversAndClock(&stubResolver{}, crs, nil, clock.Now)
+	assertCacheExpiresAfter(t, m, crs, clock, defaultManifoldCacheTTL)
+}
+
+// assertCacheExpiresAfter proves m's snapshot cache reads the injected clock
+// and expires after exactly ttl.
+func assertCacheExpiresAfter(
+	t *testing.T,
+	m Manifold,
+	crs *stubConstraintResolver,
+	clock *fakeClock,
+	ttl time.Duration,
+) {
+	t.Helper()
+	ns := domain.Namespace("github.com/u/r")
+	start := clock.now
+	if _, err := m.Snapshot(context.Background(), ns); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	clock.now = start.Add(ttl)
+	if _, err := m.Snapshot(context.Background(), ns); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if crs.refsCall != 1 {
+		t.Fatalf("refsCall = %d at the TTL, want 1 (still cached)", crs.refsCall)
+	}
+	clock.now = start.Add(ttl + time.Nanosecond)
+	if _, err := m.Snapshot(context.Background(), ns); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if crs.refsCall != 2 {
+		t.Errorf("refsCall = %d past the TTL, want 2 (expired)", crs.refsCall)
+	}
+}
+
+// TestNew_ZeroOrNegativeCacheTTL_FallsBackToDefault proves New's own
+// defensive guard: a zero or negative cacheTTL (a caller bug, or simply
+// omitted) falls back to defaultManifoldCacheTTL rather than leaving the
+// cache permanently expired (a zero TTL would otherwise mean "never cache
+// anything," which is a much easier mistake to ship silently than to
+// notice).
+func TestNew_ZeroOrNegativeCacheTTL_FallsBackToDefault(t *testing.T) {
+	for _, ttl := range []time.Duration{0, -time.Second} {
+		if _, ok := New(time.Second, nil, ttl).(*manifold); !ok {
+			t.Fatalf("New(...).(*manifold) assertion failed for ttl=%v", ttl)
+		}
+		crs := &stubConstraintResolver{}
+		clock := &fakeClock{now: time.Now()}
+		assertCacheExpiresAfter(t, newManifold(time.Second, nil, crs, ttl, clock.Now, nil), crs, clock, defaultManifoldCacheTTL)
+	}
+}
+
+// TestNew_CacheTTL_ThreadsThroughAndGovernsExpiry is the fix this whole
+// round is about: New's cacheTTL parameter must actually be what governs
+// cache expiry, not a hardcoded constant that happens to be reachable some
+// other way. Built through the constructor path New takes, with a fake
+// clock and constraint resolver to avoid a real sleep, a short TTL actually
+// expires a cache entry at that short duration, not at whatever the old
+// hardcoded default used to be.
+func TestNew_CacheTTL_ThreadsThroughAndGovernsExpiry(t *testing.T) {
+	const shortTTL = 50 * time.Millisecond
+
+	if _, ok := New(time.Second, nil, shortTTL).(*manifold); !ok {
+		t.Fatal("New(...).(*manifold) assertion failed")
+	}
+
+	crs := &stubConstraintResolver{listTags: []string{"v1.0.0"}}
+	now := time.Now()
+	clock := &fakeClock{now: now}
+	built := newManifold(time.Second, nil, crs, shortTTL, clock.Now, nil)
+
+	ns := domain.Namespace("github.com/u/r")
+	first, err := built.ListChannels(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(first) != 1 || first[0].Count != 1 {
+		t.Fatalf("first = %+v, want a single stable channel with one member", first)
+	}
+
+	// Still within the short TTL.
+	crs.listTags = []string{"v1.0.0", "v2.0.0"}
+	clock.now = now.Add(shortTTL / 2)
+	cached, err := built.ListChannels(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cached) != 1 || cached[0].Count != 1 {
+		t.Fatalf("cached = %+v, want the stale-but-still-fresh single-member result", cached)
+	}
+
+	// Past the short TTL — a hardcoded 1h or 24h default would still be
+	// "within TTL" here, so this specifically proves the constructor's
+	// value, not some other constant, is what governs this.
+	clock.now = now.Add(shortTTL + time.Millisecond)
+	fresh, err := built.ListChannels(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fresh) != 1 || fresh[0].Count != 2 {
+		t.Fatalf("fresh = %+v, want the refetched two-member result past this manifold's own short TTL", fresh)
+	}
+	if crs.listTagsCall != 2 {
+		t.Errorf("listTagsCall = %d, want 2 (past the constructor-supplied TTL must refetch)", crs.listTagsCall)
+	}
 }
 
 func TestResolveArrow_InvalidNamespace(t *testing.T) {
@@ -144,6 +294,9 @@ func TestResolveArrow_TranslatorError(t *testing.T) {
 	if !errors.Is(err, translateErr) {
 		t.Errorf("expected translateErr, got %v", err)
 	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Errorf("expected ErrInvalidManifest, got %v", err)
+	}
 }
 
 func TestResolveArrow_Success(t *testing.T) {
@@ -161,8 +314,7 @@ func TestResolveArrow_Success(t *testing.T) {
 	}
 	expectedManifest := &domain.Arrow{
 		ArrowMeta: domain.ArrowMeta{
-			Name:    "my-arrow",
-			Version: "1.0.0",
+			Name: "my-arrow",
 		},
 	}
 	m := &manifold{
@@ -183,6 +335,95 @@ func TestResolveArrow_Success(t *testing.T) {
 	}
 	if filename != "ARROW.md" {
 		t.Errorf("filename = %q, want ARROW.md", filename)
+	}
+}
+
+func TestResolveArrowAt_Success(t *testing.T) {
+	precompiled := map[string]models.PrecompiledTarget{
+		"*": {
+			Lifecycle: domain.TargetLifecycle{
+				Install: step.StepList{
+					step.NewRunStep("install", "echo ok", false, "10s", true),
+				},
+				Uninstall: step.StepList{
+					step.NewRunStep("uninstall", "echo bye", false, "10s", true),
+				},
+			},
+		},
+	}
+	expectedManifest := &domain.Arrow{
+		ArrowMeta: domain.ArrowMeta{
+			Name: "my-arrow",
+		},
+	}
+	stub := &stubResolver{
+		arrowAtData:     []byte("test"),
+		arrowAtFilename: "tools/my-arrow.yaml",
+	}
+	m := &manifold{
+		rsv: stub,
+		trs: &stubTranslator{arrow: expectedManifest, precompiled: precompiled},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	result, raw, filename, err := m.ResolveArrowAt(
+		context.Background(),
+		domain.Namespace("github.com/rabbytesoftware/quiver.essentials/my-arrow"),
+		"some/path",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "my-arrow" {
+		t.Errorf("Name = %q, want my-arrow", result.Name)
+	}
+	if string(raw) != "test" {
+		t.Errorf("raw = %q, want test", raw)
+	}
+	if filename != "tools/my-arrow.yaml" {
+		t.Errorf("filename = %q, want tools/my-arrow.yaml", filename)
+	}
+	if stub.arrowAtPath != "some/path" {
+		t.Errorf("ResolveArrowAt called with path %q, want some/path", stub.arrowAtPath)
+	}
+}
+
+func TestResolveArrowAt_ResolverError(t *testing.T) {
+	resolveErr := errors.New("resolver failed")
+	m := &manifold{
+		rsv: &stubResolver{arrowAtErr: resolveErr},
+		trs: &stubTranslator{},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	_, _, _, err := m.ResolveArrowAt(
+		context.Background(),
+		domain.Namespace("github.com/rabbytesoftware/quiver.essentials/my-arrow"),
+		"some/path",
+	)
+	if !errors.Is(err, resolveErr) {
+		t.Errorf("expected resolveErr, got %v", err)
+	}
+}
+
+func TestResolveArrowAt_TranslatorError(t *testing.T) {
+	translateErr := errors.New("translator failed")
+	m := &manifold{
+		rsv: &stubResolver{arrowAtData: []byte("test")},
+		trs: &stubTranslator{arrowErr: translateErr},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	_, _, _, err := m.ResolveArrowAt(
+		context.Background(),
+		domain.Namespace("github.com/rabbytesoftware/quiver.essentials/my-arrow"),
+		"some/path",
+	)
+	if !errors.Is(err, translateErr) {
+		t.Errorf("expected translateErr, got %v", err)
+	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Errorf("expected ErrInvalidManifest, got %v", err)
 	}
 }
 
@@ -287,6 +528,9 @@ func TestParseArrow_TranslatorError(t *testing.T) {
 	if !errors.Is(err, translateErr) {
 		t.Fatalf("expected translateErr, got %v", err)
 	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected ErrInvalidManifest, got %v", err)
+	}
 }
 
 func TestParseArrow_RuleError_ReturnsStructuredErrors(t *testing.T) {
@@ -316,6 +560,9 @@ func TestParseArrow_RuleError_ReturnsStructuredErrors(t *testing.T) {
 	if !errors.As(err, &asmErrs) {
 		t.Fatalf("expected RuleErrors, got %T: %v", err, err)
 	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected ErrInvalidManifest, got %v", err)
+	}
 }
 
 func TestParseArrow_ValidManifest_ReturnsManifest(t *testing.T) {
@@ -333,8 +580,7 @@ func TestParseArrow_ValidManifest_ReturnsManifest(t *testing.T) {
 	}
 	validManifest := &domain.Arrow{
 		ArrowMeta: domain.ArrowMeta{
-			Name:    "my-arrow",
-			Version: "1.0.0",
+			Name: "my-arrow",
 		},
 	}
 	m := &manifold{
@@ -349,6 +595,60 @@ func TestParseArrow_ValidManifest_ReturnsManifest(t *testing.T) {
 	}
 	if result.Name != "my-arrow" {
 		t.Errorf("Name = %q, want my-arrow", result.Name)
+	}
+}
+
+func TestParseArrow_ExtractsReadme(t *testing.T) {
+	precompiled := map[string]models.PrecompiledTarget{
+		"*": {
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "10s", true)},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "10s", true)},
+			},
+		},
+	}
+	validManifest := &domain.Arrow{
+		ArrowMeta: domain.ArrowMeta{Name: "my-arrow"},
+	}
+	m := &manifold{
+		rsv: &stubResolver{},
+		trs: &stubTranslator{arrow: validManifest, precompiled: precompiled, readme: "# Docs", readmeOK: true},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	result, err := m.ParseArrow([]byte("any"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Readme != "# Docs" {
+		t.Errorf("Readme = %q, want %q", result.Readme, "# Docs")
+	}
+}
+
+func TestParseArrow_NoReadme_LeavesFieldEmpty(t *testing.T) {
+	precompiled := map[string]models.PrecompiledTarget{
+		"*": {
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "10s", true)},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "10s", true)},
+			},
+		},
+	}
+	validManifest := &domain.Arrow{
+		ArrowMeta: domain.ArrowMeta{Name: "my-arrow"},
+	}
+	m := &manifold{
+		rsv: &stubResolver{},
+		trs: &stubTranslator{arrow: validManifest, precompiled: precompiled},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	result, err := m.ParseArrow([]byte("any"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Readme != "" {
+		t.Errorf("Readme = %q, want empty", result.Readme)
 	}
 }
 
@@ -367,8 +667,7 @@ func TestParseArrow_PostCompileValidationError(t *testing.T) {
 	}
 	validManifest := &domain.Arrow{
 		ArrowMeta: domain.ArrowMeta{
-			Name:    "my-arrow",
-			Version: "1.0.0",
+			Name: "my-arrow",
 		},
 	}
 	stubRuleset := &stubRuleset{postCompileErr: errors.New("post-compile validation failed")}
@@ -381,6 +680,9 @@ func TestParseArrow_PostCompileValidationError(t *testing.T) {
 	_, err := m.ParseArrow([]byte("any"))
 	if err == nil {
 		t.Fatal("expected error for post-compile validation failure")
+	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected ErrInvalidManifest, got %v", err)
 	}
 }
 
@@ -453,8 +755,7 @@ func TestParseArrow_CompileError(t *testing.T) {
 	}
 	validManifest := &domain.Arrow{
 		ArrowMeta: domain.ArrowMeta{
-			Name:    "my-arrow",
-			Version: "1.0.0",
+			Name: "my-arrow",
 		},
 	}
 	compileErr := errors.New("compile failed")
@@ -465,8 +766,11 @@ func TestParseArrow_CompileError(t *testing.T) {
 		rls: ruleset.New(),
 	}
 	_, err := m.ParseArrow([]byte("any"))
-	if !errors.Is(err, compileErr) && err == nil {
+	if !errors.Is(err, compileErr) {
 		t.Fatalf("expected compile error, got %v", err)
+	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected ErrInvalidManifest, got %v", err)
 	}
 }
 
@@ -501,18 +805,103 @@ func (s *stubCompiler) Compile(_ *domain.Arrow, _ map[string]models.PrecompiledT
 }
 
 type stubConstraintResolver struct {
-	result string
-	err    error
+	branchHash   string
+	branch       string
+	branchErr    error
+	branchCall   int
+	listTags     []string
+	listTagsErr  error
+	listTagsCall int
+	refs         *domain.RefSnapshot
+	refsErr      error
+	refsCall     int
 }
 
-func (s *stubConstraintResolver) Resolve(_ context.Context, _ domain.Namespace, _ string) (string, error) {
-	return s.result, s.err
+// Refs answers from refs when set, else builds the snapshot from the
+// listTags/branch fields, counting itself as both a tag and a branch lookup.
+func (s *stubConstraintResolver) Refs(_ context.Context, _ domain.Namespace) (domain.RefSnapshot, error) {
+	s.refsCall++
+	s.listTagsCall++
+	s.branchCall++
+	if s.refsErr != nil {
+		return domain.RefSnapshot{}, s.refsErr
+	}
+	if s.refs != nil {
+		return *s.refs, nil
+	}
+	if s.listTagsErr != nil {
+		return domain.RefSnapshot{}, s.listTagsErr
+	}
+	snap := domain.RefSnapshot{Tags: map[string]string{}, Branches: map[string]string{}}
+	for _, tag := range s.listTags {
+		snap.Tags[tag] = "commit-" + tag
+	}
+	if s.branchErr == nil && s.branch != "" {
+		snap.Branches[s.branch] = s.branchHash
+		snap.Head = s.branch
+	}
+	return snap, nil
+}
+
+// stubHost is a git host as manifold sees one. The resolver is injected
+// whole, so nothing in these tests reaches a raw file URL.
+type stubHost struct{}
+
+func (s *stubHost) RawFileURL(
+	_ domain.Namespace,
+	_ string,
+	_ string,
+) (string, error) {
+	return "", errors.New("the injected resolver fetches, not the host")
+}
+
+func (s *stubHost) BlobFileURL(
+	_ domain.Namespace,
+	_ string,
+	_ string,
+) (string, error) {
+	return "", nil
+}
+
+func (s *stubHost) OwnerAvatarURL(
+	_ domain.Namespace,
+) string {
+	return ""
+}
+
+func (s *stubHost) RepoPageURL(
+	_ domain.Namespace,
+) string {
+	return ""
+}
+
+func (s *stubHost) RepoMetadata(
+	_ context.Context,
+	_ domain.Namespace,
+) (domain.RepoMetadata, error) {
+	return domain.RepoMetadata{}, nil
+}
+
+func (s *stubHost) ReleaseAssets(
+	_ context.Context,
+	_ domain.Namespace,
+	_ string,
+) ([]domain.ReleaseAsset, error) {
+	return nil, nil
+}
+
+func (s *stubHost) DefaultBranches() []string { return nil }
+
+// hostedBy answers for every namespace, which is what a manifold wired to a
+// host it knows looks like.
+func hostedBy(h *stubHost) HostLookup {
+	return func(_ domain.Namespace) (Host, bool) { return h, true }
 }
 
 func TestNewWithResolvers_ReturnsManifoldInterface(t *testing.T) {
 	rsv := &stubResolver{}
 	crs := &stubConstraintResolver{}
-	_ = NewWithResolvers(rsv, crs)
+	_ = NewWithResolvers(rsv, crs, nil)
 }
 
 func TestNewWithResolvers_UsesInjectedResolver(t *testing.T) {
@@ -520,7 +909,7 @@ func TestNewWithResolvers_UsesInjectedResolver(t *testing.T) {
 	rsv := &stubResolver{arrowErr: resolveErr}
 	crs := &stubConstraintResolver{}
 
-	m := NewWithResolvers(rsv, crs)
+	m := NewWithResolvers(rsv, crs, nil)
 	_, _, _, err := m.ResolveArrow(context.Background(), domain.Namespace("github.com/user/repo"))
 
 	if !errors.Is(err, resolveErr) {
@@ -528,48 +917,7 @@ func TestNewWithResolvers_UsesInjectedResolver(t *testing.T) {
 	}
 }
 
-func TestResolveConstraint_Success(t *testing.T) {
-	rsv := &stubResolver{}
-	crs := &stubConstraintResolver{result: "v1.2.3"}
-
-	m := NewWithResolvers(rsv, crs)
-	got, err := m.ResolveConstraint(context.Background(), domain.Namespace("github.com/user/repo@v1.*"), "v1.*")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "v1.2.3" {
-		t.Errorf("expected v1.2.3, got %q", got)
-	}
-}
-
-func TestResolveConstraint_Error(t *testing.T) {
-	constraintErr := errors.New("no matching tags")
-	rsv := &stubResolver{}
-	crs := &stubConstraintResolver{err: constraintErr}
-
-	m := NewWithResolvers(rsv, crs)
-	_, err := m.ResolveConstraint(context.Background(), domain.Namespace("github.com/user/repo@v1.*"), "v1.*")
-
-	if !errors.Is(err, constraintErr) {
-		t.Fatalf("expected constraintErr, got %v", err)
-	}
-}
-
-func TestNewWithResolvers_ConstraintResolver_UsedOnResolveConstraint(t *testing.T) {
-	_ = resolvers.NewConstraintResolver(0)
-
-	rsv := &stubResolver{}
-	crs := &stubConstraintResolver{result: "v2.0.0"}
-
-	m := NewWithResolvers(rsv, crs)
-	got, err := m.ResolveConstraint(context.Background(), domain.Namespace("github.com/org/pkg@v2.*"), "v2.*")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "v2.0.0" {
-		t.Errorf("expected v2.0.0, got %q", got)
-	}
-}
+// ─── ParseCollection ─────────────────────────────────────────────────────────
 
 func TestParseCollection_DeriveLocalArrowNamespace(t *testing.T) {
 	m := &manifold{
@@ -728,7 +1076,9 @@ func TestParseCollection_TranslatorError(t *testing.T) {
 	}
 }
 
-func TestParseCollection_VersionedNamespace_StripsRef(t *testing.T) {
+// A local member lives inside the collection's repository, at the collection's
+// own commit, so it is at the collection's ref and nothing else.
+func TestParseCollection_VersionedNamespace_LocalArrowInheritsRef(t *testing.T) {
 	m := &manifold{
 		rsv: &stubResolver{},
 		trs: &stubTranslator{
@@ -747,9 +1097,103 @@ func TestParseCollection_VersionedNamespace_StripsRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := domain.Namespace("github.com/char2cs/gaming.quiver/cs2")
+	want := domain.Namespace("github.com/char2cs/gaming.quiver/cs2@v1.2.3")
 	if manifest.Arrows[0].Namespace != want {
 		t.Errorf("Namespace = %q, want %q", manifest.Arrows[0].Namespace, want)
+	}
+}
+
+// A ref written on the path is the collection's ref restated, so it is
+// replaced by the derived one rather than believed.
+func TestParseCollection_AuthoredPathRefIsReplacedByTheCollectionRef(t *testing.T) {
+	testCases := []struct {
+		name       string
+		collection string
+		want       domain.Namespace
+	}{
+		{
+			name:       "collection carries a ref",
+			collection: "github.com/char2cs/gaming.quiver@v2.0.0",
+			want:       "github.com/char2cs/gaming.quiver/cs2@v2.0.0",
+		},
+		{
+			name:       "collection is refless",
+			collection: "github.com/char2cs/gaming.quiver",
+			want:       "github.com/char2cs/gaming.quiver/cs2",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &manifold{
+				rsv: &stubResolver{},
+				trs: &stubTranslator{
+					quiver: &domain.Collection{
+						Meta: domain.CollectionMeta{Name: "Gaming", Description: "desc"},
+					},
+					quiverEntries: []domain.CollectionArrowEntry{
+						{Path: "servers/cs2@v1.0.0"},
+					},
+				},
+				cmp: compiler.New(),
+				rls: ruleset.New(),
+			}
+			manifest, err := m.ParseCollection([]byte("any"), domain.Namespace(tc.collection))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if manifest.Arrows[0].Namespace != tc.want {
+				t.Errorf("Namespace = %q, want %q", manifest.Arrows[0].Namespace, tc.want)
+			}
+		})
+	}
+}
+
+// ValidateManifest parses against a refless dummy namespace, so a local member
+// yields a refless namespace there. That is the correct answer for a pure
+// syntax check: with no collection to be at, there is no ref to inherit.
+func TestParseCollection_ReflessNamespace_LocalArrowStaysRefless(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Gaming", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Path: "servers/cs2"},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	manifest, err := m.ParseCollection([]byte("any"), domain.Namespace("validation.dummy/collection"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := domain.Namespace("validation.dummy/collection/cs2")
+	if manifest.Arrows[0].Namespace != want {
+		t.Errorf("Namespace = %q, want %q", manifest.Arrows[0].Namespace, want)
+	}
+}
+
+// A path that trims away to nothing has no last segment to name an arrow with.
+func TestParseCollection_PathWithNoSegment_ReturnsError(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Gaming", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Path: "/"},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	_, err := m.ParseCollection([]byte("any"), domain.Namespace("github.com/char2cs/gaming.quiver"))
+	if err == nil {
+		t.Fatal("expected error for a path with no namespace segment")
 	}
 }
 
@@ -800,5 +1244,1297 @@ func TestParseCollection_IsLocal_SetCorrectly(t *testing.T) {
 	}
 	if coll.Arrows[1].IsLocal {
 		t.Errorf("namespace: entry should be IsLocal=false, got true")
+	}
+}
+
+// ─── empty-command coverage across every lifecycle key ───────────────────────
+
+// emptyCommandArrowYAML builds a schema-valid manifest whose only step in
+// phase is a run step with no command at all. The step schema requires just
+// `type`, so nothing upstream of the rules rejects it. install is emitted
+// with a real command unless it is itself the phase under test, because
+// LifecyclePairsRule requires install and uninstall to appear together.
+func emptyCommandArrowYAML(phase string) []byte {
+	install := `      install:
+        - type: run
+          command: echo installed
+          title: Install
+          timeout: 10s
+          exit_on_failure: true
+`
+	if phase == "install" {
+		install = ""
+	}
+
+	return []byte(`schema: "arrow@v0"
+metadata:
+  name: empty-command-probe
+  description: test
+targets:
+  "*":
+    lifecycle:
+` + install + `      uninstall:
+        - type: run
+          command: echo uninstalled
+          title: Uninstall
+          timeout: 10s
+          exit_on_failure: false
+      ` + phase + `:
+        - type: run
+          title: detect
+`)
+}
+
+// TestParseArrow_EmptyCommand_RejectedInPreinstalled is the fail-open this
+// closes. OverrideableCoverageRule catches a command with no default and no OS
+// coverage for every other lifecycle, but both it and its sibling
+// OverrideableKeysRule enumerated only the five original keys, so a
+// preinstalled step slipped past uncovered. It compiles to an empty command,
+// which the run handler executes as `sh -c ""`, which exits 0 — a probe
+// reporting a successful detection from a command that never ran, marking an
+// arrow installed with nothing whatsoever verified behind it.
+func TestParseArrow_EmptyCommand_RejectedInPreinstalled(t *testing.T) {
+	m := New(time.Second, nil, 0)
+
+	_, err := m.ParseArrow(emptyCommandArrowYAML("preinstalled"))
+	if err == nil {
+		t.Fatal("expected a preinstalled run step with no command to be rejected, got nil")
+	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected ErrInvalidManifest, got: %v", err)
+	}
+	requireRuleOnField(t, err, "insufficient_coverage", "lifecycle.preinstalled[0].command")
+}
+
+func requireRuleOnField(
+	t *testing.T,
+	err error,
+	rule string,
+	fieldSuffix string,
+) {
+	t.Helper()
+	var rules ruleset.RuleErrors
+	if !errors.As(err, &rules) {
+		t.Fatalf("expected rule errors, got: %v", err)
+	}
+	for _, r := range rules {
+		if r.Rule == rule && strings.HasSuffix(r.Field, fieldSuffix) {
+			return
+		}
+	}
+	t.Fatalf("expected rule %q on a field ending in %q, got: %+v", rule, fieldSuffix, rules)
+}
+
+// TestParseArrow_EmptyCommand_RejectedInInstall is the control the finding
+// turns on: the identical step in an ordinary lifecycle was always rejected,
+// and must stay rejected — the fix adds a key to a list, it does not change
+// what the rule does to the keys already on it.
+func TestParseArrow_EmptyCommand_RejectedInInstall(t *testing.T) {
+	m := New(time.Second, nil, 0)
+
+	_, err := m.ParseArrow(emptyCommandArrowYAML("install"))
+	if err == nil {
+		t.Fatal("expected an install run step with no command to be rejected, got nil")
+	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected ErrInvalidManifest, got: %v", err)
+	}
+	requireRuleOnField(t, err, "insufficient_coverage", "lifecycle.install[0].command")
+}
+
+// globKeyArrowYAML is the manifest §6.5 used to carry as its "BROKEN today"
+// example: every step field covered by globs alone, with no default under any
+// of them, plus an exports map covered the same way. It parses clean either
+// way — OverrideableCoverageRule is glob-aware, so a glob-only field has always
+// satisfied coverage — which is exactly what made the resolution gap silent.
+func globKeyArrowYAML() []byte {
+	return []byte(`schema: "arrow@v0"
+metadata:
+  name: glob-key-resolution
+  description: test
+targets:
+  "*":
+    exports:
+      BIN:
+        "linux/*": /usr/bin/foo
+        "darwin/*": /usr/local/bin/foo
+        "windows/*": C:\foo.exe
+    lifecycle:
+      install:
+        - type: run
+          title: Install
+          timeout: 10s
+          command:
+            "linux/*": echo linux
+            "darwin/*": echo darwin
+            "windows/*": .\install.exe
+      uninstall:
+        - type: run
+          command: echo bye
+          title: Uninstall
+          timeout: 10s
+`)
+}
+
+// TestParseArrow_StepFieldGlobKey_ResolvesPerOS is the regression for the
+// engine gap docs/spec/manifests/v0/arrow.md §6.5 used to document as
+// permanent. Exports always resolved their Overrideable keys through
+// selector.go's glob-aware resolveOverrideable; step fields went through
+// resolveStepList → Step.Resolve → Overrideable.Resolve, a plain exact map
+// lookup, so a `windows/*` key never matched `windows/amd64` and the field
+// fell through to the Default — the empty string when there was none.
+//
+// The damage was silent: a glob-only command satisfies the coverage rule, so
+// the manifest parsed clean and then handed `sh -c ""` to the shell, which
+// exits 0 and reports success. This branch worked around it twice with exact
+// keys and put a floor under `preinstalled` probes specifically; install,
+// update, execute and stop had no floor at all.
+//
+// Every concrete GOOS/GOARCH is checked, not just the host's: the bug was
+// per-target-OS by construction, and windows/amd64 and windows/arm64 are the
+// exact pair that was proven broken.
+func TestParseArrow_StepFieldGlobKey_ResolvesPerOS(t *testing.T) {
+	m := New(time.Second, nil, 0)
+	arrow, err := m.ParseArrow(globKeyArrowYAML())
+	if err != nil {
+		t.Fatalf("a glob-only field satisfies the coverage rule, so this must parse: %v", err)
+	}
+
+	want := map[domain.OS]string{
+		domain.OSWindowsAMD64: `.\install.exe`,
+		domain.OSWindowsARM64: `.\install.exe`,
+		domain.OSLinuxAMD64:   "echo linux",
+		domain.OSLinuxARM64:   "echo linux",
+		domain.OSDarwinAMD64:  "echo darwin",
+		domain.OSDarwinARM64:  "echo darwin",
+	}
+
+	for os, wantCmd := range want {
+		target, ok := arrow.Targets[os]
+		if !ok {
+			t.Fatalf("%s: the `*` target matches every OS, so one must have compiled", os)
+		}
+		run, ok := target.Lifecycle.Install[0].(step.RunStep)
+		if !ok {
+			t.Fatalf("%s: expected a run step, got %T", os, target.Lifecycle.Install[0])
+		}
+		if got := run.Command.Resolve(string(os)); got != wantCmd {
+			t.Fatalf("%s: install command resolved to %q, want %q", os, got, wantCmd)
+		}
+	}
+}
+
+// Exports resolved globs before this change and must resolve them exactly the
+// same way after it — the step fields were brought up to the exports
+// behaviour, not the other way round.
+func TestParseArrow_ExportGlobKey_StillResolvesPerOS(t *testing.T) {
+	m := New(time.Second, nil, 0)
+	arrow, err := m.ParseArrow(globKeyArrowYAML())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	want := map[domain.OS]string{
+		domain.OSWindowsAMD64: `C:\foo.exe`,
+		domain.OSWindowsARM64: `C:\foo.exe`,
+		domain.OSLinuxAMD64:   "/usr/bin/foo",
+		domain.OSDarwinARM64:  "/usr/local/bin/foo",
+	}
+
+	for os, wantBin := range want {
+		if got := arrow.Targets[os].Exports["BIN"]; got != wantBin {
+			t.Fatalf("%s: export BIN resolved to %q, want %q", os, got, wantBin)
+		}
+	}
+}
+
+// Exact keys are the case every manifest in the ecosystem already uses,
+// including the two places in this branch that worked around the gap with
+// them. An exact key must still beat a glob that also matches, and the
+// per-OS answers must be the ones the exact keys name.
+func TestParseArrow_StepFieldExactKey_BeatsGlob(t *testing.T) {
+	y := []byte(`schema: "arrow@v0"
+metadata:
+  name: exact-beats-glob
+  description: test
+targets:
+  "*":
+    lifecycle:
+      install:
+        - type: run
+          title: Install
+          timeout: 10s
+          command:
+            default: echo default
+            "*": echo star
+            "windows/*": echo any-windows
+            windows/arm64: echo exactly-arm64
+      uninstall:
+        - type: run
+          command: echo bye
+          title: Uninstall
+          timeout: 10s
+`)
+
+	m := New(time.Second, nil, 0)
+	arrow, err := m.ParseArrow(y)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	want := map[domain.OS]string{
+		domain.OSWindowsARM64: "echo exactly-arm64",
+		domain.OSWindowsAMD64: "echo any-windows",
+		domain.OSLinuxAMD64:   "echo star",
+	}
+
+	for os, wantCmd := range want {
+		run, ok := arrow.Targets[os].Lifecycle.Install[0].(step.RunStep)
+		if !ok {
+			t.Fatalf("%s: expected a run step", os)
+		}
+		if got := run.Command.Resolve(string(os)); got != wantCmd {
+			t.Fatalf("%s: install command resolved to %q, want %q", os, got, wantCmd)
+		}
+	}
+}
+
+// A field with no key matching this OS at all still falls through to the
+// Default, exactly as it always did.
+func TestParseArrow_StepFieldNoMatchingKey_FallsBackToDefault(t *testing.T) {
+	y := []byte(`schema: "arrow@v0"
+metadata:
+  name: glob-default-fallback
+  description: test
+targets:
+  "*":
+    lifecycle:
+      install:
+        - type: run
+          title: Install
+          timeout: 10s
+          command:
+            default: echo default
+            "windows/*": echo windows
+      uninstall:
+        - type: run
+          command: echo bye
+          title: Uninstall
+          timeout: 10s
+`)
+
+	m := New(time.Second, nil, 0)
+	arrow, err := m.ParseArrow(y)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	run, ok := arrow.Targets[domain.OSLinuxAMD64].Lifecycle.Install[0].(step.RunStep)
+	if !ok {
+		t.Fatalf("expected a run step")
+	}
+	if got := run.Command.Resolve(string(domain.OSLinuxAMD64)); got != "echo default" {
+		t.Fatalf("install command resolved to %q, want the default", got)
+	}
+}
+
+// Two globs of equal specificity matching the same GOOS/GOARCH is the
+// ambiguity exports have always raised. A step field must raise the same one
+// rather than picking a winner out of Go's map iteration order.
+func TestParseArrow_StepFieldAmbiguousGlobKeys_Rejected(t *testing.T) {
+	y := []byte(`schema: "arrow@v0"
+metadata:
+  name: ambiguous-step-glob
+  description: test
+targets:
+  "*":
+    lifecycle:
+      install:
+        - type: run
+          title: Install
+          timeout: 10s
+          command:
+            default: echo default
+            "windows/*": echo by-os
+            "*/amd64": echo by-arch
+      uninstall:
+        - type: run
+          command: echo bye
+          title: Uninstall
+          timeout: 10s
+`)
+
+	m := New(time.Second, nil, 0)
+	_, err := m.ParseArrow(y)
+	if err == nil {
+		t.Fatal("expected windows/amd64 to be ambiguous between windows/* and */amd64")
+	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected ErrInvalidManifest, got: %v", err)
+	}
+	var ambig *models.AmbiguousTargetError
+	if !errors.As(err, &ambig) {
+		t.Fatalf("expected *AmbiguousTargetError, got: %v", err)
+	}
+	if ambig.OS != string(domain.OSWindowsAMD64) {
+		t.Fatalf("ambiguous OS = %q, want %q", ambig.OS, domain.OSWindowsAMD64)
+	}
+}
+
+// The same ambiguity on an export has always been rejected, and still is —
+// both now travel the same resolver, so this pins that the step-field case
+// did not get its own weaker treatment.
+func TestParseArrow_ExportAmbiguousGlobKeys_StillRejected(t *testing.T) {
+	y := []byte(`schema: "arrow@v0"
+metadata:
+  name: ambiguous-export-glob
+  description: test
+targets:
+  "*":
+    exports:
+      BIN:
+        default: /usr/bin/foo
+        "windows/*": C:\by-os.exe
+        "*/amd64": C:\by-arch.exe
+    lifecycle:
+      install:
+        - type: run
+          command: echo hi
+          title: Install
+          timeout: 10s
+      uninstall:
+        - type: run
+          command: echo bye
+          title: Uninstall
+          timeout: 10s
+`)
+
+	m := New(time.Second, nil, 0)
+	_, err := m.ParseArrow(y)
+	if err == nil {
+		t.Fatal("expected windows/amd64 to be ambiguous between windows/* and */amd64")
+	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected ErrInvalidManifest, got: %v", err)
+	}
+}
+
+// fetch and signal carry Overrideable fields too, and a glob key on any of
+// them was just as broken. A single manifest covers the remaining field types
+// on the one lifecycle that can hold all three.
+func TestParseArrow_FetchAndSignalGlobKeys_Resolve(t *testing.T) {
+	y := []byte(`schema: "arrow@v0"
+metadata:
+  name: glob-all-step-types
+  description: test
+targets:
+  "*":
+    lifecycle:
+      install:
+        - type: fetch
+          title: Fetch
+          timeout: 10s
+          url:
+            "windows/*": https://example.com/tool-windows.zip
+            "linux/*": https://example.com/tool-linux.tar.gz
+            "darwin/*": https://example.com/tool-darwin.tar.gz
+          to:
+            "*": ${WORKDIR}/tool
+      execute:
+        - type: run
+          command: ./tool
+          title: Run
+          timeout: 10s
+      stop:
+        - type: signal
+          title: Stop
+          signal:
+            "windows/*": kill
+            "linux/*": graceful
+            "darwin/*": graceful
+          timeout:
+            "*": 5s
+      uninstall:
+        - type: run
+          command: echo bye
+          title: Uninstall
+          timeout: 10s
+`)
+
+	m := New(time.Second, nil, 0)
+	arrow, err := m.ParseArrow(y)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	win := arrow.Targets[domain.OSWindowsAMD64]
+	fetch, ok := win.Lifecycle.Install[0].(step.FetchStep)
+	if !ok {
+		t.Fatalf("expected a fetch step, got %T", win.Lifecycle.Install[0])
+	}
+	if got := fetch.URL.Resolve(string(domain.OSWindowsAMD64)); got != "https://example.com/tool-windows.zip" {
+		t.Fatalf("fetch url resolved to %q", got)
+	}
+	if got := fetch.To.Resolve(string(domain.OSWindowsAMD64)); got != "${WORKDIR}/tool" {
+		t.Fatalf("fetch to resolved to %q", got)
+	}
+
+	sig, ok := win.Lifecycle.Stop[0].(step.SignalStep)
+	if !ok {
+		t.Fatalf("expected a signal step, got %T", win.Lifecycle.Stop[0])
+	}
+	if got := sig.Signal.Resolve(string(domain.OSWindowsAMD64)); got != step.SignalKindKill {
+		t.Fatalf("windows signal resolved to %q, want kill", got)
+	}
+	if got := sig.Timeout.Resolve(string(domain.OSWindowsAMD64)); got != "5s" {
+		t.Fatalf("signal timeout resolved to %q", got)
+	}
+
+	lin := arrow.Targets[domain.OSLinuxAMD64]
+	linSig, ok := lin.Lifecycle.Stop[0].(step.SignalStep)
+	if !ok {
+		t.Fatalf("expected a signal step, got %T", lin.Lifecycle.Stop[0])
+	}
+	if got := linSig.Signal.Resolve(string(domain.OSLinuxAMD64)); got != step.SignalKindGraceful {
+		t.Fatalf("linux signal resolved to %q, want graceful", got)
+	}
+}
+
+// A custom method's steps go through the same resolver as a lifecycle's, and
+// were broken in the same way.
+func TestParseArrow_MethodStepGlobKey_Resolves(t *testing.T) {
+	y := []byte(`schema: "arrow@v0"
+metadata:
+  name: glob-method-step
+  description: test
+targets:
+  "*":
+    lifecycle:
+      install:
+        - type: run
+          command: echo hi
+          title: Install
+          timeout: 10s
+      uninstall:
+        - type: run
+          command: echo bye
+          title: Uninstall
+          timeout: 10s
+    methods:
+      backup:
+        available_in: [ready]
+        steps:
+          - type: run
+            title: Backup
+            timeout: 10s
+            command:
+              "windows/*": .\backup.exe
+              "linux/*": ./backup
+              "darwin/*": ./backup
+`)
+
+	m := New(time.Second, nil, 0)
+	arrow, err := m.ParseArrow(y)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	run, ok := arrow.Targets[domain.OSWindowsARM64].Methods["backup"].Steps[0].(step.RunStep)
+	if !ok {
+		t.Fatalf("expected a run step")
+	}
+	if got := run.Command.Resolve(string(domain.OSWindowsARM64)); got != `.\backup.exe` {
+		t.Fatalf("method step command resolved to %q", got)
+	}
+}
+
+func TestParseCollection_ExplicitAUID_OverridesLastSegment(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Essentials", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Path: "tools/legacy/runtime-binary", AUID: "appimage-runtime"},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	ns := domain.Namespace("github.com/rabbytesoftware/quiver.essentials")
+	manifest, err := m.ParseCollection([]byte("any"), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := domain.Namespace("github.com/rabbytesoftware/quiver.essentials/appimage-runtime")
+	if manifest.Arrows[0].Namespace != want {
+		t.Errorf("Namespace = %q, want %q", manifest.Arrows[0].Namespace, want)
+	}
+	if manifest.Arrows[0].SourcePath != "tools/legacy/runtime-binary" {
+		t.Errorf("SourcePath = %q, want tools/legacy/runtime-binary", manifest.Arrows[0].SourcePath)
+	}
+}
+
+func TestParseCollection_SourcePath_SetForImplicitAUID(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Gaming", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Path: "servers/cs2"},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	manifest, err := m.ParseCollection([]byte("any"), domain.Namespace("github.com/char2cs/gaming.quiver"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if manifest.Arrows[0].SourcePath != "servers/cs2" {
+		t.Errorf("SourcePath = %q, want servers/cs2", manifest.Arrows[0].SourcePath)
+	}
+}
+
+func TestParseCollection_SourcePath_EmptyForExternalArrow(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Gaming", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Namespace: "github.com/other/pkg"},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	manifest, err := m.ParseCollection([]byte("any"), domain.Namespace("github.com/char2cs/gaming.quiver"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if manifest.Arrows[0].SourcePath != "" {
+		t.Errorf("SourcePath = %q, want empty for an external arrow", manifest.Arrows[0].SourcePath)
+	}
+}
+
+func TestParseCollection_AuthoredPathRef_StrippedFromSourcePath(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Gaming", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Path: "servers/cs2@v1.0.0"},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	manifest, err := m.ParseCollection([]byte("any"), domain.Namespace("github.com/char2cs/gaming.quiver@v2.0.0"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if manifest.Arrows[0].SourcePath != "servers/cs2" {
+		t.Errorf("SourcePath = %q, want servers/cs2 (ref suffix stripped)", manifest.Arrows[0].SourcePath)
+	}
+}
+
+func TestResolveArrow_QuiverHosted_ResolvesViaOwningCollection(t *testing.T) {
+	precompiled := map[string]models.PrecompiledTarget{
+		"*": {
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "10s", true)},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "10s", true)},
+			},
+		},
+	}
+	m := &manifold{
+		rsv: &stubResolver{
+			quiverData:      []byte("collection bytes"),
+			arrowAtData:     []byte("arrow bytes"),
+			arrowAtFilename: "tools/appimage-runtime.yaml",
+		},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Essentials", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Path: "tools/appimage-runtime", AUID: "appimage-runtime"},
+			},
+			arrow:       &domain.Arrow{ArrowMeta: domain.ArrowMeta{Name: "appimage-runtime"}},
+			precompiled: precompiled,
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	ns := domain.Namespace("github.com/rabbytesoftware/quiver.essentials/appimage-runtime")
+	arrow, raw, filename, err := m.ResolveArrow(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if arrow.Name != "appimage-runtime" {
+		t.Errorf("Name = %q, want appimage-runtime", arrow.Name)
+	}
+	if string(raw) != "arrow bytes" {
+		t.Errorf("raw = %q, want arrow bytes", raw)
+	}
+	if filename != "tools/appimage-runtime.yaml" {
+		t.Errorf("filename = %q, want tools/appimage-runtime.yaml", filename)
+	}
+	stub := m.rsv.(*stubResolver)
+	if stub.arrowAtPath != "tools/appimage-runtime" {
+		t.Errorf("ResolveArrowAt called with path %q, want tools/appimage-runtime", stub.arrowAtPath)
+	}
+}
+
+func TestResolveArrow_QuiverHosted_ArrowNotInCollection_ReturnsError(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{quiverData: []byte("collection bytes")},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Essentials", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Path: "tools/other-tool"},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	ns := domain.Namespace("github.com/rabbytesoftware/quiver.essentials/appimage-runtime")
+	_, _, _, err := m.ResolveArrow(context.Background(), ns)
+	if !errors.Is(err, ErrArrowNotInCollection) {
+		t.Fatalf("expected ErrArrowNotInCollection, got %v", err)
+	}
+}
+
+func TestResolveArrow_QuiverHosted_ExternalEntrySameNamespace_DoesNotMatch(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{quiverData: []byte("collection bytes")},
+		trs: &stubTranslator{
+			quiver: &domain.Collection{
+				Meta: domain.CollectionMeta{Name: "Essentials", Description: "desc"},
+			},
+			quiverEntries: []domain.CollectionArrowEntry{
+				{Namespace: "github.com/rabbytesoftware/quiver.essentials/appimage-runtime"},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	ns := domain.Namespace("github.com/rabbytesoftware/quiver.essentials/appimage-runtime")
+	_, _, _, err := m.ResolveArrow(context.Background(), ns)
+	if !errors.Is(err, ErrArrowNotInCollection) {
+		t.Fatalf("expected ErrArrowNotInCollection, got %v", err)
+	}
+	stub := m.rsv.(*stubResolver)
+	if stub.arrowAtPath != "" {
+		t.Errorf("ResolveArrowAt called with path %q, want it never called", stub.arrowAtPath)
+	}
+}
+
+func TestResolveArrow_QuiverHosted_CollectionResolveFails_ReturnsError(t *testing.T) {
+	collErr := errors.New("network down")
+	m := &manifold{
+		rsv: &stubResolver{quiverErr: collErr},
+		trs: &stubTranslator{},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	ns := domain.Namespace("github.com/rabbytesoftware/quiver.essentials/appimage-runtime")
+	_, _, _, err := m.ResolveArrow(context.Background(), ns)
+	if !errors.Is(err, collErr) {
+		t.Fatalf("expected wrapped collErr, got %v", err)
+	}
+}
+
+func TestResolveArrow_NonQuiverHosted_SkipsCollectionLookup(t *testing.T) {
+	m := &manifold{
+		rsv: &stubResolver{arrowData: []byte("test"), arrowFilename: "ARROW.md"},
+		trs: &stubTranslator{
+			arrow: &domain.Arrow{ArrowMeta: domain.ArrowMeta{Name: "my-arrow"}},
+			precompiled: map[string]models.PrecompiledTarget{
+				"*": {
+					Lifecycle: domain.TargetLifecycle{
+						Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "10s", true)},
+						Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "10s", true)},
+					},
+				},
+			},
+		},
+		cmp: compiler.New(),
+		rls: ruleset.New(),
+	}
+	_, _, filename, err := m.ResolveArrow(context.Background(), domain.Namespace("github.com/user/repo"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if filename != "ARROW.md" {
+		t.Errorf("filename = %q, want ARROW.md", filename)
+	}
+}
+
+// TestListChannels_BucketsTagsCorrectly_ExcludesDefaultBranchWhenTagsExist
+// proves both that tag bucketing itself is correct AND that the default
+// branch is never listed once the repository has any tag at all — even a
+// pointer-style one like "nightly" here, with no ordered channel of its
+// own. A repository's moving default branch is only ever a fallback for
+// when it has nothing else to offer; live-testing against quiver.core's own
+// real GitHub repo (which has both real releases and a "develop" default
+// branch) caught this listing the branch alongside real channels, which is
+// wrong — this test pins the fix. See TestListChannels_NoTagsAtAll_FallsBackToDefaultBranch
+// for the genuinely-empty-repo case where the branch IS still included.
+func TestListChannels_BucketsTagsCorrectly_ExcludesDefaultBranchWhenTagsExist(t *testing.T) {
+	crs := &stubConstraintResolver{
+		listTags: []string{"v1.4.0", "v1.3.0", "v1.5.0-rc1", "v1.5.0-rc2", "nightly"},
+		branch:   "main",
+	}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	got, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/r"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	byName := make(map[string]ChannelInfo)
+	for _, c := range got {
+		byName[c.Name] = c
+	}
+
+	stable, ok := byName["stable"]
+	if !ok {
+		t.Fatal("missing stable channel")
+	}
+	if stable.Kind != "ordered" || stable.Latest != "v1.4.0" || stable.Count != 2 {
+		t.Errorf("stable = %+v, want kind=ordered latest=v1.4.0 count=2", stable)
+	}
+
+	rc, ok := byName["rc"]
+	if !ok {
+		t.Fatal("missing rc channel")
+	}
+	if rc.Kind != "ordered" || rc.Latest != "v1.5.0-rc2" || rc.Count != 2 {
+		t.Errorf("rc = %+v, want kind=ordered latest=v1.5.0-rc2 count=2", rc)
+	}
+	if got, want := rc.Members, []string{"v1.5.0-rc2", "v1.5.0-rc1"}; !slices.Equal(got, want) {
+		t.Errorf("rc.Members = %v, want %v", got, want)
+	}
+
+	nightlyTag, ok := byName["nightly"]
+	if !ok {
+		t.Fatal("missing nightly pointer channel from the tag")
+	}
+	if nightlyTag.Kind != "pointer" || nightlyTag.Latest != "nightly" {
+		t.Errorf("nightly tag channel = %+v, want kind=pointer latest=nightly", nightlyTag)
+	}
+
+	if _, ok := byName["main"]; ok {
+		t.Error("default branch \"main\" must not be listed: the repository already has tags (nightly, plus real releases)")
+	}
+
+	if len(got) == 0 || got[0].Name != StableChannel {
+		t.Errorf("got[0].Name = %q, want stable first", got[0].Name)
+	}
+}
+
+// TestListChannels_NoTagsAtAll_FallsBackToDefaultBranch is the genuine
+// fallback case: a repository with zero tags of any kind has nothing else
+// to offer, so its default branch is listed as the sole pointer channel.
+func TestListChannels_NoTagsAtAll_FallsBackToDefaultBranch(t *testing.T) {
+	crs := &stubConstraintResolver{
+		listTags: nil,
+		branch:   "develop",
+	}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	got, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/r"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 (just the default branch), got %+v", len(got), got)
+	}
+	if got[0].Name != "develop" || got[0].Kind != "pointer" || got[0].Latest != "develop" {
+		t.Errorf("got[0] = %+v, want the default branch as the sole pointer channel", got[0])
+	}
+}
+
+func TestListChannels_RealWorldPrefixStyleConvention(t *testing.T) {
+	// quiver.core's own actual, live GitHub tags — the exact set that
+	// exposed this bug in a real smoke test against the real repo. Do not
+	// simplify this fixture back to synthetic suffix-style tags.
+	crs := &stubConstraintResolver{
+		listTags: []string{
+			"stable-26.5.1", "stable-26.5",
+			"beta-26.5", "beta-26.5-1", "beta-26.5-2", "beta-26.5-3", "beta-26.5-4",
+			"nightly-latest",
+		},
+	}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	got, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/r"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// This fixture stubs no default branch (stubConstraintResolver.branch is
+	// the zero value ""), so DefaultBranch returns ("", "", nil) and
+	// ListChannels's branch != "" guard skips adding a branch pointer
+	// channel. Total is exactly 3: the "stable" and "beta" ordered channels,
+	// plus "nightly-latest" as the one leftover pointer tag.
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3 (stable, beta, nightly-latest) — got %+v", len(got), got)
+	}
+
+	byName := make(map[string]ChannelInfo)
+	for _, c := range got {
+		byName[c.Name] = c
+	}
+
+	stable, ok := byName["stable"]
+	if !ok {
+		t.Fatal("missing stable channel")
+	}
+	if stable.Count != 2 {
+		t.Errorf("stable.Count = %d, want 2 (beta-26.5 must NOT be counted as stable)", stable.Count)
+	}
+	for _, m := range stable.Members {
+		if m == "beta-26.5" {
+			t.Errorf("stable.Members contains beta-26.5, want it excluded")
+		}
+	}
+
+	beta, ok := byName["beta"]
+	if !ok {
+		t.Fatal("missing beta channel — the 5 beta-26.5* tags must group into one channel, not fragment into singleton pointer channels")
+	}
+	if beta.Count != 5 {
+		t.Errorf("beta.Count = %d, want 5", beta.Count)
+	}
+
+	// A tag consumed as a member of an ordered channel must never ALSO
+	// appear as its own standalone pointer channel — that would duplicate
+	// it in the result under two different Names.
+	for _, dup := range []string{"beta-26.5-1", "beta-26.5-2", "beta-26.5-3", "beta-26.5-4"} {
+		if _, ok := byName[dup]; ok {
+			t.Errorf("byName[%q] exists as a standalone pointer channel, want it absent (already counted inside beta.Members)", dup)
+		}
+	}
+}
+
+// TestListChannels_DeterministicOrderAcrossRepeatedCalls guards against Go's
+// randomized map iteration leaking into ListChannels's result order.
+// ListChannels used to build its result by ranging over an internal
+// map[string][]string bucket, so the returned slice's order was empirically
+// observed to differ across otherwise-identical calls -- a real bug, since
+// this endpoint exists specifically to back a UI dropdown that needs stable
+// ordering. Map iteration randomization is probabilistic, not guaranteed on
+// any single run, so this calls ListChannels many times on the same input
+// and requires every result to match the first one exactly, in order.
+func TestListChannels_DeterministicOrderAcrossRepeatedCalls(t *testing.T) {
+	crs := &stubConstraintResolver{
+		listTags: []string{"v1.4.0", "v1.3.0", "v1.5.0-rc1", "v1.5.0-rc2", "nightly"},
+		branch:   "main",
+	}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	const runs = 20
+	var first []ChannelInfo
+	for i := 0; i < runs; i++ {
+		got, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/r"))
+		if err != nil {
+			t.Fatalf("run %d: unexpected error: %v", i, err)
+		}
+		if i == 0 {
+			first = got
+			if len(first) == 0 || first[0].Name != StableChannel {
+				t.Fatalf("run %d: stable must be first, got %+v", i, first)
+			}
+			continue
+		}
+		if !reflect.DeepEqual(first, got) {
+			t.Fatalf("run %d: order differs from run 0\nrun 0: %+v\nrun %d: %+v", i, first, i, got)
+		}
+	}
+}
+
+func TestListChannels_NoDefaultBranch_StillReturnsTagChannels(t *testing.T) {
+	crs := &stubConstraintResolver{
+		listTags:  []string{"v1.0.0"},
+		branchErr: errors.New("no HEAD symref"),
+	}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	got, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/r"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "stable" {
+		t.Errorf("got %+v, want exactly one stable channel", got)
+	}
+}
+
+func TestListChannels_ListTagsError_Propagates(t *testing.T) {
+	listErr := errors.New("dial tcp: connection refused")
+	crs := &stubConstraintResolver{listTagsErr: listErr}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	_, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/r"))
+	if !errors.Is(err, listErr) {
+		t.Fatalf("err = %v, want wrapping %v", err, listErr)
+	}
+}
+
+// TestListChannels_ListTagsError_NotCached proves a failed lookup is never
+// cached: a second call, even with the same failing resolver, must still
+// attempt ListTags again rather than silently reusing an error result (in
+// this case there is nothing to reuse, but the important thing is that
+// ListTags is still called).
+func TestListChannels_ListTagsError_NotCached(t *testing.T) {
+	listErr := errors.New("dial tcp: connection refused")
+	crs := &stubConstraintResolver{listTagsErr: listErr}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+	ns := domain.Namespace("github.com/u/r")
+
+	_, err1 := m.ListChannels(context.Background(), ns)
+	_, err2 := m.ListChannels(context.Background(), ns)
+
+	if !errors.Is(err1, listErr) || !errors.Is(err2, listErr) {
+		t.Fatalf("expected both calls to fail with %v, got %v and %v", listErr, err1, err2)
+	}
+	if crs.listTagsCall != 2 {
+		t.Errorf("listTagsCall = %d, want 2 (an error must never be cached)", crs.listTagsCall)
+	}
+}
+
+// TestListChannels_SecondCall_ServedFromCache is the actual regression
+// guard for the "ListChannels hit twice or more per page view" report: a
+// second call for the same namespace must not touch ListTags or
+// DefaultBranch again, and must return the same result.
+func TestListChannels_SecondCall_ServedFromCache(t *testing.T) {
+	// No tags at all, so the default-branch fallback is exercised too (per
+	// the "exclude default branch once any tag exists" fix, DefaultBranch
+	// is skipped whenever listTags is non-empty) — this way both
+	// call-count assertions below are meaningful.
+	crs := &stubConstraintResolver{
+		listTags: nil,
+		branch:   "main",
+	}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+	ns := domain.Namespace("github.com/u/r")
+
+	first, err := m.ListChannels(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	second, err := m.ListChannels(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("second call = %+v, want identical to first %+v", second, first)
+	}
+	if crs.listTagsCall != 1 {
+		t.Errorf("listTagsCall = %d, want 1 (second call must be served from cache)", crs.listTagsCall)
+	}
+	if crs.branchCall != 1 {
+		t.Errorf("branchCall = %d, want 1 (second call must be served from cache)", crs.branchCall)
+	}
+}
+
+// TestListChannels_DifferentNamespaces_CachedIndependently proves the cache
+// is keyed per namespace, not a single global slot.
+func TestListChannels_DifferentNamespaces_CachedIndependently(t *testing.T) {
+	crs := &stubConstraintResolver{listTags: []string{"v1.0.0"}}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	if _, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/one")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/two")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if crs.listTagsCall != 2 {
+		t.Errorf("listTagsCall = %d, want 2 (one live call per distinct namespace)", crs.listTagsCall)
+	}
+}
+
+func TestListChannels_SnapshotError_Propagates(t *testing.T) {
+	refsErr := errors.New("dial tcp: connection refused")
+	crs := &stubConstraintResolver{refsErr: refsErr}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	_, err := m.ListChannels(context.Background(), domain.Namespace("github.com/u/r"))
+	if !errors.Is(err, refsErr) {
+		t.Errorf("err = %v, want %v", err, refsErr)
+	}
+}
+
+// TestListChannels_CacheExpiresAfterTTL_RefetchesLive proves the cache
+// eventually re-checks the remote: past its TTL, a third call must hit
+// ListTags again, and must pick up a tag added in the meantime.
+func TestListChannels_CacheExpiresAfterTTL_RefetchesLive(t *testing.T) {
+	const testTTL = 24 * time.Hour
+	crs := &stubConstraintResolver{listTags: []string{"v1.0.0"}}
+	now := time.Now()
+	clock := &fakeClock{now: now}
+	m := &manifold{
+		trs:       translator.NewTranslator(),
+		cmp:       compiler.New(),
+		rls:       ruleset.New(),
+		snapshots: versioning.New(crs, clock.Now, testTTL),
+	}
+	ns := domain.Namespace("github.com/u/r")
+
+	first, err := m.ListChannels(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(first) != 1 || first[0].Latest != "v1.0.0" {
+		t.Fatalf("first = %+v, want a single stable channel at v1.0.0", first)
+	}
+
+	// Still within TTL: served from cache, unaffected by the new tag.
+	crs.listTags = []string{"v1.0.0", "v2.0.0"}
+	clock.now = now.Add(time.Hour)
+	cached, err := m.ListChannels(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cached) != 1 || cached[0].Latest != "v1.0.0" {
+		t.Fatalf("cached = %+v, want the stale-but-still-fresh v1.0.0 result", cached)
+	}
+	if crs.listTagsCall != 1 {
+		t.Errorf("listTagsCall = %d, want 1 (still within TTL)", crs.listTagsCall)
+	}
+
+	// Past TTL: must refetch and pick up the new tag.
+	clock.now = now.Add(testTTL + time.Minute)
+	fresh, err := m.ListChannels(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fresh) != 1 || fresh[0].Latest != "v2.0.0" {
+		t.Fatalf("fresh = %+v, want the refetched v2.0.0 result", fresh)
+	}
+	if crs.listTagsCall != 2 {
+		t.Errorf("listTagsCall = %d, want 2 (past TTL must refetch)", crs.listTagsCall)
+	}
+}
+
+// fakeClock lets a test move a manifold's clock forward deterministically,
+// to test cache-TTL expiry without a real sleep.
+type fakeClock struct{ now time.Time }
+
+func (c *fakeClock) Now() time.Time { return c.now }
+
+func commitManifold(
+	rsv *stubResolver,
+	trs *stubTranslator,
+) *manifold {
+	if trs == nil {
+		trs = &stubTranslator{
+			arrow: &domain.Arrow{ArrowMeta: domain.ArrowMeta{Name: "my-arrow"}},
+			precompiled: map[string]models.PrecompiledTarget{
+				"*": {
+					Lifecycle: domain.TargetLifecycle{
+						Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "10s", true)},
+						Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "10s", true)},
+					},
+				},
+			},
+		}
+	}
+	return &manifold{rsv: rsv, trs: trs, cmp: compiler.New(), rls: ruleset.New()}
+}
+
+func TestResolveArrowAtCommit_FetchesAtTheCommitAndStampsTheOriginalNamespace(t *testing.T) {
+	const commit = "9dd0b183177a64ec71a2672d1cd7cf0c70bb4877"
+	rsv := &stubResolver{arrowData: []byte("test"), arrowFilename: "ARROW.md"}
+	m := commitManifold(rsv, nil)
+	ns := domain.Namespace("github.com/u/r@stable")
+
+	arrow, raw, filename, err := m.ResolveArrowAtCommit(context.Background(), ns, "v1.2.0", commit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := []domain.Namespace{ns.WithRef(commit)}; !slices.Equal(rsv.arrowRequests, want) {
+		t.Errorf("requests = %v, want %v", rsv.arrowRequests, want)
+	}
+	if arrow.Namespace != ns {
+		t.Errorf("Namespace = %q, want %q", arrow.Namespace, ns)
+	}
+	if string(raw) != "test" || filename != "ARROW.md" {
+		t.Errorf("raw = %q, filename = %q", raw, filename)
+	}
+}
+
+// A clone-only host serves no SHA, and a selector that is not itself a git
+// ref names nothing there: the fallback must fetch the resolved ref.
+func TestResolveArrowAtCommit_CommitRefused_FallsBackToTheResolvedRef(t *testing.T) {
+	const commit = "9dd0b18"
+	testCases := []struct {
+		name string
+		ns   domain.Namespace
+		ref  string
+	}{
+		{name: "channel", ns: "git.example.org/u/r@stable", ref: "stable-26.6.0"},
+		{name: "constraint", ns: "git.example.org/u/r@v1.*", ref: "v1.3.0"},
+		{name: "pointer tag", ns: "git.example.org/u/r@nightly", ref: "nightly"},
+		{name: "refless identity", ns: "git.example.org/u/r", ref: "v2.0.0"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			rsv := &stubResolver{arrowFn: func(requested domain.Namespace) ([]byte, string, error) {
+				if requested.Ref() != tc.ref {
+					return nil, "", resolvers.ErrFetchFailed
+				}
+				return []byte("test"), "ARROW.md", nil
+			}}
+			m := commitManifold(rsv, nil)
+
+			arrow, raw, _, err := m.ResolveArrowAtCommit(context.Background(), tc.ns, tc.ref, commit)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			want := []domain.Namespace{tc.ns.WithRef(commit), tc.ns.WithRef(tc.ref)}
+			if !slices.Equal(rsv.arrowRequests, want) {
+				t.Errorf("requests = %v, want %v", rsv.arrowRequests, want)
+			}
+			if arrow.Namespace != tc.ns {
+				t.Errorf("Namespace = %q, want %q", arrow.Namespace, tc.ns)
+			}
+			if string(raw) != "test" {
+				t.Errorf("raw = %q", raw)
+			}
+		})
+	}
+}
+
+func TestResolveArrowAtCommit_NoSeparateRefToFallBackTo_FetchesOnce(t *testing.T) {
+	const commit = "9dd0b18"
+	testCases := []struct {
+		name string
+		ref  string
+	}{
+		{name: "no resolved ref", ref: ""},
+		{name: "the resolved ref is the commit", ref: commit},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			rsv := &stubResolver{arrowErr: resolvers.ErrFetchFailed}
+			m := commitManifold(rsv, nil)
+			ns := domain.Namespace("git.example.org/u/r@" + commit)
+
+			_, _, _, err := m.ResolveArrowAtCommit(context.Background(), ns, tc.ref, commit)
+			if !errors.Is(err, resolvers.ErrFetchFailed) {
+				t.Fatalf("err = %v, want ErrFetchFailed", err)
+			}
+			if want := []domain.Namespace{ns.WithRef(commit)}; !slices.Equal(rsv.arrowRequests, want) {
+				t.Errorf("requests = %v, want %v", rsv.arrowRequests, want)
+			}
+		})
+	}
+}
+
+func TestResolveArrowAtCommit_BothFetchesFail_ReturnsTheError(t *testing.T) {
+	rsv := &stubResolver{arrowErr: resolvers.ErrNotFound}
+	m := commitManifold(rsv, nil)
+	ns := domain.Namespace("github.com/u/r@stable")
+
+	_, _, _, err := m.ResolveArrowAtCommit(context.Background(), ns, "v1.0.0", "9dd0b18")
+	if !errors.Is(err, resolvers.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if want := []domain.Namespace{ns.WithRef("9dd0b18"), ns.WithRef("v1.0.0")}; !slices.Equal(rsv.arrowRequests, want) {
+		t.Errorf("requests = %v, want the commit then the resolved ref", rsv.arrowRequests)
+	}
+}
+
+func TestResolveArrowAtCommit_InvalidManifestAtCommit_DoesNotFallBack(t *testing.T) {
+	rsv := &stubResolver{arrowData: []byte("test"), arrowFilename: "ARROW.md"}
+	m := commitManifold(rsv, &stubTranslator{arrowErr: errors.New("bad yaml")})
+
+	_, _, _, err := m.ResolveArrowAtCommit(context.Background(), domain.Namespace("github.com/u/r@v1.0.0"), "v1.0.0", "9dd0b18")
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("err = %v, want ErrInvalidManifest", err)
+	}
+	if len(rsv.arrowRequests) != 1 {
+		t.Errorf("requests = %v, want only the commit", rsv.arrowRequests)
+	}
+}
+
+func TestFreshSnapshot_DelegatesToVersioning(t *testing.T) {
+	snap := domain.RefSnapshot{Tags: map[string]string{"v1.0.0": "c100"}}
+	crs := &stubConstraintResolver{refs: &snap}
+	m := NewWithResolvers(&stubResolver{}, crs, nil)
+
+	for range 2 {
+		got, err := m.FreshSnapshot(context.Background(), domain.Namespace("github.com/u/r"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !reflect.DeepEqual(got, snap) {
+			t.Fatalf("FreshSnapshot = %+v, want %+v", got, snap)
+		}
+	}
+	if crs.refsCall != 2 {
+		t.Errorf("refsCall = %d, want 2 (every fresh read goes live)", crs.refsCall)
+	}
+}
+
+func TestVersioningReExports_Delegate(t *testing.T) {
+	snap := domain.RefSnapshot{Tags: map[string]string{"v1.0.0": "c100", "v1.1.0": "c110"}}
+	resolved := domain.Resolved{Ref: "v1.0.0", Commit: "c100"}
+	kind := domain.SelectorOrderedChannel
+
+	gotKind, gotErr := ClassifySelector("stable", snap)
+	wantKind, wantErr := versioning.ClassifySelector("stable", snap)
+	assertSame(t, "ClassifySelector", []any{gotKind, gotErr}, []any{wantKind, wantErr})
+
+	gotChannel, gotErr := DefaultChannel(snap)
+	wantChannel, wantErr := versioning.DefaultChannel(snap)
+	assertSame(t, "DefaultChannel", []any{gotChannel, gotErr}, []any{wantChannel, wantErr})
+
+	gotCommit, gotOK := RefCommit(kind, "stable", "v1.0.0", snap)
+	wantCommit, wantOK := versioning.RefCommit(kind, "stable", "v1.0.0", snap)
+	assertSame(t, "RefCommit", []any{gotCommit, gotOK}, []any{wantCommit, wantOK})
+
+	assertSame(t, "HasEmptyComponent", []any{HasEmptyComponent("a//b")}, []any{versioning.HasEmptyComponent("a//b")})
+
+	gotTarget, gotErr := Target(kind, "stable", snap)
+	wantTarget, wantErr := versioning.Target(kind, "stable", snap)
+	assertSame(t, "Target", []any{gotTarget, gotErr}, []any{wantTarget, wantErr})
+
+	gotTarget, gotOutdated, gotErr := Drift(kind, "stable", resolved, snap)
+	wantTarget, wantOutdated, wantErr := versioning.Drift(kind, "stable", resolved, snap)
+	assertSame(t, "Drift", []any{gotTarget, gotOutdated, gotErr}, []any{wantTarget, wantOutdated, wantErr})
+
+	gotTarget, gotErr = Admit(kind, "stable", "v1.0.0", snap)
+	wantTarget, wantErr = versioning.Admit(kind, "stable", "v1.0.0", snap)
+	assertSame(t, "Admit", []any{gotTarget, gotErr}, []any{wantTarget, wantErr})
+}
+
+func assertSame(
+	t *testing.T,
+	name string,
+	got []any,
+	want []any,
+) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("%s = %v, want %v", name, got, want)
 	}
 }

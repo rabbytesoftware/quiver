@@ -1,0 +1,78 @@
+package discovery
+
+import (
+	"errors"
+	"time"
+
+	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/provider"
+)
+
+// Reasons a provider contributed nothing. A rate limit is temporary and carries
+// how long to wait; an unauthorized host needs the user to fix a token.
+const (
+	ReasonRateLimited  = "rate_limited"
+	ReasonUnauthorized = "unauthorized"
+	ReasonError        = "error"
+	ReasonUnsupported  = "unsupported"
+)
+
+const (
+	PassTagged   = "tagged"
+	PassUnmarked = "unmarked"
+	PassBrowse   = "browse"
+)
+
+// Outcome summarises one discovery pass. Found counts the deduplicated
+// candidates considered, Verified those that proved to be arrows, and Skipped
+// those that did not.
+//
+// Order is set by a browse pass only: the candidates it kept, as bare
+// namespaces in the order the hosts ranked them.
+type Outcome struct {
+	Found     int
+	Verified  int
+	Skipped   int
+	Providers []ProviderOutcome
+	Order     []domain.Namespace
+}
+
+// ProviderOutcome is what one host contributed. Every provider failing is a
+// populated outcome, not an error: the caller must be able to say which host
+// failed and why rather than being shown a bare failure.
+type ProviderOutcome struct {
+	Host       string
+	OK         bool
+	Returned   int
+	Reason     string
+	RetryAfter time.Duration
+	Pass       string
+}
+
+func outcomeOf(
+	host string,
+	candidates []provider.Candidate,
+	err error,
+) ProviderOutcome {
+	if err == nil {
+		return ProviderOutcome{Host: host, OK: true, Returned: len(candidates)}
+	}
+	if errors.Is(err, provider.ErrSearchUnsupported) {
+		return ProviderOutcome{Host: host, OK: true, Reason: ReasonUnsupported}
+	}
+
+	outcome := ProviderOutcome{Host: host, Reason: ReasonError}
+
+	var limited *provider.RateLimitedError
+	if errors.As(err, &limited) {
+		outcome.Reason = ReasonRateLimited
+		outcome.RetryAfter = limited.RetryAfter
+		return outcome
+	}
+
+	var unauthorized *provider.UnauthorizedError
+	if errors.As(err, &unauthorized) {
+		outcome.Reason = ReasonUnauthorized
+	}
+	return outcome
+}

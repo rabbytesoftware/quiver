@@ -10,8 +10,11 @@ import (
 // Wizard is a test double for wizard.Wizard.
 type Wizard struct {
 	StartFn        func(ctx context.Context, req wizard.RunRequest) wizard.Execution
+	ProbeFn        func(ctx context.Context, req wizard.RunRequest) error
 	ShutdownFn     func(ctx context.Context) error
 	ProcessAliveFn func(pid int) bool
+	PathStatusFn   func(ctx context.Context) (wizard.PathStatus, error)
+	SetupPathFn    func(ctx context.Context) (wizard.PathStatus, error)
 	// BlockStart, when non-nil, blocks Start until the channel is closed.
 	BlockStart chan struct{}
 }
@@ -29,6 +32,18 @@ func (m *Wizard) Start(
 	return NewDoneExecution(domainRuntime.ExecutionOutcomeSuccess)
 }
 
+// Probe reports a successful detection unless ProbeFn says otherwise, matching
+// the rest of this double's "succeeds by default" shape.
+func (m *Wizard) Probe(
+	ctx context.Context,
+	req wizard.RunRequest,
+) error {
+	if m.ProbeFn != nil {
+		return m.ProbeFn(ctx, req)
+	}
+	return nil
+}
+
 func (m *Wizard) Shutdown(ctx context.Context) error {
 	if m.ShutdownFn != nil {
 		return m.ShutdownFn(ctx)
@@ -41,6 +56,24 @@ func (m *Wizard) ProcessAlive(pid int) bool {
 		return m.ProcessAliveFn(pid)
 	}
 	return false
+}
+
+func (m *Wizard) PathStatus(
+	ctx context.Context,
+) (wizard.PathStatus, error) {
+	if m.PathStatusFn != nil {
+		return m.PathStatusFn(ctx)
+	}
+	return wizard.PathStatus{}, nil
+}
+
+func (m *Wizard) SetupPath(
+	ctx context.Context,
+) (wizard.PathStatus, error) {
+	if m.SetupPathFn != nil {
+		return m.SetupPathFn(ctx)
+	}
+	return wizard.PathStatus{}, nil
 }
 
 // doneExecution is an already-finished Execution used by the mock.

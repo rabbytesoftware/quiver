@@ -6,29 +6,37 @@ import (
 )
 
 type ArrowDTO struct {
-	Namespace     string            `json:"namespace"`
-	Name          string            `json:"name"`
-	Version       string            `json:"version"`
-	Description   string            `json:"description"`
-	Tags          []string          `json:"tags"`
-	Media         domain.ArrowMedia `json:"media"`
-	UserInstalled bool              `json:"user_installed"`
+	Namespace     string            `json:"namespace" yaml:"namespace"`
+	Name          string            `json:"name" yaml:"name"`
+	Description   string            `json:"description" yaml:"description"`
+	Tags          []string          `json:"tags" yaml:"tags"`
+	Media         domain.ArrowMedia `json:"media" yaml:"media"`
+	UserInstalled bool              `json:"user_installed" yaml:"user_installed"`
+	LastUsedAt    string            `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
+	Origin        string            `json:"origin" yaml:"origin"`
+	Inference     *InferenceDTO     `json:"inference,omitempty" yaml:"inference,omitempty"`
 }
 
 func ArrowDTOFrom(a domain.Arrow) ArrowDTO {
+	lastUsedAt := ""
+	if !a.LastUsedAt.IsZero() {
+		lastUsedAt = a.LastUsedAt.Format("2006-01-02T15:04:05Z07:00")
+	}
 	return ArrowDTO{
 		Namespace:     string(a.Namespace),
 		Name:          a.Name,
-		Version:       a.Version,
 		Description:   a.Description,
 		Tags:          a.Tags,
 		Media:         a.Media,
 		UserInstalled: a.UserInstalled,
+		LastUsedAt:    lastUsedAt,
+		Origin:        a.Origin(),
+		Inference:     InferenceDTOFrom(a.Generator),
 	}
 }
 
 type arrowEventDTO struct {
-	Event string `json:"event"`
+	Event string `json:"event" yaml:"event"`
 	ArrowDTO
 }
 

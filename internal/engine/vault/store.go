@@ -2,10 +2,12 @@ package vault
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,12 +16,22 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 )
 
+const (
+	defaultTTL      = 24 * time.Hour
+	defaultIndexTTL = 720 * time.Hour
+	indexFilename   = "index.db"
+)
+
 type store struct {
 	vaultPath      string
 	namespacesPath string
 	ttl            time.Duration
+	indexTTL       time.Duration
 	sweepInterval  time.Duration
 	clock          func() time.Time
+	idx            *index
+	idxMu          sync.Mutex
+	closed         bool
 	mu             sync.RWMutex
 	locks          map[string]*sync.Mutex
 }
@@ -28,7 +40,7 @@ func New(
 	vaultPath string,
 	namespacesPath string,
 	ttl time.Duration,
-) Vault {
+) (Vault, error) {
 	if vaultPath == "" {
 		vaultPath = metadata.GetVaultPath()
 	}
@@ -36,7 +48,7 @@ func New(
 		namespacesPath = metadata.GetNamespacesPath()
 	}
 	if ttl == 0 {
-		ttl = 24 * time.Hour
+		ttl = defaultTTL
 		if d, err := time.ParseDuration(config.GetVault().TTL); err == nil && d > 0 {
 			ttl = d
 		}
@@ -53,7 +65,7 @@ func NewWithClock(
 	namespacesPath string,
 	ttl time.Duration,
 	clock func() time.Time,
-) Vault {
+) (Vault, error) {
 	return newStore(vaultPath, namespacesPath, ttl, 5*time.Minute, clock)
 }
 
@@ -63,15 +75,35 @@ func newStore(
 	ttl time.Duration,
 	sweepInterval time.Duration,
 	clock func() time.Time,
-) Vault {
+) (Vault, error) {
+	// The vault directory must exist before SQLite can create a file in it.
+	if err := os.MkdirAll(vaultPath, 0o700); err != nil {
+		return nil, fmt.Errorf("vault: create dir: %w", err)
+	}
+
+	idx, err := openIndex(filepath.Join(vaultPath, indexFilename))
+	if err != nil {
+		return nil, fmt.Errorf("vault: %w", err)
+	}
+
 	return &store{
 		vaultPath:      vaultPath,
 		namespacesPath: namespacesPath,
 		ttl:            ttl,
+		indexTTL:       resolveIndexTTL(),
 		sweepInterval:  sweepInterval,
 		clock:          clock,
+		idx:            idx,
 		locks:          make(map[string]*sync.Mutex),
+	}, nil
+}
+
+func resolveIndexTTL() time.Duration {
+	ttl := defaultIndexTTL
+	if d, err := time.ParseDuration(config.GetVault().IndexTTL); err == nil && d > 0 {
+		ttl = d
 	}
+	return ttl
 }
 
 func (s *store) Start(ctx context.Context) {
@@ -87,6 +119,38 @@ func (s *store) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// Close releases the index database. It is idempotent: the daemon closes the
+// vault once, but a constructor that failed downstream discards it too, and the
+// two must be able to overlap without double-closing a handle.
+//
+// The sweep goroutine is not stopped here — it exits with the context Start was
+// given, which the daemon cancels before shutting anything down. A sweep that
+// lands afterwards finds the index closed and leaves it alone.
+func (s *store) Close() error {
+	s.idxMu.Lock()
+	defer s.idxMu.Unlock()
+
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	return s.idx.close()
+}
+
+// withIndex runs fn under the lifecycle lock, so Close can never land while a
+// connection is checked out and an in-flight query can never be handed a handle
+// that is already gone. A closed vault reports ErrClosed rather than driving a
+// dead database.
+func (s *store) withIndex(fn func(i *index) error) error {
+	s.idxMu.Lock()
+	defer s.idxMu.Unlock()
+
+	if s.closed {
+		return ErrClosed
+	}
+	return fn(s.idx)
 }
 
 // namespaceLock returns the per-namespace mutex, creating it on first access.
@@ -108,22 +172,36 @@ func (s *store) namespaceLock(key string) *sync.Mutex {
 	return m
 }
 
-// encodeNS URL-encodes a namespace so it is safe to use as a flat filename.
-func encodeNS(ns domain.Namespace) string {
-	return url.PathEscape(string(ns))
-}
+const metaSuffix = ".meta.json"
 
 func (s *store) metaFilePath(ns domain.Namespace) string {
-	return filepath.Join(s.vaultPath, encodeNS(ns)+".meta.json")
+	return filepath.Join(s.vaultPath, encodeNS(ns)+metaSuffix)
 }
 
 func (s *store) manifestFilePath(ns domain.Namespace, filename string) string {
-	ext := filepath.Ext(filename)
-	return filepath.Join(s.vaultPath, encodeNS(ns)+ext)
+	return filepath.Join(s.vaultPath, encodeNS(ns)+filepath.Ext(filename))
 }
 
-func (s *store) workdirPath(ns domain.Namespace) string {
-	return filepath.Join(s.namespacesPath, filepath.FromSlash(string(ns)))
+// cacheNames lists the names ns's manifest cache has had, current first: an
+// entry an earlier layout wrote is still read, and deleted with the rest.
+func cacheNames(ns domain.Namespace) []string {
+	current, legacy := encodeNS(ns), legacyEncodeNS(ns)
+	if current == legacy || len(legacy+metaSuffix) > maxComponentLen {
+		return []string{current}
+	}
+	return []string{current, legacy}
+}
+
+// cachedNamespace reads the namespace a cache entry belongs to from its
+// meta file name, or from the meta itself when the name was capped.
+func (s *store) cachedNamespace(metaName string) (domain.Namespace, bool) {
+	encoded := strings.TrimSuffix(metaName, metaSuffix)
+	if isHashed(encoded) {
+		meta, err := readMeta(filepath.Join(s.vaultPath, metaName))
+		return meta.Namespace, err == nil && meta.Namespace != ""
+	}
+	decoded, err := url.PathUnescape(encoded)
+	return domain.Namespace(decoded), err == nil
 }
 
 func (s *store) WorkDir(
@@ -133,7 +211,10 @@ func (s *store) WorkDir(
 	if err := ns.Validate(); err != nil {
 		return "", ErrInvalidNamespace
 	}
-	dir := s.workdirPath(ns)
+	dir, err := s.namespacePath(ns)
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("workdir %s: %w", ns, err)
 	}
@@ -171,6 +252,17 @@ func (s *store) PutArrow(
 	return putArrow(s, ns, file)
 }
 
+func (s *store) PutArrowNotFound(
+	ctx context.Context,
+	ns domain.Namespace,
+	commit string,
+) error {
+	if err := ns.Validate(); err != nil {
+		return ErrInvalidNamespace
+	}
+	return putArrowNotFound(s, ns, commit)
+}
+
 func (s *store) PutCollection(
 	ctx context.Context,
 	ns domain.Namespace,
@@ -203,7 +295,13 @@ func (s *store) DeleteWorkDir(
 	if err := ns.Validate(); err != nil {
 		return ErrInvalidNamespace
 	}
-	dir := s.workdirPath(ns)
+	dir, err := s.namespacePath(ns)
+	if errors.Is(err, ErrWorkDirCollision) {
+		return nil // ns owns no directory; the one at its path is another identity's
+	}
+	if err != nil {
+		return err
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("workdir delete %s: %w", ns, err)
 	}
@@ -233,23 +331,6 @@ func (s *store) DeleteCollection(
 	return deleteCollection(s, ns)
 }
 
-func (s *store) RenameArrow(
-	ctx context.Context,
-	oldNs domain.Namespace,
-	newNs domain.Namespace,
-) error {
-	if err := oldNs.Validate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidNamespace, err)
-	}
-	if err := newNs.Validate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidNamespace, err)
-	}
-	if oldNs == newNs {
-		return nil
-	}
-	return renameArrow(s, oldNs, newNs)
-}
-
 func (s *store) ListVersions(
 	ctx context.Context,
 	ns domain.Namespace,
@@ -258,6 +339,32 @@ func (s *store) ListVersions(
 		return []string{}, nil
 	}
 	return listVersions(s, ns)
+}
+
+func (s *store) SearchArrows(
+	_ context.Context,
+	q IndexQuery,
+) ([]IndexRow, error) {
+	var rows []IndexRow
+	err := s.withIndex(func(i *index) error {
+		var searchErr error
+		rows, searchErr = i.search(q, s.clock())
+		return searchErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *store) ForgetArrow(
+	_ context.Context,
+	ns domain.Namespace,
+) error {
+	if err := ns.Validate(); err != nil {
+		return ErrInvalidNamespace
+	}
+	return s.withIndex(func(i *index) error { return i.forget(ns) })
 }
 
 // removeMacOSMetadata deletes Finder-created metadata files (.DS_Store, ._*)

@@ -4,23 +4,47 @@ import (
 	"context"
 
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	domainRuntime "github.com/rabbytesoftware/quiver.core/internal/domain/runtime"
 )
 
 type RuntimeService struct {
+	InstallStarted      bool
 	InstallErr          error
 	UninstallErr        error
 	ExecuteErr          error
+	UpdateStarted       bool
+	UpdateErr           error
 	StopErr             error
+	ResetErr            error
 	RuntimeExistsResult bool
 	RuntimeExistsErr    error
+	GetRuntimeResult    *domainRuntime.ArrowRuntime
+	GetRuntimeErr       error
+	ListRuntimesResult  []domainRuntime.ArrowRuntime
+	ListRuntimesErr     error
+	SettlingNamespaces  map[domain.Namespace]bool
+	DrainErr            error
+}
+
+func (m *RuntimeService) GetRuntime(
+	_ context.Context,
+	_ domain.Namespace,
+) (*domainRuntime.ArrowRuntime, error) {
+	return m.GetRuntimeResult, m.GetRuntimeErr
+}
+
+func (m *RuntimeService) ListRuntimes(
+	_ context.Context,
+) ([]domainRuntime.ArrowRuntime, error) {
+	return m.ListRuntimesResult, m.ListRuntimesErr
 }
 
 func (m *RuntimeService) Install(
 	_ context.Context,
 	_ domain.Namespace,
 	_ map[string]string,
-) error {
-	return m.InstallErr
+) (bool, error) {
+	return m.InstallStarted, m.InstallErr
 }
 
 func (m *RuntimeService) Uninstall(
@@ -40,11 +64,26 @@ func (m *RuntimeService) Execute(
 	return m.ExecuteErr
 }
 
+func (m *RuntimeService) Update(
+	_ context.Context,
+	_ domain.Namespace,
+	_ map[string]string,
+) (bool, error) {
+	return m.UpdateStarted, m.UpdateErr
+}
+
 func (m *RuntimeService) Stop(
 	_ context.Context,
 	_ domain.Namespace,
 ) error {
 	return m.StopErr
+}
+
+func (m *RuntimeService) Reset(
+	_ context.Context,
+	_ domain.Namespace,
+) error {
+	return m.ResetErr
 }
 
 func (m *RuntimeService) RuntimeExists(
@@ -56,6 +95,10 @@ func (m *RuntimeService) RuntimeExists(
 
 func (m *RuntimeService) Start(_ context.Context) {}
 
-func (m *RuntimeService) Shutdown(_ context.Context) error {
-	return nil
+func (m *RuntimeService) Settling(ns domain.Namespace) bool {
+	return m.SettlingNamespaces[ns]
+}
+
+func (m *RuntimeService) Drain(_ context.Context) error {
+	return m.DrainErr
 }

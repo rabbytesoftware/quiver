@@ -9,7 +9,7 @@ import (
 const (
 	MaxNameLength        = 255
 	MaxDescriptionLength = 1000
-	VersionLatestRef     = "latest"
+	MaxReadmeLength      = 256000
 	MethodInstall        = "_install"
 	MethodUninstall      = "_uninstall"
 	MethodUpdate         = "_update"
@@ -17,39 +17,71 @@ const (
 	MethodStop           = "_stop"
 )
 
-// Arrow is the single canonical aggregate for an installed namespace@ref.
+// Arrow is the single canonical aggregate for an installed namespace@selector.
 // When used as a parsed manifest (vault/manifold contexts) the installation
-// fields (InstalledAt, InstalledRef, InstalledConstraint, UserInstalled) are zero.
+// fields (InstalledAt, UserInstalled, SelectorKind, Resolved, Available) are
+// zero.
 type Arrow struct {
-	Namespace           Namespace           `json:"namespace"`
-	ArrowMeta                               // Name, Description, Version, etc.
-	Variables           []Variable          `yaml:"variables"  json:"variables"`
-	Netbridge           []netbridge.PortDef `yaml:"netbridge"  json:"netbridge"`
-	Targets             map[OS]Target       `json:"targets"`
-	InstalledAt         time.Time           `json:"installed_at"`
-	UserInstalled       bool                `json:"user_installed"`
-	InstalledRef        string              `json:"installed_ref"`
-	InstalledConstraint string              `json:"installed_constraint"`
-	// UpgradedFromNs is set only on the arrow.upgraded.* event; it names the
-	// old namespace that was replaced so the runtime reaction can clean up.
-	UpgradedFromNs Namespace `json:"upgraded_from_ns,omitempty"`
+	Namespace Namespace           `json:"namespace"`
+	ArrowMeta                     // Name, Description, License, etc.
+	Variables []Variable          `yaml:"variables"  json:"variables"`
+	Netbridge []netbridge.PortDef `yaml:"netbridge"  json:"netbridge"`
+	Targets   map[OS]Target       `json:"targets"`
+	// Readme is the prose surrounding the fenced manifest block when the arrow
+	// is delivered as ARROW.md; it is empty for the plain arrow.yaml form. It
+	// lives here rather than on ArrowMeta so it never rides into the lightweight
+	// catalog/search row, which embeds ArrowMeta directly.
+	Readme        string    `yaml:"readme,omitempty" json:"readme,omitempty"`
+	InstalledAt   time.Time `json:"installed_at"`
+	UserInstalled bool      `json:"user_installed"`
+	// LastUsedAt is stamped when an _execute run completes successfully; zero
+	// means the arrow has never been run.
+	LastUsedAt time.Time `json:"last_used_at"`
+	// SelectorKind names the type of selector this row tracks.
+	SelectorKind SelectorKind `json:"selector_kind,omitempty" yaml:"selector_kind,omitempty"`
+	// Resolved carries the installed ref and its resolved commit.
+	Resolved Resolved `json:"resolved" yaml:"resolved"`
+	// Available carries a newly available ref and its commit, or nil when no newer version is available.
+	Available *Available `json:"available,omitempty" yaml:"available,omitempty"`
 }
 
+// ArrowMeta carries gorm tags so read models can embed it instead of restating
+// its columns. Maintainers, Credits and Tags are ignored on purpose: they are
+// slices, which cannot be columns, so a read model that needs them normalises
+// them into a table of its own.
+//
+// There is no version here. An arrow's version is the ref its namespace names,
+// and that ref is already the key every read model, cache entry and aggregate
+// is filed under; a copy of it on the manifest could only ever disagree.
 type ArrowMeta struct {
-	Name        string     `yaml:"name"        json:"name"`
-	Description string     `yaml:"description" json:"description"`
-	Version     string     `yaml:"version"     json:"version"`
-	License     string     `yaml:"license"     json:"license"`
-	URL         string     `yaml:"url"         json:"url"`
-	Maintainers []Credit   `yaml:"maintainers" json:"maintainers"`
-	Credits     []Credit   `yaml:"credits"     json:"credits"`
-	Tags        []string   `yaml:"tags"        json:"tags"`
-	Media       ArrowMedia `yaml:"media"       json:"media"`
+	Name        string          `yaml:"name"        json:"name"        gorm:"column:name"`
+	Description string          `yaml:"description" json:"description" gorm:"column:description"`
+	License     string          `yaml:"license"     json:"license"     gorm:"column:license"`
+	URL         string          `yaml:"url"         json:"url"         gorm:"column:url"`
+	Maintainers []Credit        `yaml:"maintainers" json:"maintainers" gorm:"-"`
+	Credits     []Credit        `yaml:"credits"     json:"credits"     gorm:"-"`
+	Tags        []string        `yaml:"tags"        json:"tags"        gorm:"-"`
+	Media       ArrowMedia      `yaml:"media"       json:"media"       gorm:"embedded"`
+	Generator   *ArrowGenerator `yaml:"generator,omitempty" json:"generator,omitempty" gorm:"-"`
+}
+
+func (a Arrow) Origin() string {
+	if a.Generator == nil || a.Generator.Name == "" {
+		return ArrowOriginDeclared
+	}
+	return ArrowOriginInferred
+}
+
+func (a Arrow) Confidence() string {
+	if a.Origin() == ArrowOriginDeclared {
+		return ""
+	}
+	return a.Generator.Confidence
 }
 
 type ArrowMedia struct {
-	Icon   string `yaml:"icon"   json:"icon"`
-	Banner string `yaml:"banner" json:"banner"`
+	Icon   string `yaml:"icon"   json:"icon"   gorm:"column:icon"`
+	Banner string `yaml:"banner" json:"banner" gorm:"column:banner"`
 }
 
 type ArrowState string
@@ -74,12 +106,17 @@ var transitions = map[ArrowState][]ArrowState{
 	ArrowStateRunning:      {ArrowStateStopping, ArrowStateDetached},
 	ArrowStateStopping:     {ArrowStateReady, ArrowStateDraining},
 	ArrowStateDraining:     {ArrowStateReady},
-	ArrowStateDetached:     {ArrowStateReady, ArrowStateStopping},
+	ArrowStateDetached:     {ArrowStateReady, ArrowStateStopping, ArrowStateRunning},
 	ArrowStateInstalling:   {ArrowStateReady, ArrowStateAbsent},
 	ArrowStateUninstalling: {ArrowStateAbsent, ArrowStateReady},
 	ArrowStateUpdating:     {ArrowStateReady, ArrowStateAbsent},
 	ArrowStateRemoved:      {},
-	ArrowStateOutdated:     {ArrowStateReady, ArrowStateUninstalling},
+	// Outdated reaches Running because it is not a busy state: an arrow a
+	// version check found a newer release for is still installed and still
+	// idle, and running it is the product's central action. Applying the
+	// update it now has available stays an explicit trigger, never a gate
+	// that has to be passed before the arrow can be used again.
+	ArrowStateOutdated: {ArrowStateReady, ArrowStateRunning, ArrowStateUninstalling},
 }
 
 func (s ArrowState) CanTransitionTo(

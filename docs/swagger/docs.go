@@ -47,7 +47,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
@@ -55,7 +55,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ArrowListItemDTO"
+                                                "$ref": "#/definitions/dto.ArrowListItemDTO"
                                             }
                                         }
                                     }
@@ -66,7 +66,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -74,7 +74,7 @@ const docTemplate = `{
         },
         "/arrow/{ns}": {
             "get": {
-                "description": "Returns detailed information for an arrow including current state, active run, and last return. Use the WebSocket upgrade to stream live updates.",
+                "description": "Returns detailed information for an arrow including current state, active run, and last return. An uncatalogued namespace resolves live, the same way the manifest and readme endpoints do, and reports state \"absent\". Use the WebSocket upgrade to stream live updates.",
                 "produces": [
                     "application/json"
                 ],
@@ -97,13 +97,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ArrowDetailDTO"
+                                            "$ref": "#/definitions/dto.ArrowDetailDTO"
                                         }
                                     }
                                 }
@@ -113,19 +113,31 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
             },
             "post": {
-                "description": "Registers an arrow by its namespace. The manifest must already exist in the registry.",
+                "description": "Registers an arrow by its namespace. The ref after @ is the selector the row tracks; a refless namespace follows the repository's default channel. The request takes no body.",
                 "tags": [
                     "arrows"
                 ],
@@ -143,37 +155,37 @@ const docTemplate = `{
                     "201": {
                         "description": "Arrow registered",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse"
+                            "$ref": "#/definitions/libs.MutationResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid namespace",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "404": {
                         "description": "Manifest not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "409": {
-                        "description": "Arrow already registered",
+                        "description": "A concurrent registration of the same identity won the race (re-registering is otherwise idempotent, 201), or another identity's workdir occupies this identity's path",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
             },
             "delete": {
-                "description": "Deregisters an arrow. The namespace must include a @ref (version) qualifier.",
+                "description": "Deregisters an arrow, addressed by the namespace it was registered under (bare or versioned).",
                 "tags": [
                     "arrows"
                 ],
@@ -181,7 +193,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Versioned arrow namespace (e.g. github.com/user/repo@v1.0.0)",
+                        "description": "Arrow namespace (bare or versioned, e.g. github.com/user/repo@v1.0.0)",
                         "name": "ns",
                         "in": "path",
                         "required": true
@@ -191,38 +203,32 @@ const docTemplate = `{
                     "200": {
                         "description": "Arrow removed",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Namespace missing @ref",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.MutationResponse"
                         }
                     },
                     "404": {
                         "description": "Arrow not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
             },
             "patch": {
-                "description": "Fetches the latest manifest for the arrow and updates its registration.",
-                "consumes": [
+                "description": "Re-checks the arrow's selector against its repository. A row nothing is installed from advances to the available ref at once and reports its dependency changes; an installed row keeps its version and reports the ref in ` + "`" + `available` + "`" + `, which the runtime update moves it to. ` + "`" + `available` + "`" + ` is absent when the row is current. The request takes no body.",
+                "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "arrows"
                 ],
-                "summary": "Update arrow manifest",
+                "summary": "Update arrow",
                 "parameters": [
                     {
                         "type": "string",
@@ -234,21 +240,278 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Arrow updated",
+                        "description": "Update result",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.MutationResultResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.UpdateResultDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid namespace",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "404": {
                         "description": "Arrow not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Another identity's workdir occupies this identity's path",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/arrow/{ns}/adopt": {
+            "post": {
+                "description": "Registers the arrow under the identity POST /arrow/{ns} would file it under (the ref after @ is the selector; a refless namespace follows the repository's default channel), recording it as already installed at resolved_ref instead of at what the selector points at now. For a client that installed itself and announces the build it actually runs, so the next version check offers the update that build needs. resolved_ref must be a tag or branch the repository holds and one the selector could resolve to: a member of the channel, a tag the constraint matches, the pin's own ref, or a ref at the commit. Re-adopting the same state writes nothing; adopting another state moves the row in place. The row is marked user-installed. Adopt declares the catalog state only and leaves the runtime untouched: a client that also needs the arrow's installed state detected (its preinstalled probe) must POST /arrow/{ns} first and then call /adopt.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "arrows"
+                ],
+                "summary": "Adopt installed arrow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Arrow namespace (e.g. github.com/user/repo@stable)",
+                        "name": "ns",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "The ref the caller has installed",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdoptRequestDTO"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Arrow adopted, or already at the declared state",
+                        "schema": {
+                            "$ref": "#/definitions/libs.MutationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid namespace, a body that is not JSON, a missing resolved_ref, or a ref the selector could never resolve to",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Repository or ref not found",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "A concurrent registration of the same identity won the race",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Invalid manifest at the declared ref",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Repository unreachable",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/arrow/{ns}/channels": {
+            "get": {
+                "description": "Buckets every tag the arrow's repository publishes into its release channel, plus the repository's default branch.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "arrows"
+                ],
+                "summary": "List arrow channels",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Arrow namespace",
+                        "name": "ns",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Channels",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ChannelListDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Arrow not found",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/arrow/{ns}/dependencies": {
+            "get": {
+                "description": "Returns the transitive dependency plan for this arrow, resolved from its manifest's tools and services, in dependency-first order.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "arrows"
+                ],
+                "summary": "Get arrow dependencies",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Arrow namespace",
+                        "name": "ns",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ArrowDependenciesDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/arrow/{ns}/dependents": {
+            "get": {
+                "description": "Returns the namespaces of arrows that declare a dependency on this arrow, across all installed versions pointing at it.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "arrows"
+                ],
+                "summary": "Get arrow dependents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Arrow namespace",
+                        "name": "ns",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ArrowDependentsDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -256,7 +519,7 @@ const docTemplate = `{
         },
         "/arrow/{ns}/manifest": {
             "get": {
-                "description": "Returns the full manifest definition including targets, variables, and lifecycle steps.",
+                "description": "Returns the manifest as its author wrote it (metadata, variables, netbridge, targets, readme). Quiver's own bookkeeping for the row (selector, resolved and available refs) is on the arrow detail, not here.",
                 "produces": [
                     "application/json"
                 ],
@@ -279,13 +542,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ArrowManifestDTO"
+                                            "$ref": "#/definitions/dto.ArrowManifestDTO"
                                         }
                                     }
                                 }
@@ -295,13 +558,25 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -337,25 +612,31 @@ const docTemplate = `{
                     "201": {
                         "description": "Manifest seeded and arrow registered",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse"
+                            "$ref": "#/definitions/libs.MutationResponse"
                         }
                     },
                     "400": {
-                        "description": "Failed to read body",
+                        "description": "Failed to read body, or a namespace without a ref or with an empty ref component",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "A concurrent registration of the same identity won the race",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "422": {
                         "description": "Invalid manifest",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -398,13 +679,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ValidationResultDTO"
+                                            "$ref": "#/definitions/dto.ValidationResultDTO"
                                         }
                                     }
                                 }
@@ -414,7 +695,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Failed to read body",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "422": {
@@ -422,13 +703,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ValidationResultDTO"
+                                            "$ref": "#/definitions/dto.ValidationResultDTO"
                                         }
                                     }
                                 }
@@ -438,7 +719,247 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/arrow/{ns}/readme": {
+            "get": {
+                "description": "Returns the prose surrounding the fenced manifest block when the arrow is delivered as ARROW.md. 404 if the arrow was delivered as arrow.yaml or carries no readme.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "arrows"
+                ],
+                "summary": "Get arrow readme",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Arrow namespace",
+                        "name": "ns",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ArrowReadmeDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/devices": {
+            "get": {
+                "description": "Reachable only from the daemon's own host, and only when the daemon is bound to tcp://.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List paired devices",
+                "responses": {
+                    "200": {
+                        "description": "Paired devices",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/dto.DeviceDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Not reachable from this host",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/devices/{id}": {
+            "delete": {
+                "description": "Reachable only from the daemon's own host, and only when the daemon is bound to tcp://.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Revoke a paired device",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Device ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Device revoked",
+                        "schema": {
+                            "$ref": "#/definitions/libs.MutationResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Device not found",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/pairing": {
+            "post": {
+                "description": "Mints a one-time code quiver.desktop redeems to pair with this daemon. Reachable only from the daemon's own host, and only when the daemon is bound to tcp://.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Generate a device-pairing code",
+                "responses": {
+                    "201": {
+                        "description": "Pairing code generated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.PairingCodeDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Not reachable from this host",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/pairing/redeem": {
+            "post": {
+                "description": "Exchanges a valid, unexpired pairing code for a session token, pairing the given device. The token is returned exactly once.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Redeem a pairing code",
+                "parameters": [
+                    {
+                        "description": "Pairing code, a client-generated device id, and a human label",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.RedeemPairingCodeRequestDTO"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Session token issued",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SessionTokenDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid or expired pairing code",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many attempts",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -468,7 +989,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
@@ -476,7 +997,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.CollectionListItemDTO"
+                                                "$ref": "#/definitions/dto.CollectionListItemDTO"
                                             }
                                         }
                                     }
@@ -487,7 +1008,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -518,13 +1039,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.CollectionDetailDTO"
+                                            "$ref": "#/definitions/dto.CollectionDetailDTO"
                                         }
                                     }
                                 }
@@ -534,13 +1055,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -566,25 +1087,25 @@ const docTemplate = `{
                     "201": {
                         "description": "Quiver followed",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse"
+                            "$ref": "#/definitions/libs.MutationResponse"
                         }
                     },
                     "404": {
                         "description": "Quiver not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "409": {
                         "description": "Already following",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -608,19 +1129,19 @@ const docTemplate = `{
                     "200": {
                         "description": "Quiver unfollowed",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse"
+                            "$ref": "#/definitions/libs.MutationResponse"
                         }
                     },
                     "404": {
                         "description": "Quiver not followed",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -655,13 +1176,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -697,19 +1218,25 @@ const docTemplate = `{
                     "201": {
                         "description": "Manifest stored",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse"
+                            "$ref": "#/definitions/libs.MutationResponse"
                         }
                     },
                     "400": {
+                        "description": "Failed to read body",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "422": {
                         "description": "Invalid manifest",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -752,13 +1279,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ValidationResultDTO"
+                                            "$ref": "#/definitions/dto.ValidationResultDTO"
                                         }
                                     }
                                 }
@@ -770,13 +1297,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse"
+                                    "$ref": "#/definitions/libs.QueryResponse"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ValidationResultDTO"
+                                            "$ref": "#/definitions/dto.ValidationResultDTO"
                                         }
                                     }
                                 }
@@ -786,7 +1313,229 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/config": {
+            "get": {
+                "description": "Returns the configuration three ways at once: running is what this process is using, configured is what the next start will use, and defaults is what ships in the binary.\n\nEvery configuration change takes effect on restart, so running and configured differ whenever a change is still pending. restart_required names exactly those fields, so a client does not have to diff the documents itself.\n\nrunning carries no api section: the --host flag can override the configured host at start, so the daemon cannot report a bind address from configuration alone.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Read the daemon configuration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ConfigDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "The configuration file could not be read",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Applies a sparse configuration change. A field left out of the body is untouched, a field set to null is restored to its default, and a field carrying a value is set to it.\n\nSettings are accepted or refused one at a time: a body mixing valid and invalid settings persists the valid ones and reports the rest in rejected, including any key the daemon does not recognise. The response is 422 only when nothing at all could be applied.\n\nNothing takes effect until the daemon restarts. Re-read GET /v0/config to see the change reflected in configured and listed in restart_required.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Change the daemon configuration",
+                "parameters": [
+                    {
+                        "description": "Sparse configuration document: any subset of the sections and settings returned by GET /v0/config, with null to restore a default",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/usecases.Config"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ConfigPatchResultDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Body could not be read",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Every setting in the body was refused; rejected names each one and why",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ConfigPatchResultDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/console/commands": {
+            "get": {
+                "description": "Returns the runnable commands that carry the console annotation along with all their ancestors.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "console"
+                ],
+                "summary": "List the commands the console may run",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ConsoleCommandsDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/console/exec": {
+            "post": {
+                "description": "Runs a line against the daemon's own CLI tree and streams newline-delimited JSON: ` + "`" + `out` + "`" + ` frames, then exactly one ` + "`" + `exit` + "`" + ` frame. Only commands marked for the console run (403 otherwise). The line is split on spaces and never reaches a shell; quoting is not supported. At most 4 commands run at once (429), each limited to 10 minutes and 256 KiB of output.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/x-ndjson"
+                ],
+                "tags": [
+                    "console"
+                ],
+                "summary": "Run a console command",
+                "parameters": [
+                    {
+                        "description": "The command line, without the leading quiver",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.ConsoleExecRequestDTO"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Stream of out and exit frames"
+                    },
+                    "400": {
+                        "description": "The line is empty, too long or has forbidden characters",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The command is not available in the console",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many commands are running",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/console/logs": {
+            "get": {
+                "description": "Upgrades to a WebSocket. Replays the last 500 records (or those after ` + "`" + `since` + "`" + `), sends one ` + "`" + `ready` + "`" + ` frame, then every new record. A client that falls behind is disconnected; reconnect with since=\u003clast seq\u003e.",
+                "tags": [
+                    "console"
+                ],
+                "summary": "Stream the daemon's logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "info",
+                        "description": "Minimum level: debug, info, warn or error",
+                        "name": "level",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Replay only records with a sequence number above this",
+                        "name": "since",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols"
+                    },
+                    "400": {
+                        "description": "level or since is invalid",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -815,9 +1564,167 @@ const docTemplate = `{
                 }
             }
         },
+        "/home": {
+            "get": {
+                "description": "Returns the shelves the home screen shows, each a named, ranked list of arrows that are installable without any query. Every arrow has the shape GET /v0/search returns.\n\nThe answer comes from a local snapshot and the vault index. It never reaches a git host, so it is instant and works offline. A shelf that has never been filled has a null refreshed_at and no arrows; the snapshot fills in the background, so a client that sees refreshing set should ask again shortly.\n\nShelves are titled for people: show title and nothing that names where an arrow was found. When recommendations are disabled the list of shelves is empty.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "home"
+                ],
+                "summary": "Read the home shelves",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.HomeDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Recommendations are not configured on this daemon",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/home/refresh": {
+            "post": {
+                "description": "Starts a refresh of the home shelves in the background and returns at once with no body. A refresh already running is joined rather than restarted, so calling this repeatedly is harmless. Read GET /v0/home to see the shelves fill; its refreshing field says when the work is done.\n\nA refresh that fails or is cancelled leaves the previous shelves in place.",
+                "tags": [
+                    "home"
+                ],
+                "summary": "Refresh the home shelves",
+                "responses": {
+                    "202": {
+                        "description": "Refresh started, or already running"
+                    },
+                    "503": {
+                        "description": "Recommendations are not configured on this daemon",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/runtime": {
+            "get": {
+                "description": "Returns the current runtime state of every arrow in the catalog. Arrows that have never been installed report state \"absent\". settling marks an arrow whose update has not committed yet, even after its steps ended. Use the WebSocket upgrade on the same route to stream updates instead.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "runtime"
+                ],
+                "summary": "List runtimes",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/dto.ArrowRuntimeDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/runtime/{ns}": {
+            "get": {
+                "description": "Returns the current runtime state for an arrow, including the active execution and the last completed return. settling is true while an update has not committed yet, even after its steps ended. Use the WebSocket upgrade on the same route to stream updates instead.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "runtime"
+                ],
+                "summary": "Get runtime",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Arrow namespace",
+                        "name": "ns",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ArrowRuntimeDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Arrow not found",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/runtime/{ns}/{method}": {
             "post": {
-                "description": "Triggers a lifecycle method on an arrow (install, uninstall, execute, stop, update, or any custom method defined in the manifest). Returns 202 Accepted immediately; progress is streamed via WebSocket.",
+                "description": "Triggers a lifecycle method on an arrow (install, uninstall, execute, stop, update, or any custom method defined in the manifest). Returns 202 Accepted immediately when work started; progress is streamed via WebSocket. Returns 200 when there was nothing to do (install of an installed arrow, update of an arrow with nothing newer): no runtime event follows.",
                 "consumes": [
                     "application/json"
                 ],
@@ -845,39 +1752,410 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ExecuteMethodRequestDTO"
+                            "$ref": "#/definitions/dto.ExecuteMethodRequestDTO"
                         }
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "No-op: already installed, or nothing newer to update to",
+                        "schema": {
+                            "$ref": "#/definitions/libs.MutationResponse"
+                        }
+                    },
                     "202": {
                         "description": "Method accepted",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse"
+                            "$ref": "#/definitions/libs.MutationResponse"
                         }
                     },
                     "400": {
-                        "description": "Invalid request",
+                        "description": "Invalid request, or a reserved variable was set",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "404": {
                         "description": "Arrow not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "409": {
-                        "description": "Arrow already running",
+                        "description": "Arrow already running, a cyclic dependency, or another identity's workdir occupies this identity's path (no step runs)",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "State violation, e.g. an update while the previous one is still settling",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse"
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/search": {
+            "get": {
+                "description": "Searches everything this machine already knows about: arrows installed, arrows pulled in as dependencies, arrows from followed collections, and every arrow Quiver has resolved recently. The search is offline and always answers — it never reaches the network.\n\nThe query is split on whitespace and an arrow matches when every word appears, case-insensitively, in its namespace (owner and repository name included), name, description or tags, so short and multi-word queries work. Limit counts arrows, not versions.\n\nResults are ranked by textual relevance, then boosted for an exact name match, membership of a followed collection, and stars. Installed state, provenance and known versions are reported, never scored.\n\nEvery result a discovery pass streams is indexed before it is emitted, so this endpoint returns it for the same query, keyed by the same bare namespace.\n\nThe os filter is advisory: the compatible-OS list is a denormalised projection of the last compile, and install-time re-resolution is authoritative. Treat it as a hint, not a gate.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "Search arrows",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search text. Empty or whitespace-only is rejected.",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum results to return. Defaults to 25, capped at 100.",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "linux/amd64",
+                            "linux/arm64",
+                            "windows/amd64",
+                            "windows/arm64",
+                            "darwin/amd64",
+                            "darwin/arm64"
+                        ],
+                        "type": "string",
+                        "description": "Advisory platform filter (e.g. linux/amd64)",
+                        "name": "os",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/dto.SearchResultDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Missing q, or an unknown os value",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/search/discover": {
+            "post": {
+                "description": "Searches the configured git hosts for arrows nobody on this machine has seen yet, and returns immediately with a job id. It does not wait for providers.\n\nEvery candidate is proven before it is reported: its manifest is fetched, parsed and compiled, then written to the vault. That is what makes the results renderable without a second round trip, and what makes a later POST /v0/arrow/{ns} on a discovered namespace serve from cache.\n\nVerified results stream from GET /v0/search/discover/{job} with an Upgrade header; a late or reconnecting subscriber is replayed what it missed, and the socket closes with code 1000 when the pass finishes. Counts and per-provider failures never appear on that stream; read them once from the same path without the header, after the socket closes.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "Start a discovery pass",
+                "parameters": [
+                    {
+                        "description": "Query. Blank or whitespace-only is rejected.",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.DiscoverRequestDTO"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.DiscoveryJobStartedDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Missing or blank q, or a body that is not JSON",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Discovery is not configured on this daemon",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/search/discover/{job}": {
+            "get": {
+                "description": "Returns the status of a discovery pass and, once it has finished, how many candidates were found, verified and skipped, plus what every host contributed.\n\nA host that refused is reported with the reason and, for a rate limit, how many seconds to wait. That is the only place a client can tell \"GitHub rate-limited you\" apart from \"nothing matched\", because the result stream carries results and nothing else.\n\nRead this once, when the socket closes. Do not poll it. A finished job stays readable for a short grace period and is then evicted, after which this returns 404 and the search should simply be run again — the verified manifests are already in the vault.\n\nSending an Upgrade: websocket header to this same path opens the result stream instead.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "Read a discovery job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job id returned by POST /search/discover",
+                        "name": "job",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.DiscoveryJobDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown or already evicted job",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Discovery is not configured on this daemon",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/path": {
+            "get": {
+                "description": "Reports whether ~/.quiver/bin exists, is on PATH, and, where the platform tracks it, whether it is configured to stay there (shell rc files on unix, the user Path on Windows).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Read PATH status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.PathStatusDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Adds ~/.quiver/bin to PATH on explicit user action: appends a block to shell rc files on unix, sets the user Path on Windows. Idempotent — calling it again once already configured is a no-op.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Set up PATH",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.PathStatusDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/shutdown": {
+            "post": {
+                "description": "Asks the daemon to leave through its graceful shutdown sequence, the same one a SIGTERM takes it through, and answers before it is gone with the process to wait for: its pid, executable and arguments. A caller that wants to replace the daemon waits for that pid and the socket to disappear, then starts the same command again.\n\nMeant for a local caller (quiver self-update). Over tcp:// it needs a bearer token like every other route.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Shut the daemon down",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/libs.QueryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ShutdownDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "The daemon was built without a way to stop itself",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ui/{ns}/{path}": {
+            "get": {
+                "description": "Reverse-proxies any method and path under the namespace to the arrow's open interface, with the /v0/ui/{ns} prefix stripped and the query string forwarded as net/http sanitises it (unparsable parameters are dropped). WebSocket upgrades ride the same route. Authorization and Cookie headers are never forwarded to the arrow.",
+                "tags": [
+                    "ui"
+                ],
+                "summary": "Serve arrow interface",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Arrow namespace",
+                        "name": "ns",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Path inside the arrow interface",
+                        "name": "path",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Whatever the arrow answers"
+                    },
+                    "404": {
+                        "description": "Arrow not found",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "The arrow interface did not answer",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Arrow has no open interface",
+                        "schema": {
+                            "$ref": "#/definitions/libs.ErrResponse"
                         }
                     }
                 }
@@ -885,237 +2163,231 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_rabbytesoftware_quiver_core_internal_api_libs.ErrResponse": {
+        "config.API": {
             "type": "object",
             "properties": {
-                "error": {
+                "host": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.ArrowAutoRetry": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "retries": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
+        "config.Arrows": {
+            "type": "object",
+            "properties": {
+                "auto_retry": {
+                    "$ref": "#/definitions/config.ArrowAutoRetry"
+                },
+                "extract_max_bytes": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "self_update_channel": {
                     "type": "string"
                 },
-                "namespace": {
+                "version_check_interval": {
                     "type": "string"
                 },
-                "success": {
+                "version_check_ttl": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.Auth": {
+            "type": "object",
+            "properties": {
+                "pairing_code_ttl": {
+                    "type": "string"
+                },
+                "redeem_rate_limit": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "redeem_rate_window": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.Logger": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "level": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.Manifold": {
+            "type": "object",
+            "properties": {
+                "fetch_timeout": {
+                    "type": "string"
+                },
+                "fletcher": {
+                    "$ref": "#/definitions/config.ManifoldFletcher"
+                }
+            }
+        },
+        "config.ManifoldFletcher": {
+            "type": "object",
+            "properties": {
+                "enabled": {
                     "type": "boolean"
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_api_libs.MutationResponse": {
+        "config.Netbridge": {
             "type": "object",
             "properties": {
-                "namespace": {
-                    "type": "string"
-                },
-                "success": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_libs.QueryResponse": {
-            "type": "object",
-            "properties": {
-                "data": {},
-                "success": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ArrowDetailDTO": {
-            "type": "object",
-            "properties": {
-                "active_run": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.RunRecordDTO"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "installed_at": {
-                    "type": "string"
-                },
-                "installed_constraint": {
-                    "type": "string"
-                },
-                "installed_ref": {
-                    "type": "string"
-                },
-                "last_return": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ReturnDTO"
-                },
-                "license": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "namespace": {
-                    "type": "string"
-                },
-                "state": {
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "user_installed": {
+                "enabled": {
                     "type": "boolean"
                 },
-                "version": {
-                    "type": "string"
+                "ephemeral_port_end": {
+                    "type": "integer",
+                    "maximum": 65535,
+                    "minimum": 1
+                },
+                "ephemeral_port_start": {
+                    "type": "integer",
+                    "maximum": 65535,
+                    "minimum": 1
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ArrowListItemDTO": {
+        "config.Recommendation": {
             "type": "object",
             "properties": {
-                "description": {
-                    "type": "string"
+                "candidate_budget": {
+                    "type": "integer",
+                    "minimum": 1
                 },
-                "media": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.ArrowMedia"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "namespace": {
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "versions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.InstalledVersionItemDTO"
-                    }
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ArrowManifestDTO": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "manifest": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Arrow"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "namespace": {
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "targets": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Target"
-                    }
-                },
-                "variables": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Variable"
-                    }
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.CollectionArrowDTO": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "namespace": {
-                    "type": "string"
-                },
-                "resolved": {
+                "enabled": {
                     "type": "boolean"
                 },
-                "version": {
+                "min_entries": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "refresh_interval": {
                     "type": "string"
+                },
+                "shelves": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.RecommendationShelf"
+                    }
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.CollectionDetailDTO": {
+        "config.RecommendationShelf": {
             "type": "object",
             "properties": {
-                "arrows": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.CollectionArrowDTO"
-                    }
-                },
-                "description": {
+                "id": {
                     "type": "string"
                 },
-                "followed": {
-                    "type": "boolean"
-                },
-                "maintainers": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "media": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.CollectionMediaDTO"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "namespace": {
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "url": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.CollectionListItemDTO": {
-            "type": "object",
-            "properties": {
-                "arrow_count": {
+                "limit": {
                     "type": "integer"
                 },
-                "description": {
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.RecommendationSource"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.RecommendationSource": {
+            "type": "object",
+            "properties": {
+                "host": {
                     "type": "string"
                 },
-                "followed": {
-                    "type": "boolean"
+                "max_stars": {
+                    "type": "integer"
+                },
+                "min_stars": {
+                    "type": "integer"
+                },
+                "pushed_within": {
+                    "type": "string"
+                },
+                "sort": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.Search": {
+            "type": "object",
+            "properties": {
+                "fetch_concurrency": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "per_provider_limit": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "provider_timeout": {
+                    "type": "string"
+                },
+                "unmarked": {
+                    "$ref": "#/definitions/config.SearchUnmarked"
+                }
+            }
+        },
+        "config.SearchUnmarked": {
+            "type": "object",
+            "properties": {
+                "min_stars": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "probe_limit": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "config.Vault": {
+            "type": "object",
+            "properties": {
+                "index_ttl": {
+                    "type": "string"
+                },
+                "sweep_interval": {
+                    "type": "string"
+                },
+                "ttl": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ArrowGenerator": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
                 },
-                "namespace": {
-                    "type": "string"
-                },
-                "tags": {
+                "warnings": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -1123,7 +2395,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.CollectionMediaDTO": {
+        "domain.ArrowMedia": {
             "type": "object",
             "properties": {
                 "banner": {
@@ -1134,163 +2406,20 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ExecuteMethodRequestDTO": {
-            "type": "object",
-            "properties": {
-                "variables": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.InstalledVersionItemDTO": {
-            "type": "object",
-            "properties": {
-                "constraint": {
-                    "type": "string"
-                },
-                "installed_at": {
-                    "type": "string"
-                },
-                "ref": {
-                    "type": "string"
-                },
-                "state": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ReturnDTO": {
-            "type": "object",
-            "properties": {
-                "method": {
-                    "type": "string"
-                },
-                "outcome": {
-                    "type": "string"
-                },
-                "steps": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.StepProgressDTO"
-                    }
-                },
-                "variables": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.RunRecordDTO": {
-            "type": "object",
-            "properties": {
-                "method": {
-                    "type": "string"
-                },
-                "pid": {
-                    "type": "integer"
-                },
-                "steps": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.StepProgressDTO"
-                    }
-                },
-                "variables": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.StepProgressDTO": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string"
-                },
-                "index": {
-                    "type": "integer"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ValidationErrorDTO": {
-            "type": "object",
-            "properties": {
-                "field": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "rule": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ValidationResultDTO": {
-            "type": "object",
-            "properties": {
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_api_v0_dto.ValidationErrorDTO"
-                    }
-                },
-                "supported_platforms": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "unsupported_platforms": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "valid": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.Arrow": {
+        "domain.ArrowMeta": {
             "type": "object",
             "properties": {
                 "credits": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Credit"
+                        "$ref": "#/definitions/domain.Credit"
                     }
                 },
                 "description": {
                     "type": "string"
                 },
-                "installed_at": {
-                    "type": "string"
-                },
-                "installed_constraint": {
-                    "type": "string"
-                },
-                "installed_ref": {
-                    "type": "string"
+                "generator": {
+                    "$ref": "#/definitions/domain.ArrowGenerator"
                 },
                 "license": {
                     "type": "string"
@@ -1298,23 +2427,14 @@ const docTemplate = `{
                 "maintainers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Credit"
+                        "$ref": "#/definitions/domain.Credit"
                     }
                 },
                 "media": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.ArrowMedia"
+                    "$ref": "#/definitions/domain.ArrowMedia"
                 },
                 "name": {
                     "type": "string"
-                },
-                "namespace": {
-                    "type": "string"
-                },
-                "netbridge": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain_netbridge.PortDef"
-                    }
                 },
                 "tags": {
                     "type": "array",
@@ -1322,45 +2442,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
-                "targets": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Target"
-                    }
-                },
-                "upgraded_from_ns": {
-                    "description": "UpgradedFromNs is set only on the arrow.upgraded.* event; it names the\nold namespace that was replaced so the runtime reaction can clean up.",
-                    "type": "string"
-                },
                 "url": {
                     "type": "string"
-                },
-                "user_installed": {
-                    "type": "boolean"
-                },
-                "variables": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Variable"
-                    }
-                },
-                "version": {
-                    "type": "string"
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.ArrowMedia": {
-            "type": "object",
-            "properties": {
-                "banner": {
-                    "type": "string"
-                },
-                "icon": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.ArrowState": {
+        "domain.ArrowState": {
             "type": "string",
             "enum": [
                 "absent",
@@ -1389,7 +2476,7 @@ const docTemplate = `{
                 "ArrowStateOutdated"
             ]
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.Credit": {
+        "domain.Credit": {
             "type": "object",
             "properties": {
                 "email": {
@@ -1403,7 +2490,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.DepType": {
+        "domain.DepType": {
             "type": "string",
             "enum": [
                 "tool",
@@ -1414,7 +2501,7 @@ const docTemplate = `{
                 "ServiceDep"
             ]
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.DependencyEdge": {
+        "domain.DependencyEdge": {
             "type": "object",
             "properties": {
                 "constraint": {
@@ -1424,17 +2511,54 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.DepType"
+                    "$ref": "#/definitions/domain.DepType"
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.Method": {
+        "domain.Expose": {
+            "type": "object",
+            "properties": {
+                "cli": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.ExposeEntry"
+                    }
+                },
+                "desktop": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.ExposeEntry"
+                    }
+                }
+            }
+        },
+        "domain.ExposeEntry": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.Method": {
             "type": "object",
             "properties": {
                 "available_in": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.ArrowState"
+                        "$ref": "#/definitions/domain.ArrowState"
                     }
                 },
                 "steps": {
@@ -1443,7 +2567,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.Requirement": {
+        "domain.Requirement": {
             "type": "object",
             "properties": {
                 "cpu_cores": {
@@ -1457,7 +2581,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.Target": {
+        "domain.Target": {
             "type": "object",
             "properties": {
                 "exports": {
@@ -1466,33 +2590,36 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "expose": {
+                    "$ref": "#/definitions/domain.Expose"
+                },
                 "lifecycle": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.TargetLifecycle"
+                    "$ref": "#/definitions/domain.TargetLifecycle"
                 },
                 "methods": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Method"
+                        "$ref": "#/definitions/domain.Method"
                     }
                 },
                 "requirements": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.Requirement"
+                    "$ref": "#/definitions/domain.Requirement"
                 },
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.DependencyEdge"
+                        "$ref": "#/definitions/domain.DependencyEdge"
                     }
                 },
                 "tools": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.DependencyEdge"
+                        "$ref": "#/definitions/domain.DependencyEdge"
                     }
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.TargetLifecycle": {
+        "domain.TargetLifecycle": {
             "type": "object",
             "properties": {
                 "execute": {
@@ -1500,6 +2627,10 @@ const docTemplate = `{
                     "items": {}
                 },
                 "install": {
+                    "type": "array",
+                    "items": {}
+                },
+                "preinstalled": {
                     "type": "array",
                     "items": {}
                 },
@@ -1517,7 +2648,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.Variable": {
+        "domain.Variable": {
             "type": "object",
             "properties": {
                 "default": {
@@ -1539,7 +2670,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain.VariableType"
+                    "$ref": "#/definitions/domain.VariableType"
                 },
                 "values": {
                     "type": "array",
@@ -1549,7 +2680,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain.VariableType": {
+        "domain.VariableType": {
             "type": "string",
             "enum": [
                 "string",
@@ -1564,7 +2695,1067 @@ const docTemplate = `{
                 "VariableTypeSelect"
             ]
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain_netbridge.PortDef": {
+        "dto.AdoptRequestDTO": {
+            "type": "object",
+            "properties": {
+                "resolved_ref": {
+                    "description": "ResolvedRef is the tag or branch the caller runs. It must be one the\nnamespace's selector could resolve to: a member of the channel, a tag\nthe constraint matches, the pin's own ref, or a ref at the commit.",
+                    "type": "string",
+                    "example": "v1.2.0"
+                }
+            }
+        },
+        "dto.ArrowDependenciesDTO": {
+            "type": "object",
+            "properties": {
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ArrowDependencyDTO"
+                    }
+                },
+                "namespace": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ArrowDependencyDTO": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ArrowDependentsDTO": {
+            "type": "object",
+            "properties": {
+                "dependents": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "namespace": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ArrowDetailDTO": {
+            "type": "object",
+            "properties": {
+                "active_run": {
+                    "$ref": "#/definitions/dto.RunRecordDTO"
+                },
+                "available": {
+                    "$ref": "#/definitions/dto.AvailableDTO"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "inference": {
+                    "$ref": "#/definitions/dto.InferenceDTO"
+                },
+                "installed_at": {
+                    "type": "string"
+                },
+                "installed_commit": {
+                    "type": "string"
+                },
+                "last_return": {
+                    "$ref": "#/definitions/dto.ReturnDTO"
+                },
+                "last_used_at": {
+                    "type": "string"
+                },
+                "license": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
+                "outdated": {
+                    "description": "Outdated is true exactly when Available is set.",
+                    "type": "boolean"
+                },
+                "resolved_ref": {
+                    "type": "string"
+                },
+                "selector_kind": {
+                    "description": "SelectorKind is one of \"pin\", \"channel\", \"constraint\" or \"commit\".",
+                    "type": "string",
+                    "enum": [
+                        "pin",
+                        "channel",
+                        "constraint",
+                        "commit"
+                    ]
+                },
+                "state": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "user_installed": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.ArrowListItemDTO": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "media": {
+                    "$ref": "#/definitions/domain.ArrowMedia"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "versions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.InstalledVersionItemDTO"
+                    }
+                }
+            }
+        },
+        "dto.ArrowManifestDTO": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "manifest": {
+                    "$ref": "#/definitions/dto.ManifestContentDTO"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "targets": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/domain.Target"
+                    }
+                },
+                "variables": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.Variable"
+                    }
+                }
+            }
+        },
+        "dto.ArrowReadmeDTO": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string"
+                },
+                "readme": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ArrowRuntimeDTO": {
+            "type": "object",
+            "properties": {
+                "active_run": {
+                    "$ref": "#/definitions/dto.RunRecordDTO"
+                },
+                "last_return": {
+                    "$ref": "#/definitions/dto.ReturnDTO"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "settling": {
+                    "description": "Settling is true while an update has not committed yet, including the\nmoment after its steps ended and before its row advanced. Only REST\nreads set it; streamed runtime events omit it.",
+                    "type": "boolean"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AvailableDTO": {
+            "type": "object",
+            "properties": {
+                "commit": {
+                    "type": "string"
+                },
+                "ref": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ChannelDTO": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "latest": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ChannelListDTO": {
+            "type": "object",
+            "properties": {
+                "channels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ChannelDTO"
+                    }
+                }
+            }
+        },
+        "dto.CollectionArrowDTO": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "media": {
+                    "$ref": "#/definitions/domain.ArrowMedia"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "resolved": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.CollectionDetailDTO": {
+            "type": "object",
+            "properties": {
+                "arrows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.CollectionArrowDTO"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "followed": {
+                    "type": "boolean"
+                },
+                "maintainers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "media": {
+                    "$ref": "#/definitions/dto.CollectionMediaDTO"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CollectionListItemDTO": {
+            "type": "object",
+            "properties": {
+                "arrow_count": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "followed": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.CollectionMediaDTO": {
+            "type": "object",
+            "properties": {
+                "banner": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ConfigDTO": {
+            "type": "object",
+            "properties": {
+                "configured": {
+                    "$ref": "#/definitions/usecases.Config"
+                },
+                "corrected": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ConfigRejectionDTO"
+                    }
+                },
+                "defaults": {
+                    "$ref": "#/definitions/usecases.Config"
+                },
+                "restart_required": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "running": {
+                    "$ref": "#/definitions/dto.runningConfig"
+                }
+            }
+        },
+        "dto.ConfigPatchResultDTO": {
+            "type": "object",
+            "properties": {
+                "applied": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "rejected": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ConfigRejectionDTO"
+                    }
+                }
+            }
+        },
+        "dto.ConfigRejectionDTO": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ConsoleCommandDTO": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "short": {
+                    "type": "string"
+                },
+                "usage": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ConsoleCommandsDTO": {
+            "type": "object",
+            "properties": {
+                "commands": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ConsoleCommandDTO"
+                    }
+                }
+            }
+        },
+        "dto.ConsoleExecRequestDTO": {
+            "type": "object",
+            "properties": {
+                "line": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ConstrainedDepDTO": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string"
+                },
+                "new_constraint": {
+                    "type": "string"
+                },
+                "old_constraint": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.DeviceDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "last_seen_at": {
+                    "type": "string"
+                },
+                "paired_at": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.DiscoverRequestDTO": {
+            "type": "object",
+            "properties": {
+                "q": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.DiscoveryJobDTO": {
+            "type": "object",
+            "properties": {
+                "found": {
+                    "type": "integer"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.DiscoveryProviderDTO"
+                    }
+                },
+                "query": {
+                    "type": "string"
+                },
+                "skipped": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "verified": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.DiscoveryJobStartedDTO": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "description": "ExpiresAt is when the job stops being readable. While the pass is still\nrunning it is a floor, not a promise: the grace is measured from the\nmoment the pass finishes.",
+                    "type": "string"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "query": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.DiscoveryProviderDTO": {
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "pass": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "retry_after": {
+                    "description": "RetryAfter is in seconds and is set only when the host said how long to\nwait.",
+                    "type": "integer"
+                },
+                "returned": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.ExecuteMethodRequestDTO": {
+            "type": "object",
+            "properties": {
+                "variables": {
+                    "description": "Variables supplied by the caller. WORKDIR, INSTALL_PATH, ARROW_NAMESPACE,\nPLATFORM and REF are computed by Quiver and rejected with 400 if set.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.HomeDTO": {
+            "type": "object",
+            "properties": {
+                "refreshing": {
+                    "type": "boolean"
+                },
+                "shelves": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.HomeShelfDTO"
+                    }
+                }
+            }
+        },
+        "dto.HomeShelfDTO": {
+            "type": "object",
+            "properties": {
+                "arrows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.SearchResultDTO"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "refreshed_at": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.InferenceDTO": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "string"
+                },
+                "generator": {
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.InstalledVersionItemDTO": {
+            "type": "object",
+            "properties": {
+                "installed_at": {
+                    "type": "string"
+                },
+                "last_used_at": {
+                    "type": "string"
+                },
+                "ref": {
+                    "type": "string"
+                },
+                "resolved_ref": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ManifestContentDTO": {
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "$ref": "#/definitions/domain.ArrowMeta"
+                },
+                "netbridge": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/netbridge.PortDef"
+                    }
+                },
+                "readme": {
+                    "type": "string"
+                },
+                "targets": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/domain.Target"
+                    }
+                },
+                "variables": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.Variable"
+                    }
+                }
+            }
+        },
+        "dto.PairingCodeDTO": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.PathStatusDTO": {
+            "type": "object",
+            "properties": {
+                "bin_dir": {
+                    "type": "string"
+                },
+                "configured": {
+                    "type": "boolean"
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "on_path": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.RedeemPairingCodeRequestDTO": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "device_id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ReturnDTO": {
+            "type": "object",
+            "properties": {
+                "execution_id": {
+                    "description": "ExecutionID names the run this return ended; two returns of the same\nmethod are the same run exactly when their IDs match.",
+                    "type": "string"
+                },
+                "method": {
+                    "type": "string"
+                },
+                "outcome": {
+                    "type": "string",
+                    "enum": [
+                        "success",
+                        "failed",
+                        "cancelled"
+                    ]
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.StepProgressDTO"
+                    }
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.RunRecordDTO": {
+            "type": "object",
+            "properties": {
+                "method": {
+                    "type": "string"
+                },
+                "pid": {
+                    "type": "integer"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.StepProgressDTO"
+                    }
+                },
+                "surface": {
+                    "$ref": "#/definitions/dto.SurfaceDTO"
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.SearchResultDTO": {
+            "type": "object",
+            "properties": {
+                "compatible_os": {
+                    "description": "CompatibleOS is a denormalised projection of the last compile and is\nadvisory: install-time re-resolution is authoritative.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "confidence": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "installed": {
+                    "description": "Installed says the catalog holds the arrow, which is the only thing that\nseparates what you have from what you could have. It is narrower than\nKnown and never follows from it: an arrow can be on this machine because\na search once cached its manifest, which installs nothing.",
+                    "type": "boolean"
+                },
+                "known": {
+                    "description": "Known says the arrow is already on this machine by either route — the\ncatalog holds it, or the vault index cached its manifest. Every GET\n/v0/search result is known by construction. A client merging streamed\nresults over an already-rendered list must keep its own row when this is\ntrue, or it will overwrite a correct provenance with a less specific one.",
+                    "type": "boolean"
+                },
+                "media": {
+                    "description": "Media is the icon/banner pair declared by the manifest.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/domain.ArrowMedia"
+                        }
+                    ]
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
+                "provenance": {
+                    "description": "Provenance is empty when the server cannot say: a streamed result the\ncatalog already holds is known to be yours, but discovery does not know\nwhich provenance your catalog recorded for it.",
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "stars": {
+                    "type": "integer"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "versions": {
+                    "description": "Versions are the refs known locally, not every ref that exists upstream.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.SessionTokenDTO": {
+            "type": "object",
+            "properties": {
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ShutdownDTO": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "exe": {
+                    "type": "string"
+                },
+                "pid": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.StepProgressDTO": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.SurfaceDTO": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "ready": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.UpdateResultDTO": {
+            "type": "object",
+            "properties": {
+                "added_deps": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "available": {
+                    "$ref": "#/definitions/dto.AvailableDTO"
+                },
+                "constrained_deps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ConstrainedDepDTO"
+                    }
+                },
+                "removed_from_manifest": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "safe_to_uninstall": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.ValidationErrorDTO": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "rule": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ValidationResultDTO": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ValidationErrorDTO"
+                    }
+                },
+                "supported_platforms": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "unsupported_platforms": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "valid": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.runningConfig": {
+            "type": "object",
+            "properties": {
+                "api": {
+                    "$ref": "#/definitions/config.API"
+                },
+                "arrows": {
+                    "$ref": "#/definitions/config.Arrows"
+                },
+                "auth": {
+                    "$ref": "#/definitions/config.Auth"
+                },
+                "logger": {
+                    "$ref": "#/definitions/config.Logger"
+                },
+                "manifold": {
+                    "$ref": "#/definitions/config.Manifold"
+                },
+                "netbridge": {
+                    "$ref": "#/definitions/config.Netbridge"
+                },
+                "recommendation": {
+                    "$ref": "#/definitions/config.Recommendation"
+                },
+                "search": {
+                    "$ref": "#/definitions/config.Search"
+                },
+                "vault": {
+                    "$ref": "#/definitions/config.Vault"
+                }
+            }
+        },
+        "libs.ErrResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "libs.MutationResponse": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "libs.MutationResultResponse": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "namespace": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "libs.QueryResponse": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "netbridge.PortDef": {
             "type": "object",
             "properties": {
                 "default": {
@@ -1574,14 +3765,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "protocol": {
-                    "$ref": "#/definitions/github_com_rabbytesoftware_quiver_core_internal_domain_netbridge.Protocol"
+                    "$ref": "#/definitions/netbridge.Protocol"
                 },
                 "required": {
                     "type": "boolean"
                 }
             }
         },
-        "github_com_rabbytesoftware_quiver_core_internal_domain_netbridge.Protocol": {
+        "netbridge.Protocol": {
             "type": "string",
             "enum": [
                 "tcp",
@@ -1593,6 +3784,38 @@ const docTemplate = `{
                 "ProtocolUDP",
                 "ProtocolTCPUDP"
             ]
+        },
+        "usecases.Config": {
+            "type": "object",
+            "properties": {
+                "api": {
+                    "$ref": "#/definitions/config.API"
+                },
+                "arrows": {
+                    "$ref": "#/definitions/config.Arrows"
+                },
+                "auth": {
+                    "$ref": "#/definitions/config.Auth"
+                },
+                "logger": {
+                    "$ref": "#/definitions/config.Logger"
+                },
+                "manifold": {
+                    "$ref": "#/definitions/config.Manifold"
+                },
+                "netbridge": {
+                    "$ref": "#/definitions/config.Netbridge"
+                },
+                "recommendation": {
+                    "$ref": "#/definitions/config.Recommendation"
+                },
+                "search": {
+                    "$ref": "#/definitions/config.Search"
+                },
+                "vault": {
+                    "$ref": "#/definitions/config.Vault"
+                }
+            }
         }
     }
 }`

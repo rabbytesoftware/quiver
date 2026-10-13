@@ -31,7 +31,7 @@ servers:
 channels:
   arrow:
     address: /v0/arrow
-    description: Arrow catalog — all arrows. Triggered by arrow.Add, arrow.UpdateManifest, arrow.Remove.
+    description: Arrow catalog — all arrows. Triggered by arrow add, advance, manifest refresh, install and uninstall stamps, version checks, and remove.
     messages:
       arrow:
         $ref: '#/components/messages/ArrowMessage'
@@ -80,7 +80,24 @@ channels:
       runtime:
         $ref: '#/components/messages/ArrowRuntimeMessage'
 
+  consoleLogs:
+    address: /v0/console/logs
+    description: >
+      The daemon's own log records. The server replays the last 500 records
+      (or those after the since query), sends one ready frame, then streams new
+      records. A client that falls behind is disconnected and reconnects with
+      since. Sensitive values are redacted before a record is stored.
+    messages:
+      consoleLog:
+        $ref: '#/components/messages/ConsoleLogMessage'
+
 operations:
+  receiveConsoleLogs:
+    action: receive
+    channel:
+      $ref: '#/channels/consoleLogs'
+    summary: Daemon log records, replay then live
+
   receiveArrow:
     action: receive
     channel:
@@ -137,6 +154,12 @@ components:
       payload:
         $ref: '#/components/schemas/CollectionEvent'
 
+    ConsoleLogMessage:
+      name: ConsoleLog
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ConsoleFrame'
+
     ArrowRuntimeMessage:
       name: ArrowRuntime
       contentType: application/json
@@ -144,6 +167,34 @@ components:
         $ref: '#/components/schemas/ArrowRuntime'
 
   schemas:
+    ConsoleFrame:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [log, ready]
+        seq:
+          type: integer
+          description: Per-process sequence number of a log record; on ready, the last one sent.
+        time:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [debug, info, warn, error]
+        component:
+          type: string
+        msg:
+          type: string
+        fields:
+          type: object
+          additionalProperties: true
+        reset:
+          type: boolean
+          description: On ready, set when since is newer than the daemon's newest record, which means it restarted.
+
     ArrowEvent:
       type: object
       required:
@@ -157,15 +208,13 @@ components:
             - removed
           description: >
             Discriminant for the catalog operation.
-            "upserted" — arrow was added, updated, upgraded, or marked installed.
+            "upserted" — arrow was added, advanced, had its manifest refreshed, was marked installed or uninstalled, or had a version check recorded.
             "removed"  — arrow was deleted; only namespace is meaningful.
         namespace:
           type: string
         name:
           type: string
         description:
-          type: string
-        version:
           type: string
         tags:
           type: array
@@ -181,6 +230,39 @@ components:
         user_installed:
           type: boolean
           description: true for user-intent arrows; false for transitive dependencies or on "removed".
+        last_used_at:
+          type: string
+          format: date-time
+          description: Stamped when an _execute run completes successfully; omitted while the arrow has never been run.
+        origin:
+          type: string
+          enum:
+            - declared
+            - inferred
+          description: '"declared" for a hand-authored manifest, "inferred" for one Fletcher synthesized.'
+        inference:
+          allOf:
+            - $ref: '#/components/schemas/Inference'
+          description: Present only when origin is "inferred".
+
+    Inference:
+      type: object
+      required:
+        - generator
+        - confidence
+      properties:
+        generator:
+          type: string
+        confidence:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+        warnings:
+          type: array
+          items:
+            type: string
 
     StepProgress:
       type: object
@@ -204,6 +286,9 @@ components:
           type:
             - string
             - "null"
+        note:
+          type: string
+          description: Present on a completed step that did nothing worth failing over, such as an auto expose entry that found nothing to expose.
 
     Execution:
       type: object
@@ -223,6 +308,28 @@ components:
           type: object
           additionalProperties:
             type: string
+        surface:
+          type: object
+          description: The interface opened by the ui node of the run step currently running. Absent until that run opens one and again once it exits.
+          required:
+            - mode
+            - path
+            - ready
+          properties:
+            title:
+              type: string
+              description: Name the shell shows for the interface. Omitted when the manifest sets none.
+            mode:
+              type: string
+              enum:
+                - listen
+                - static
+            path:
+              type: string
+              description: Initial path, served under /v0/ui/{ns}.
+            ready:
+              type: boolean
+              description: True once the surface answers requests.
 
     LastReturn:
       type: object
@@ -232,6 +339,9 @@ components:
         - steps
         - variables
       properties:
+        execution_id:
+          type: string
+          description: The run this return ended; omitted for a return recorded before returns carried one.
         method:
           type: string
         outcome:

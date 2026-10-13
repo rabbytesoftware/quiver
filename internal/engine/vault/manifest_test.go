@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -122,6 +123,82 @@ func TestHelperGetArrow_MetaMissingManifest(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotCached)
 }
 
+// getArrow / putArrowNotFound tests
+
+func TestHelperPutArrowNotFound_ThenGetArrow_ReturnsConfirmedAbsent(t *testing.T) {
+	s := newTestStore(t)
+	ns := mocks.Namespace()
+
+	require.NoError(t, putArrowNotFound(s, ns, ""))
+
+	_, err := getArrow(s, ns)
+
+	assert.ErrorIs(t, err, ErrConfirmedAbsent)
+}
+
+// TestHelperGetArrow_ConfirmedAbsent_PastTTL_ReportsNotCached proves the
+// negative marker expires the same way a positive one goes stale: past the
+// TTL, getArrow reports ErrNotCached (not ErrConfirmedAbsent), so the
+// caller attempts a live resolution again instead of trusting a day-old
+// "not found" forever.
+func TestHelperGetArrow_ConfirmedAbsent_PastTTL_ReportsNotCached(t *testing.T) {
+	s := newTestStore(t)
+	ns := mocks.Namespace()
+
+	require.NoError(t, os.MkdirAll(s.vaultPath, 0o700))
+	meta, err := json.Marshal(VaultMetadata{CachedAt: time.Now().Add(-2 * time.Hour), NotFound: true})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(s.metaFilePath(ns), meta, 0o644))
+
+	_, getErr := getArrow(s, ns)
+
+	assert.ErrorIs(t, getErr, ErrNotCached)
+}
+
+func TestHelperPutArrowNotFound_WritesNoManifestFile(t *testing.T) {
+	s := newTestStore(t)
+	ns := mocks.Namespace()
+
+	require.NoError(t, putArrowNotFound(s, ns, ""))
+
+	// A confirmed-absent marker has nothing to serve as content: neither
+	// candidate extension should exist on disk.
+	_, mdErr := os.Stat(s.manifestFilePath(ns, "ARROW.md"))
+	assert.True(t, os.IsNotExist(mdErr))
+	_, yamlErr := os.Stat(s.manifestFilePath(ns, "arrow.yaml"))
+	assert.True(t, os.IsNotExist(yamlErr))
+}
+
+func TestHelperPutArrowNotFound_MkdirError(t *testing.T) {
+	s := newTestStore(t)
+	// Block MkdirAll by writing a file where vaultPath would be, same
+	// technique TestHelperPutArrow_MkdirError already uses.
+	s.vaultPath = filepath.Join(t.TempDir(), "blocked")
+	require.NoError(t, os.WriteFile(s.vaultPath, []byte("block"), 0o644))
+
+	err := putArrowNotFound(s, mocks.Namespace(), "")
+
+	assert.Error(t, err)
+}
+
+// TestHelperPutArrow_ClearsPriorNotFoundMarker proves the (rare, but
+// possible for a mutable ref) transition back from confirmed-absent to a
+// real cached manifest: a plain putArrow after putArrowNotFound leaves no
+// trace of the NotFound marker, so getArrow serves the fresh content
+// instead of ErrConfirmedAbsent.
+func TestHelperPutArrow_ClearsPriorNotFoundMarker(t *testing.T) {
+	s := newTestStore(t)
+	ns := mocks.Namespace()
+
+	require.NoError(t, putArrowNotFound(s, ns, ""))
+	require.NoError(t, putArrow(s, ns, testFile))
+
+	got, err := getArrow(s, ns)
+
+	require.NoError(t, err)
+	assert.Equal(t, testFile.Content, got.Content)
+}
+
 func TestHelperGetArrow_ReadPermissionError(t *testing.T) {
 	if os.Getuid() == 0 || runtime.GOOS == "windows" {
 		t.Skip("skipping: file permission restrictions do not apply for root or on Windows")
@@ -160,7 +237,9 @@ func TestHelperPutArrow_CreatesWorkdir(t *testing.T) {
 
 	require.NoError(t, putArrow(s, ns, testFile))
 
-	_, err := os.Stat(s.workdirPath(ns))
+	workdir, err := s.namespacePath(ns)
+	require.NoError(t, err)
+	_, err = os.Stat(workdir)
 	assert.NoError(t, err)
 }
 
@@ -286,66 +365,6 @@ func TestHelperDeleteArrow_CorruptedMeta(t *testing.T) {
 
 	err := deleteArrow(s, ns)
 	assert.Error(t, err)
-}
-
-// renameArrow tests
-
-func TestHelperRenameArrow_MovesFiles(t *testing.T) {
-	s := newTestStore(t)
-	oldNs := domain.Namespace("github.com/org/repo@v1.0.0")
-	newNs := domain.Namespace("github.com/org/repo@v2.0.0")
-
-	require.NoError(t, putArrow(s, oldNs, testFile))
-
-	err := renameArrow(s, oldNs, newNs)
-	require.NoError(t, err)
-
-	// old should be gone
-	_, err = getArrow(s, oldNs)
-	assert.ErrorIs(t, err, ErrNotCached)
-
-	// new should exist
-	got, err := getArrow(s, newNs)
-	require.NoError(t, err)
-	assert.Equal(t, testFile.Content, got.Content)
-}
-
-func TestHelperRenameArrow_SourceDoesNotExist(t *testing.T) {
-	s := newTestStore(t)
-	oldNs := domain.Namespace("github.com/org/nonexistent@v1.0.0")
-	newNs := domain.Namespace("github.com/org/new@v1.0.0")
-
-	err := renameArrow(s, oldNs, newNs)
-	assert.Error(t, err)
-}
-
-func TestHelperRenameArrow_NoConcurrentDeadlock(t *testing.T) {
-	s := newTestStore(t)
-	ns1 := domain.Namespace("github.com/a/b@v1.0.0")
-	ns2 := domain.Namespace("github.com/c/d@v1.0.0")
-
-	require.NoError(t, putArrow(s, ns1, ManifestFile{Content: []byte("x"), Filename: "arrow.yaml"}))
-
-	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			_ = renameArrow(s, ns1, ns2)
-		}()
-		go func() {
-			defer wg.Done()
-			_ = renameArrow(s, ns2, ns1)
-		}()
-	}
-
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("deadlock detected")
-	}
 }
 
 // listVersions tests
@@ -734,13 +753,20 @@ func TestHelperPutCollection_AcquireNamespaceError(t *testing.T) {
 // Constructor tests
 
 func TestNewConstructor_WithDefaults(t *testing.T) {
-	v := New("", "", 0)
+	// New creates the vault directory on disk, so redirect home away from the
+	// developer's real ~/.quiver.
+	t.Setenv("HOME", t.TempDir())
+
+	v, err := New("", "", 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
 
 	assert.NotNil(t, v)
 	st := v.(*store)
 	assert.NotEmpty(t, st.vaultPath)
 	assert.NotEmpty(t, st.namespacesPath)
 	assert.Equal(t, 24*time.Hour, st.ttl)
+	assert.Equal(t, 720*time.Hour, st.indexTTL)
 	assert.NotNil(t, st.locks)
 	assert.Equal(t, 0, len(st.locks))
 }
@@ -750,13 +776,24 @@ func TestNewConstructor_WithCustomValues(t *testing.T) {
 	nsDir := t.TempDir()
 	ttl := 48 * time.Hour
 
-	v := New(vaultDir, nsDir, ttl)
+	v, err := New(vaultDir, nsDir, ttl)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
 
 	assert.NotNil(t, v)
 	st := v.(*store)
 	assert.Equal(t, vaultDir, st.vaultPath)
 	assert.Equal(t, nsDir, st.namespacesPath)
 	assert.Equal(t, ttl, st.ttl)
+}
+
+func TestNewConstructor_UncreatableVaultDir_Error(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+
+	v, err := New(filepath.Join(blocker, "vault"), t.TempDir(), time.Hour)
+	require.Error(t, err)
+	assert.Nil(t, v)
 }
 
 // Race condition in namespaceLock
@@ -996,8 +1033,8 @@ func TestHelperDeleteArrow_ManifestRemoveError(t *testing.T) {
 	defer os.Chmod(s.vaultPath, 0o700)
 
 	err := deleteArrow(s, ns)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "vault delete: remove manifest")
+	assert.ErrorIs(t, err, os.ErrPermission)
+	assert.FileExists(t, s.metaFilePath(ns), "meta outlives a manifest that could not be removed")
 }
 
 func TestHelperDeleteArrow_MetaRemoveError(t *testing.T) {
@@ -1020,53 +1057,8 @@ func TestHelperDeleteArrow_MetaRemoveError(t *testing.T) {
 	defer os.Chmod(s.vaultPath, 0o700)
 
 	err := deleteArrow(s, ns)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "vault delete: remove meta")
-}
-
-// renameArrow error path tests
-
-func TestHelperRenameArrow_ManifestRenameError(t *testing.T) {
-	if os.Getuid() == 0 || runtime.GOOS == "windows" {
-		t.Skip("skipping: file permission restrictions do not apply for root or on Windows")
-	}
-	s := newTestStore(t)
-	oldNs := domain.Namespace("github.com/org/repo@v1.0.0")
-	newNs := domain.Namespace("github.com/org/repo@v2.0.0")
-
-	require.NoError(t, putArrow(s, oldNs, testFile))
-
-	// Make vault dir non-writable so rename of manifest fails
-	require.NoError(t, os.Chmod(s.vaultPath, 0o555))
-	defer os.Chmod(s.vaultPath, 0o700)
-
-	err := renameArrow(s, oldNs, newNs)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "vault rename manifest")
-}
-
-func TestHelperRenameArrow_MetaRenameErrorWithRollback(t *testing.T) {
-	// Trigger the meta rename failure + rollback by making oldMeta non-renameable.
-	// Strategy: write the manifest files manually but put a directory where newMeta should land,
-	// so the manifest rename succeeds but meta rename fails.
-	s := newTestStore(t)
-	oldNs := domain.Namespace("github.com/org/repo@v1.0.0")
-	newNs := domain.Namespace("github.com/org/repo@v2.0.0")
-
-	require.NoError(t, putArrow(s, oldNs, testFile))
-
-	// Create a directory at newMeta path so os.Rename to newMeta fails
-	newMetaPath := s.metaFilePath(newNs)
-	require.NoError(t, os.Mkdir(newMetaPath, 0o700))
-
-	err := renameArrow(s, oldNs, newNs)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "vault rename meta")
-
-	// Rollback should have restored the old manifest — old entry should still be gettable
-	got, getErr := getArrow(s, oldNs)
-	require.NoError(t, getErr)
-	assert.Equal(t, testFile.Content, got.Content)
+	assert.ErrorIs(t, err, os.ErrPermission)
+	assert.FileExists(t, s.metaFilePath(ns))
 }
 
 // putArrow atomicWrite error paths
@@ -1207,4 +1199,123 @@ func TestNamespaceLock_DoubleCheckPath(t *testing.T) {
 	// All goroutines must have gotten the same lock instance
 	assert.Equal(t, 1, len(s.locks))
 	assert.NotNil(t, s.locks[key])
+}
+
+func TestListCachedCollections_ViaVault(t *testing.T) {
+	v := newTestVault(t)
+	ns := domain.Namespace("github.com/org/quiver@v1")
+	_, err := v.PutCollection(context.Background(), ns, mocks.Quiver())
+	require.NoError(t, err)
+
+	got, err := v.ListCachedCollections(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+}
+
+func TestListCachedQuivers_NamespacesPathIsFile_Error(t *testing.T) {
+	s := newTestStore(t)
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	s.namespacesPath = blocker
+
+	got, err := listCachedQuivers(s)
+
+	require.Error(t, err)
+	assert.Empty(t, got)
+}
+
+func TestListCachedQuivers_SkipsTopLevelFiles(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, os.WriteFile(filepath.Join(s.namespacesPath, "stray.txt"), []byte("x"), 0o600))
+
+	got, err := listCachedQuivers(s)
+
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestFindQuiversUnder_SkipsFilesAndWorkdirs(t *testing.T) {
+	s := newTestStore(t)
+	base := filepath.Join(s.namespacesPath, "github.com")
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "workdir"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(base, "notes.txt"), []byte("x"), 0o600))
+
+	got, err := findQuiversUnder(base, "github.com")
+
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestPutArrow_DefaultFlag_SurvivesAnOverwriteThatDoesNotSetIt(t *testing.T) {
+	s := newTestStore(t)
+	ns := domain.Namespace("github.com/u/r@stable")
+	require.NoError(t, s.PutArrow(t.Context(), ns, ManifestFile{Content: []byte("# a"), Filename: "ARROW.md", Ref: "v1.0.0", Commit: "c1", Default: true}))
+	require.NoError(t, s.PutArrow(t.Context(), ns, ManifestFile{Content: []byte("# b"), Filename: "ARROW.md", Ref: "v1.1.0", Commit: "c2"}))
+
+	got, err := s.GetArrow(t.Context(), ns)
+
+	require.NoError(t, err)
+	assert.True(t, got.Default)
+	assert.Equal(t, "c2", got.Commit)
+}
+
+func TestPutArrow_Channels_RoundTripAndSurviveAnOverwriteWithoutThem(t *testing.T) {
+	s := newTestStore(t)
+	ns := domain.Namespace("github.com/u/r@stable")
+	channels := []byte(`[{"Name":"stable"}]`)
+	require.NoError(t, s.PutArrow(t.Context(), ns, ManifestFile{Content: []byte("# a"), Filename: "ARROW.md", Ref: "v1.0.0", Commit: "c1", Channels: channels}))
+	require.NoError(t, s.PutArrow(t.Context(), ns, ManifestFile{Content: []byte("# b"), Filename: "ARROW.md", Ref: "v1.1.0", Commit: "c2"}))
+
+	got, err := s.GetArrow(t.Context(), ns)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, string(channels), string(got.Channels))
+}
+
+func TestPutArrow_DefaultAt_MovesWhenTheMarkIsSetAndNotWhenOnlyKept(t *testing.T) {
+	s := newTestStore(t)
+	ns := domain.Namespace("github.com/u/r@stable")
+	file := ManifestFile{Content: []byte("# a"), Filename: "ARROW.md", Ref: "v1.0.0", Commit: "c1", Default: true}
+	require.NoError(t, s.PutArrow(t.Context(), ns, file))
+	first, err := s.GetArrow(t.Context(), ns)
+	require.NoError(t, err)
+	require.False(t, first.DefaultAt.IsZero())
+
+	time.Sleep(10 * time.Millisecond)
+	file.Default = false
+	require.NoError(t, s.PutArrow(t.Context(), ns, file))
+	kept, err := s.GetArrow(t.Context(), ns)
+	require.NoError(t, err)
+	assert.True(t, kept.Default)
+	assert.True(t, first.DefaultAt.Equal(kept.DefaultAt), "a rewrite keeps the mark's age")
+
+	time.Sleep(10 * time.Millisecond)
+	file.Default = true
+	require.NoError(t, s.PutArrow(t.Context(), ns, file))
+	renewed, err := s.GetArrow(t.Context(), ns)
+	require.NoError(t, err)
+	assert.True(t, renewed.DefaultAt.After(first.DefaultAt), "setting the mark again renews it")
+}
+
+func TestPutArrow_DefaultFlag_RoundTrips(t *testing.T) {
+	testCases := []struct {
+		name      string
+		isDefault bool
+	}{
+		{name: "a manifest a refless namespace settled on", isDefault: true},
+		{name: "any other manifest", isDefault: false},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t)
+			file := ManifestFile{Content: []byte("# arrow"), Filename: "ARROW.md", Ref: "v1.0.0", Commit: "c1", Default: tc.isDefault}
+			require.NoError(t, s.PutArrow(t.Context(), "github.com/u/r@stable", file))
+
+			got, err := s.GetArrow(t.Context(), "github.com/u/r@stable")
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.isDefault, got.Default)
+		})
+	}
 }

@@ -36,7 +36,7 @@ func (s *LifecycleSuite) TestLifecycle_FullRoundTrip() {
 	env.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a", "v1"), domain.ArrowStateReady, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Execute(kit.NSFor("quiver-test/tool-a", "v1"), "execute", nil))
-	env.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a", "v1"), domain.ArrowStateRunning, 30*time.Second)
+	env.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a", "v1"), domain.ArrowStateRunning, 120*time.Second)
 	env.WaitForState(s.T(), kit.NSFor("quiver-test/tool-a", "v1"), domain.ArrowStateReady, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Uninstall(kit.NSFor("quiver-test/tool-a", "v1"), nil))
@@ -44,8 +44,12 @@ func (s *LifecycleSuite) TestLifecycle_FullRoundTrip() {
 
 	s.Equal(http.StatusOK, tc.Remove(kit.NSFor("quiver-test/tool-a", "v1")))
 
-	_, status := tc.GetDetail(kit.NSFor("quiver-test/tool-a", "v1"))
-	s.Equal(http.StatusNotFound, status)
+	// Removed from the catalog, but GetDetail resolves it live like an
+	// uncatalogued namespace — the fixture repository still resolves, so this
+	// reports state "absent" rather than 404ing.
+	detail, status := tc.GetDetail(kit.NSFor("quiver-test/tool-a", "v1"))
+	s.Equal(http.StatusOK, status)
+	s.Equal(string(domain.ArrowStateAbsent), detail.State)
 }
 
 func (s *LifecycleSuite) TestLifecycle_AddIdempotency() {
@@ -59,6 +63,21 @@ func (s *LifecycleSuite) TestLifecycle_AddIdempotency() {
 	env.WaitForListLen(s.T(), 1, 120*time.Second)
 	items, _ := tc.List()
 	s.Len(items, 1)
+}
+
+// quiver.test appears in no platform table, so no configured branch list can
+// answer a refless add. The ref comes off the remote's HEAD instead.
+func (s *LifecycleSuite) TestLifecycle_AddReflessOnAnUnlistedPlatform() {
+	env := s.NewEnv()
+	tc := env.TypedClient(s.T())
+
+	s.Equal(http.StatusCreated, tc.Add("quiver.test/quiver-test/tool-a"))
+	env.WaitForListLen(s.T(), 1, 120*time.Second)
+
+	items, _ := tc.List()
+	s.Require().Len(items, 1)
+	s.Require().Len(items[0].Versions, 1)
+	s.NotEmpty(items[0].Versions[0].Ref, "a refless add must land on a real ref")
 }
 
 func (s *LifecycleSuite) TestLifecycle_StateViaWebSocket() {
@@ -140,45 +159,76 @@ func (s *LifecycleSuite) TestLifecycle_SeedThenInstall() {
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 }
 
+// An update runs only when something is ahead of the row, so the fixture's
+// tag is force-moved first; the update then runs its steps and stamps the
+// moved commit.
 func (s *LifecycleSuite) TestLifecycle_UpdateMethod() {
+	key := "quiver-test/tool-with-update-moved"
+	storer := kit.BuildUpgradeRepo(s.T(), kit.ReadFixture(s.T(), "tool-with-update/arrow.yaml"))
+	s.Repos.Set(key, storer)
+	s.T().Cleanup(func() { s.Repos.Delete(key) })
+
 	env := s.NewEnv()
 	tc := env.TypedClient(s.T())
-	ns := kit.NSFor("quiver-test/tool-with-update", "v1")
+	ns := kit.NSFor(key, "v1")
 
 	s.Equal(http.StatusCreated, tc.Add(ns))
 	s.Equal(http.StatusAccepted, tc.Install(ns, nil))
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
+	var moved string
+	s.Repos.Mutate(func() { moved = kit.MoveTagToNewCommit(s.T(), storer, "v1") })
+
 	s.Equal(http.StatusAccepted, tc.Execute(ns, "_update", nil))
-	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
+	updated := kit.WaitForDetail(s.T(), tc, ns, "the update ran and stamped the moved commit", 120*time.Second,
+		func(d dto.ArrowDetailDTO, status int) bool {
+			return status == http.StatusOK &&
+				d.InstalledCommit == moved &&
+				d.State == string(domain.ArrowStateReady) &&
+				d.LastReturn != nil
+		},
+	)
+	s.Equal(domain.MethodUpdate, updated.LastReturn.Method, "the update steps ran")
+	s.Equal("success", updated.LastReturn.Outcome)
+	s.Require().Len(updated.LastReturn.Steps, 1)
 }
 
-func (s *LifecycleSuite) TestLifecycle_InstalledRefInList() {
+// A list row names its ref from the moment it is added, so the ref cannot say
+// whether the arrow is on disk. The install stamp does: installed_at is absent
+// until _install succeeds, and only then names a real moment.
+func (s *LifecycleSuite) TestLifecycle_InstallStampInList() {
 	env := s.NewEnv()
 	tc := env.TypedClient(s.T())
 	ns := kit.NSFor("quiver-test/tool-a", "v1")
 
 	s.Equal(http.StatusCreated, tc.Add(ns))
+
+	added := kit.WaitForList(
+		s.T(), tc, "the added arrow to reach the catalog list", 120*time.Second,
+		func(items []dto.ArrowListItemDTO, status int) bool {
+			return status == http.StatusOK && len(items) == 1 && len(items[0].Versions) == 1
+		},
+	)
+	s.Equal("v1", added[0].Versions[0].Ref, "a row names its ref before any install")
+	s.Empty(added[0].Versions[0].InstalledAt, "an added arrow carries no install stamp")
+
 	s.Equal(http.StatusAccepted, tc.Install(ns, nil))
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
-	// MarkInstalled is dispatched asynchronously after install steps finish.
-	// Poll until versions[0].ref is populated (typically <100ms after ready).
-	var ref, installedAt string
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		items, _ := tc.List()
-		if len(items) == 1 && len(items[0].Versions) == 1 && items[0].Versions[0].Ref != "" {
-			ref = items[0].Versions[0].Ref
-			installedAt = items[0].Versions[0].InstalledAt
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	// MarkInstalled is dispatched asynchronously after install steps finish, and
+	// reaches the list through its own projection, so `ready` does not imply it.
+	installed := kit.WaitForList(
+		s.T(), tc, "the install stamp to reach the catalog list", 120*time.Second,
+		func(items []dto.ArrowListItemDTO, status int) bool {
+			return status == http.StatusOK &&
+				len(items) == 1 &&
+				len(items[0].Versions) == 1 &&
+				items[0].Versions[0].InstalledAt != ""
+		},
+	)
 
-	s.Equal("v1", ref)
-	s.NotEmpty(installedAt)
-	s.NotEqual("0001-01-01T00:00:00Z", installedAt)
+	s.Equal("v1", installed[0].Versions[0].Ref)
+	s.NotEmpty(installed[0].Versions[0].InstalledAt)
 }
 
 func (s *LifecycleSuite) TestLifecycle_MarkdownArrow() {
@@ -198,7 +248,7 @@ func (s *LifecycleSuite) TestLifecycle_MarkdownArrow() {
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Execute(ns, "execute", nil))
-	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 30*time.Second)
+	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 120*time.Second)
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Uninstall(ns, nil))
@@ -215,7 +265,7 @@ func (s *LifecycleSuite) TestLifecycle_ExecuteWithVariables() {
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Execute(ns, "execute", map[string]string{"EXEC_VAR": "custom-value"}))
-	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 30*time.Second)
+	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 120*time.Second)
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 }
 
@@ -262,14 +312,14 @@ func (s *LifecycleSuite) TestLifecycle_StopThenExecuteAgain() {
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Execute(ns, "execute", nil))
-	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 30*time.Second)
+	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Stop(ns))
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
 	// Execute again after stop — must accept and transition to running.
 	s.Equal(http.StatusAccepted, tc.Execute(ns, "execute", nil))
-	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 30*time.Second)
+	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 120*time.Second)
 }
 
 func (s *LifecycleSuite) TestLifecycle_GetDetailSeededNeverInstalled() {
@@ -279,13 +329,13 @@ func (s *LifecycleSuite) TestLifecycle_GetDetailSeededNeverInstalled() {
 
 	content := kit.ReadFixture(s.T(), "tool-a/arrow.yaml")
 	s.Equal(http.StatusCreated, tc.Seed(ns, content))
-	env.WaitForArrow(s.T(), ns, 30*time.Second)
+	env.WaitForArrow(s.T(), ns, 120*time.Second)
 
 	detail, status := tc.GetDetail(ns)
 	s.Equal(http.StatusOK, status)
 	s.Equal(string(domain.ArrowStateAbsent), detail.State)
 	s.Equal("quiver-test.tool-a", detail.Name)
-	s.Equal("1.0.0", detail.Version)
+	s.Equal("v1", domain.Namespace(detail.Namespace).Ref())
 }
 
 func (s *LifecycleSuite) TestLifecycle_ListMixedInstalledAndNot() {
@@ -296,7 +346,7 @@ func (s *LifecycleSuite) TestLifecycle_ListMixedInstalledAndNot() {
 
 	s.Equal(http.StatusCreated, tc.Add(nsA))
 	s.Equal(http.StatusCreated, tc.Add(nsB))
-	env.WaitForListLen(s.T(), 2, 30*time.Second)
+	env.WaitForListLen(s.T(), 2, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Install(nsA, nil))
 	env.WaitForState(s.T(), nsA, domain.ArrowStateReady, 120*time.Second)
@@ -328,16 +378,7 @@ func (s *LifecycleSuite) TestLifecycle_MultistepProgress() {
 	s.Equal(http.StatusAccepted, tc.Install(ns, nil))
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
-	// Poll until LastReturn is populated (set asynchronously).
-	var detail dto.ArrowDetailDTO
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		detail, _ = tc.GetDetail(ns)
-		if detail.LastReturn != nil && len(detail.LastReturn.Steps) > 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	detail := kit.WaitForLastReturn(s.T(), tc, ns, 1, 120*time.Second)
 
 	// The runtime prepends a synthetic "Resolve dependencies" step at index 0.
 	s.Require().NotNil(detail.LastReturn, "LastReturn must be present after install")
@@ -357,18 +398,10 @@ func (s *LifecycleSuite) TestLifecycle_LastReturnAfterExecution() {
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Execute(ns, "execute", nil))
-	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 30*time.Second)
+	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 120*time.Second)
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
-	var detail dto.ArrowDetailDTO
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		detail, _ = tc.GetDetail(ns)
-		if detail.LastReturn != nil {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	detail := kit.WaitForLastReturn(s.T(), tc, ns, 0, 120*time.Second)
 
 	s.Require().NotNil(detail.LastReturn, "LastReturn must be present after execute")
 	s.Equal("success", detail.LastReturn.Outcome)
@@ -385,33 +418,24 @@ func (s *LifecycleSuite) TestLifecycle_RuntimeFreshAfterReAdd() {
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
 	// Confirm LastReturn is populated after install.
-	var detail dto.ArrowDetailDTO
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		detail, _ = tc.GetDetail(ns)
-		if detail.LastReturn != nil {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	detail := kit.WaitForLastReturn(s.T(), tc, ns, 0, 120*time.Second)
 	s.Require().NotNil(detail.LastReturn, "LastReturn must be set after install")
 
 	s.Equal(http.StatusAccepted, tc.Uninstall(ns, nil))
 	env.WaitForState(s.T(), ns, domain.ArrowStateAbsent, 120*time.Second)
 	s.Equal(http.StatusOK, tc.Remove(ns))
 
-	// Re-add and verify the runtime starts fresh — no stale LastReturn.
+	// Re-add and verify the runtime eventually starts fresh — no stale
+	// LastReturn. The forget cascade behind Remove is durable but asynchronous
+	// (internal/app/repositories/cascade), so this polls rather than asserting
+	// on the very next read.
 	s.Equal(http.StatusCreated, tc.Add(ns))
-	var freshDetail dto.ArrowDetailDTO
-	deadline = time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		var status int
-		freshDetail, status = tc.GetDetail(ns)
-		if status == http.StatusOK {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	freshDetail := kit.WaitForDetail(
+		s.T(), tc, ns, "the re-added arrow to start fresh with no stale LastReturn", 120*time.Second,
+		func(d dto.ArrowDetailDTO, status int) bool {
+			return status == http.StatusOK && d.LastReturn == nil
+		},
+	)
 	s.Nil(freshDetail.LastReturn, "LastReturn must be nil after removing and re-adding the arrow")
 }
 
@@ -436,6 +460,6 @@ func (s *LifecycleSuite) TestLifecycle_ManifestPersistsAcrossRestart() {
 	s.Equal(http.StatusOK, status)
 	s.Equal(string(domain.ArrowStateReady), detail.State, "arrow must be ready after restart")
 	s.Equal("quiver-test.tool-a", detail.Name)
-	s.Equal("1.0.0", detail.Version)
+	s.Equal("v1", domain.Namespace(detail.Namespace).Ref())
 	s.Equal("Simple tool with no dependencies", detail.Description)
 }

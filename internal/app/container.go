@@ -2,19 +2,29 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/char2cs/asynx"
 	asynxModels "github.com/char2cs/asynx/models"
+	gormdb "gorm.io/gorm"
 
 	"github.com/rabbytesoftware/quiver.core/internal/adapter"
+	eventstoreSqlite "github.com/rabbytesoftware/quiver.core/internal/adapter/eventstore/sqlite"
 	adapterSqlite "github.com/rabbytesoftware/quiver.core/internal/adapter/store/sqlite"
 	"github.com/rabbytesoftware/quiver.core/internal/app/hub"
 	"github.com/rabbytesoftware/quiver.core/internal/app/repositories"
+	"github.com/rabbytesoftware/quiver.core/internal/app/selfarrow"
 	"github.com/rabbytesoftware/quiver.core/internal/app/usecases"
+	"github.com/rabbytesoftware/quiver.core/internal/core/config"
 	"github.com/rabbytesoftware/quiver.core/internal/core/paths"
+	"github.com/rabbytesoftware/quiver.core/internal/core/shutdown"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	authdomain "github.com/rabbytesoftware/quiver.core/internal/domain/auth"
 	domainRuntime "github.com/rabbytesoftware/quiver.core/internal/domain/runtime"
 	"github.com/rabbytesoftware/quiver.core/internal/engine"
 )
@@ -22,19 +32,175 @@ import (
 type Container struct {
 	Arrow      usecases.ArrowUsecase
 	Runtime    usecases.RuntimeUsecase
+	Surface    usecases.SurfaceUsecase
 	Collection usecases.CollectionUsecase
-	Hub        *hub.Hub
+	Search     usecases.SearchUsecase
+	// Discovery is nil when the container was built without a vault or a
+	// manifold: there is nothing for a discovery pass to parse with or write
+	// to, so the routes report it rather than half-running.
+	Discovery usecases.DiscoveryUsecase
+	Config    usecases.ConfigUsecase
+	Auth      usecases.AuthUsecase
+	Path      usecases.PathUsecase
+	System    usecases.SystemUsecase
+	// Home is nil when the container was built without discovery.
+	Home usecases.HomeUsecase
+	Hub  *hub.Hub
+
+	repos    *repositories.Container
+	arrowsDB *gormdb.DB
+	deviceDB *gormdb.DB
+	version  string
+	commit   string
+	channel  string
+	homeDir  string
 }
 
+// Start recovers any in-flight forget cascade, starts the runtime usecase,
+// promotes the running binary to the stable self-install path, and only then
+// registers this build into its own arrow catalog. Promotion must precede
+// registration: after a self-update the process may be exec'd out of a
+// self-arrow row's vault workdir, and EnsureRegistered removes the rows
+// earlier builds filed under other identities along with their workdirs, so
+// registering first can leave promotion nothing to copy and revert the next
+// cold start to the previous version. Failures beyond the first two
+// steps are logged, not fatal — they must never block a self-update that
+// already succeeded.
 func (c *Container) Start(ctx context.Context) {
+	c.repos.RecoverForgetCascade(ctx)
 	c.Runtime.Start(ctx)
+	c.promoteRunningBinary(ctx)
+	channel := selfarrow.Channel(config.GetArrows().SelfUpdateChannel, c.channel)
+	if err := selfarrow.EnsureRegistered(ctx, c.repos.Arrow, c.repos.Runtime, c.version, c.commit, channel); err != nil {
+		slog.WarnContext(ctx, "app: self-registration failed", "err", err)
+	}
+	c.repos.Arrow.WatchVersions(ctx)
 }
 
+// StartRecommendation launches the home refresh loop: it refreshes once at once
+// if any shelf is missing or stale, then on its interval, until ctx is
+// cancelled. It is separate from Start because only the daemon wants a
+// background refresh; a container built for a test or a command must not reach a
+// git host on its own.
+func (c *Container) StartRecommendation(ctx context.Context) {
+	c.repos.StartRecommendation(ctx)
+}
+
+func (c *Container) promoteRunningBinary(ctx context.Context) {
+	exe, err := os.Executable()
+	if err != nil {
+		slog.WarnContext(ctx, "app: resolving running executable failed", "err", err)
+		return
+	}
+	if err := selfarrow.PromoteRunningBinary(exe, c.homeDir); err != nil {
+		slog.WarnContext(ctx, "app: promoting running binary failed", "err", err)
+	}
+}
+
+// Shutdown drains every aggregate the app layer owns, then closes the arrows
+// read model this container opened. It must run before the event and snapshot
+// stores are closed, otherwise in-flight writes land on a closed database.
+//
+// arrows.db backs both the arrow and the graph read models, so it closes here
+// rather than in either repository — and only once repos.Shutdown has drained
+// the arrow aggregate, since both read models are fed by its projections.
+//
+// Update commits drain first: they write to both aggregates, off either
+// one's own queue.
 func (c *Container) Shutdown(ctx context.Context) error {
-	return c.Runtime.Shutdown(ctx)
+	var errs []error
+
+	c.stopWatchingVersions()
+
+	if err := c.DrainUpdates(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("app container: %w", err))
+	}
+
+	if err := c.shutdownRepos(ctx); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.closeArrowsDB(); err != nil {
+		errs = append(errs, fmt.Errorf("app container: close arrows db: %w", err))
+	}
+
+	if err := c.closeDeviceDB(); err != nil {
+		errs = append(errs, fmt.Errorf("app container: close device db: %w", err))
+	}
+
+	return errors.Join(errs...)
 }
 
-type appOpts struct{ homeDir string }
+// stopWatchingVersions ends the version check before anything drains: a
+// check writes to both aggregates.
+func (c *Container) stopWatchingVersions() {
+	if c.repos == nil {
+		return
+	}
+	c.repos.Arrow.StopWatchingVersions()
+}
+
+// DrainUpdates waits for the update commits still in flight; see
+// usecases.RuntimeUsecase.Drain. It is safe to call before Shutdown, which
+// drains again and then finds nothing left.
+func (c *Container) DrainUpdates(ctx context.Context) error {
+	if c.Runtime == nil {
+		return nil
+	}
+	return c.Runtime.Drain(ctx)
+}
+
+func (c *Container) shutdownRepos(ctx context.Context) error {
+	if c.repos == nil {
+		return nil
+	}
+	return c.repos.Shutdown(ctx)
+}
+
+func (c *Container) closeArrowsDB() error {
+	if c.arrowsDB == nil {
+		return nil
+	}
+	return adapterSqlite.CloseDB(c.arrowsDB)
+}
+
+func (c *Container) closeDeviceDB() error {
+	if c.deviceDB == nil {
+		return nil
+	}
+	return adapterSqlite.CloseDB(c.deviceDB)
+}
+
+// discardDB releases a read-model handle opened by a New that failed afterwards,
+// so a half-built container never leaves a SQLite file open with no owner.
+func discardDB(db *gormdb.DB) {
+	if err := adapterSqlite.CloseDB(db); err != nil {
+		slog.Warn("app container: close db after failed construction", "err", err)
+	}
+}
+
+// discardRepos releases everything a successfully built repositories.Container
+// owns — including the collections database it opened — plus the arrows and
+// device handles this container opened itself.
+func discardRepos(repos *repositories.Container, arrowsDB, deviceDB *gormdb.DB) {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdown.DiscardTimeout)
+	defer cancel()
+
+	if err := repos.Shutdown(ctx); err != nil {
+		slog.Warn("app container: release repositories after failed construction", "err", err)
+	}
+	discardDB(arrowsDB)
+	discardDB(deviceDB)
+}
+
+type appOpts struct {
+	homeDir              string
+	version              string
+	commit               string
+	channel              string
+	stop                 func()
+	versionCheckInterval *time.Duration
+}
 
 type Option func(*appOpts)
 
@@ -43,8 +209,43 @@ func WithHomeDir(dir string) Option {
 	return func(o *appOpts) { o.homeDir = dir }
 }
 
+// WithVersion sets the running build's own version, used to register this
+// daemon into its own arrow catalog on boot. See selfarrow.EnsureRegistered.
+func WithVersion(v string) Option {
+	return func(o *appOpts) { o.version = v }
+}
+
+// WithCommit sets the full hash of the commit the running build came from,
+// recorded against this daemon's own catalog row on boot.
+func WithCommit(c string) Option {
+	return func(o *appOpts) { o.commit = c }
+}
+
+// WithChannel sets the release channel the running build was published under.
+// An explicit self_update_channel config still wins. See selfarrow.Channel.
+func WithChannel(c string) Option {
+	return func(o *appOpts) { o.channel = c }
+}
+
+// WithStop hands the container the daemon's own cancellation, the one
+// POST /v0/system/shutdown triggers.
+func WithStop(stop func()) Option {
+	return func(o *appOpts) { o.stop = stop }
+}
+
+// WithVersionCheckInterval overrides arrows.version_check_interval, the
+// period of the installed rows' version check; zero turns it off.
+func WithVersionCheckInterval(d time.Duration) Option {
+	return func(o *appOpts) { o.versionCheckInterval = &d }
+}
+
 // New constructs Arrow, Runtime, and Quiver usecases wired to the provided engine
 // and adapter containers. Callers are responsible for opening and managing the event stores.
+//
+// This function sits close to golangci-lint's funlen limit (100 lines) after
+// listRuntimeAggregates was extracted out of it to fix a violation the
+// feature/cli merge introduced. The next addition here is likely to trip it
+// again — extract another helper rather than letting this grow further.
 func New(
 	engines *engine.Container,
 	adapters *adapter.Container,
@@ -57,28 +258,22 @@ func New(
 
 	os := domain.CurrentOS()
 
-	var storePath string
-	var err error
-	if cfg.homeDir != "" {
-		storePath, err = paths.StoreAt(cfg.homeDir)
-	} else {
-		storePath, err = paths.Store()
-	}
+	storePath, err := resolveStorePath(cfg.homeDir)
 	if err != nil {
 		return nil, fmt.Errorf("app container: store path: %w", err)
 	}
 
-	axArrow, err := newAsynx[domain.Arrow](adapters.ArrowES)
+	axArrow, err := newAsynx[domain.Arrow](adapters.Arrow)
 	if err != nil {
 		return nil, fmt.Errorf("app container: asynx arrow: %w", err)
 	}
 
-	axRuntime, err := newAsynx[domainRuntime.ArrowRuntime](adapters.RuntimeES)
+	axRuntime, err := newAsynx[domainRuntime.ArrowRuntime](adapters.Runtime)
 	if err != nil {
 		return nil, fmt.Errorf("app container: asynx runtime: %w", err)
 	}
 
-	axCollection, err := newAsynx[domain.Collection](adapters.QuiverES)
+	axCollection, err := newAsynx[domain.Collection](adapters.Quiver)
 	if err != nil {
 		return nil, fmt.Errorf("app container: asynx quiver: %w", err)
 	}
@@ -86,6 +281,12 @@ func New(
 	db, err := adapterSqlite.OpenDB(filepath.Join(storePath, "arrows.db"))
 	if err != nil {
 		return nil, fmt.Errorf("app container: open db: %w", err)
+	}
+
+	axPairingCode, axDevice, deviceDB, err := newAuthStores(adapters, storePath)
+	if err != nil {
+		discardDB(db)
+		return nil, err
 	}
 
 	quiverDBPath := filepath.Join(storePath, "collections.db")
@@ -101,33 +302,176 @@ func New(
 		engines.Vault,
 		engines.Manifold,
 		engines.Wizard,
+		engines.Surface,
 		os,
 		h,
+		engines.Providers,
+		listRuntimeAggregates(adapters.Runtime.Events),
+		axPairingCode,
+		axDevice,
+		deviceDB,
+		repoOptions(cfg)...,
 	)
 	if err != nil {
+		discardDB(db)
+		discardDB(deviceDB)
 		return nil, fmt.Errorf("app container: repositories: %w", err)
 	}
 
 	if err := repos.RegisterHubProjections(h); err != nil {
+		discardRepos(repos, db, deviceDB)
 		return nil, fmt.Errorf("app container: hub projections: %w", err)
 	}
 
-	uc, err := usecases.New(repos, engines.Manifold, engines.Vault)
+	uc, err := usecases.New(repos, engines.Manifold, engines.Vault, engines.Wizard, cfg.stop)
 	if err != nil {
+		discardRepos(repos, db, deviceDB)
 		return nil, fmt.Errorf("app container: usecases: %w", err)
 	}
 
+	container := assemble(cfg, uc, h, repos, db, deviceDB)
+	container.Surface = usecases.NewSurfaceUsecase(uc.Runtime, engines.Surface)
+	return container, nil
+}
+
+func assemble(
+	cfg appOpts,
+	uc *usecases.Container,
+	h *hub.Hub,
+	repos *repositories.Container,
+	db *gormdb.DB,
+	deviceDB *gormdb.DB,
+) *Container {
 	return &Container{
 		Arrow:      uc.Arrow,
 		Runtime:    uc.Runtime,
 		Collection: uc.Collection,
+		Search:     uc.Search,
+		Discovery:  uc.Discovery,
+		Config:     uc.Config,
+		Auth:       uc.Auth,
+		Path:       uc.Path,
+		System:     uc.System,
+		Home:       uc.Home,
 		Hub:        h,
-	}, nil
+		repos:      repos,
+		arrowsDB:   db,
+		deviceDB:   deviceDB,
+		version:    cfg.version,
+		commit:     cfg.commit,
+		channel:    cfg.channel,
+		homeDir:    cfg.homeDir,
+	}
 }
 
-func newAsynx[T any](es asynxModels.Store) (asynx.Asynx[T], error) {
+func repoOptions(
+	cfg appOpts,
+) []repositories.Option {
+	var opts []repositories.Option
+	if cfg.versionCheckInterval != nil {
+		opts = append(opts, repositories.WithVersionCheckInterval(*cfg.versionCheckInterval))
+	}
+	return opts
+}
+
+// resolveStorePath mirrors every other homeDir/homeDirAt path pair in this
+// codebase: an empty homeDir means no override, so it resolves against the
+// process home instead of the empty string literally.
+func resolveStorePath(homeDir string) (string, error) {
+	if homeDir != "" {
+		return paths.StoreAt(homeDir)
+	}
+	return paths.Store()
+}
+
+// listRuntimeAggregates returns a ListRuntimeAggregatesFn backed by events,
+// used by the runtime repository's crash-recovery pass to enumerate
+// aggregates that predate this process.
+func listRuntimeAggregates(
+	events eventstoreSqlite.Store,
+) func(ctx context.Context) ([]domain.Namespace, error) {
+	return func(ctx context.Context) ([]domain.Namespace, error) {
+		ids, err := events.ListAggregateIDs(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("app: list runtime aggregates: %w", err)
+		}
+		out := make([]domain.Namespace, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, domain.Namespace(id))
+		}
+		return out, nil
+	}
+}
+
+// newAuthStores builds the pairing-code and device asynx instances plus the
+// device read-model's own db file (separate from arrows.db per CLAUDE.md
+// §4.6 — never point two asynx instances at the same store). The device
+// asynx instance succeeding but its db file failing to open would otherwise
+// leak that instance with nothing to release it; both are cheap to construct
+// so failing either one is reported as a single error rather than half-built.
+func newAuthStores(
+	adapters *adapter.Container,
+	storePath string,
+) (asynx.Asynx[authdomain.PairingCode], asynx.Asynx[authdomain.Device], *gormdb.DB, error) {
+	axPairingCode, err := newAsynx[authdomain.PairingCode](adapters.PairingCode)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("app container: asynx pairingcode: %w", err)
+	}
+
+	axDevice, err := newAsynx[authdomain.Device](adapters.Device)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("app container: asynx device: %w", err)
+	}
+
+	deviceDB, err := adapterSqlite.OpenDB(filepath.Join(storePath, "device_store.db"))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("app container: open device db: %w", err)
+	}
+
+	return axPairingCode, axDevice, deviceDB, nil
+}
+
+// newAsynx builds an asynx instance wired to s's paired event and snapshot
+// stores.
+//
+// WorkersPerShard is left at the asynx default. Pinning it to 1 deadlocks arrow
+// deletion: newAsynx is called once per aggregate, so arrow and runtime each get
+// their own processor and shard pool, and the deadlock is a circular wait across
+// those two instances, not within one shard. An arrow worker running the
+// synchronous OnArrowRemoved cascade (repositories/container.go) blocks inside
+// PublishSync on a send into axRuntime, while a runtime worker is already
+// blocked on a send of its own. With one worker per shard there is nobody left
+// to make progress.
+//
+// The cost of reverting is real, not zero. Per asynx's ShardingOpts docs,
+// WorkersPerShard 1 serializes load-validate-write per shard so same-aggregate
+// commands cannot conflict; above 1 the loser of a race returns
+// ErrPipelineFailed. Every call site in arrow.go and runtime.go maps that to
+// apperrors.ErrStateViolation, and BeginStop is the only one that retries.
+//
+// This revert widens the deadlock window rather than closing it: the circular
+// wait still exists, it now just needs all 8 workers blocked instead of 1. The
+// actual fix is to make the forget-cascade non-blocking.
+func newAsynx[T any](
+	s adapter.Stores,
+) (asynx.Asynx[T], error) {
 	return asynx.New[T]().
-		WithEventStore(es).
-		WithShardingOpts(asynx.ShardingOpts{Shards: 8, QueueDepth: 1000}).
+		WithEventStore(s.Events).
+		WithSnapshotStore(s.Snapshots).
+		WithShardingOpts(asynx.ShardingOpts{
+			Shards:     8,
+			QueueDepth: 1000,
+		}).
+		WithCorruptionHook(func(err error) {
+			slog.Error("asynx snapshot unreadable; falling back to cold replay", "err", err)
+		}).
+		WithPanicHandler(func(ctx context.Context, evt asynxModels.Event[T], p any) {
+			slog.ErrorContext(ctx, "asynx projection panic; read model may be stale",
+				"aggregate", evt.AggregateID, "event", evt.EventName, "version", evt.Version, "panic", p)
+		}).
+		WithPublishErrorHandler(func(ctx context.Context, evt asynxModels.Event[T], err error) {
+			slog.ErrorContext(ctx, "asynx publish failed; event is durable but was not delivered",
+				"aggregate", evt.AggregateID, "event", evt.EventName, "version", evt.Version, "err", err)
+		}).
 		Build()
 }

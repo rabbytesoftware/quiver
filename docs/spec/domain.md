@@ -11,12 +11,12 @@ Three persistent aggregates live in this layer:
 
 | Aggregate     | Identity (key)                            | Source file                                  |
 |---------------|-------------------------------------------|----------------------------------------------|
-| `Arrow`       | `Namespace` (carries an `@ref` suffix)    | `internal/domain/arrow.go`                   |
+| `Arrow`       | `Namespace` (carries an `@selector` suffix) | `internal/domain/arrow.go`                 |
 | `ArrowRuntime`| `Namespace` (the same namespace as Arrow) | `internal/domain/runtime/arrow_runtime.go`   |
 | `Collection`  | `Namespace` (3-segment, no `@ref`)        | `internal/domain/collection.go`              |
 
-The Arrow aggregate is the canonical record of an installed `namespace@ref` — its
-manifest data, target compilation, and bookkeeping. The runtime aggregate is the
+The Arrow aggregate is the canonical record of a catalogued `namespace@selector` — its
+manifest data, target compilation, the version it has installed, and bookkeeping. The runtime aggregate is the
 volatile execution context for that same namespace. The collection aggregate is a
 followed catalog of arrows.
 
@@ -45,17 +45,21 @@ two parts joined by `@`:
 domain.tld/user/repo[/auid][@ref]
 ```
 
-The bare portion (left of `@`) names the software; the optional ref names the
-git revision. The same namespace without a ref refers to the software in the
-abstract; the same namespace with a ref refers to one specific installed
-version.
+The bare portion (left of `@`) names the software; the optional suffix names
+what to follow. For a catalog row the suffix is a **selector** — a channel
+(`stable`), a constraint (`v1.*`), a pinned tag or branch (`v1.2.3`, `main`), or a
+commit — and it never changes for the life of the row. The same namespace
+without a suffix refers to the software in the abstract; no catalog row is keyed
+by one. Which version a row has installed is state inside it (`Resolved`), not
+part of the key. See [manifests/v0/versioning.md](manifests/v0/versioning.md).
 
 | Form                                         | Bare segments | Has ref | Meaning                                            |
 |----------------------------------------------|---------------|---------|----------------------------------------------------|
 | `github.com/valve/steamcmd`                  | 3             | no      | Standalone arrow, version unspecified              |
-| `github.com/valve/steamcmd@v1.2.3`           | 3             | yes     | Standalone arrow at tag `v1.2.3`                   |
+| `github.com/valve/steamcmd@v1.2.3`           | 3             | yes     | Standalone arrow pinned to tag `v1.2.3`            |
+| `github.com/valve/steamcmd@stable`           | 3             | yes     | Standalone arrow following its `stable` channel    |
 | `github.com/char2cs/gaming.quiver/cs2`       | 4             | no      | Quiver-hosted arrow `cs2` inside a collection      |
-| `github.com/char2cs/gaming.quiver/cs2@main`  | 4             | yes     | The same arrow at branch `main`                    |
+| `github.com/char2cs/gaming.quiver/cs2@main`  | 4             | yes     | The same arrow pinned to branch `main`             |
 
 Validation rules (`Namespace.Validate`):
 
@@ -76,16 +80,16 @@ Helpers:
 - `Domain()` returns the first segment (e.g. `github.com`).
 - `CloneURL()` synthesises an HTTPS URL from the first three segments.
 
-The constant `VersionLatestRef = "latest"` denotes the head of the default
-branch; constants `MethodInstall`, `MethodUninstall`, `MethodUpdate`,
+The constants `MethodInstall`, `MethodUninstall`, `MethodUpdate`,
 `MethodExecute`, and `MethodStop` (all underscore-prefixed) are the reserved
-lifecycle method names.
+lifecycle method names. `latest` has no special meaning as a suffix — it is
+classified like any other selector.
 
 ---
 
 ## 2. `Arrow` aggregate
 
-The `Arrow` struct is the canonical record for one installed `namespace@ref`.
+The `Arrow` struct is the canonical record for one catalogued `namespace@selector`.
 The same struct doubles as a parsed-but-not-yet-installed manifest (vault and
 manifold contexts) — in those uses the installation fields stay zero.
 
@@ -93,39 +97,51 @@ manifold contexts) — in those uses the installation fields stay zero.
 
 | Field                  | Type                                | Purpose                                                               |
 |------------------------|-------------------------------------|-----------------------------------------------------------------------|
-| `Namespace`            | `Namespace`                         | Aggregate key. Always carries `@ref` for installed arrows.            |
+| `Namespace`            | `Namespace`                         | Aggregate key, `namespace@selector`. Never changes for the life of the row. |
 | `ArrowMeta`            | embedded                            | Display metadata — see below.                                         |
 | `Variables`            | `[]Variable`                        | User-configurable parameters declared by the manifest.                |
 | `Netbridge`            | `[]netbridge.PortDef`               | Required network ports.                                               |
 | `Targets`              | `map[OS]Target`                     | Per-OS execution recipes — already compiled from manifest globs.      |
-| `InstalledAt`          | `time.Time`                         | Timestamp written when the install transitions to `ready`.            |
+| `InstalledAt`          | `time.Time`                         | Timestamp written when the install transitions to `ready`; zero until then and again after an uninstall. |
+| `LastUsedAt`           | `time.Time`                         | Timestamp written when an `_execute` run completes successfully; zero if the arrow has never been run. |
 | `UserInstalled`        | `bool`                              | True when a user explicitly installed this arrow; false for deps.     |
-| `InstalledRef`         | `string`                            | The exact resolved ref recorded at install time.                      |
-| `InstalledConstraint`  | `string`                            | The original ref/constraint the user (or parent) requested.           |
-| `UpgradedFromNs`       | `Namespace`                         | Set only on the `arrow.upgraded.*` event so reactions can clean up.   |
+| `SelectorKind`         | `SelectorKind`                      | How the selector is followed: `pin` (the zero value), `channel`, `constraint`, `commit`, refined by the ref it named at creation (`pin:tag`, `pin:branch`, `channel:ordered`, `channel:pointer`, `channel:branch`; `Family()` maps back). Decided at creation and stored. |
+| `Resolved`             | `Resolved{Ref, Commit, Fingerprint}`| What is installed: the ref, its full commit, and a fingerprint (the commit today). Moved only by an advance or an adoption. |
+| `Available`            | `*Available{Ref, Commit}`           | What the last version check found ahead of `Resolved`; `nil` when current. "Outdated" is derived from it. |
 
-`ArrowMeta` carries: `Name`, `Description`, `Version`, `License`, `URL`,
-`Maintainers []Credit`, `Credits []Credit`, `Tags []string`. Maximum lengths
-`MaxNameLength = 255` and `MaxDescriptionLength = 1000` apply.
+`ArrowMeta` carries: `Name`, `Description`, `License`, `URL`,
+`Maintainers []Credit`, `Credits []Credit`, `Tags []string`, `Media`, and `Generator *ArrowGenerator`
+(name, confidence, warnings) on a manifest Fletcher synthesized; `Origin()` is `inferred` when
+`Generator.Name` is set, `declared` otherwise, and `Confidence()` returns the generator's
+confidence (empty when declared). Maximum lengths `MaxNameLength = 255` and
+`MaxDescriptionLength = 1000` apply.
+
+There is no version field. An arrow's version is the ref it resolved to,
+`Resolved.Ref` — never the selector in its `Namespace`, which names what is
+followed (`stable` is not a release). Whether anything is on disk is
+`InstalledAt`'s to say. See
+[manifests/v0/versioning.md §7](manifests/v0/versioning.md).
 
 A `Credit` is `{Name, Email, URL}`; only `Name` is required.
 
 ### Identity & versioning
 
-Each installed `(namespace, ref)` pair is a **distinct aggregate**. There is no
-single Arrow that owns a list of versions. `pkg@v1.0` and `pkg@v2.0` are two
+Each `(namespace, selector)` pair is a **distinct aggregate**. There is no
+single Arrow that owns a list of versions. `pkg@v1.*` and `pkg@v2.*` are two
 separate aggregates with two separate event streams; deduplication, dependency
-resolution, and uninstall walk them independently.
+resolution, and uninstall walk them independently. An update never creates a
+new aggregate: it advances `Resolved` on the same one (`arrow.advanced`).
+Switching what a row follows is uninstall + install.
 
 When a user runs `quiver remove`, only arrows with `UserInstalled = true` are
 candidates; dependency-only arrows are removed by orphan detection on uninstall.
 
 ### Manifest mode vs installed mode
 
-| Use site                      | `InstalledAt` | `UserInstalled`/`InstalledRef`/`InstalledConstraint` | Notes                          |
+| Use site                      | `InstalledAt` | `UserInstalled`/`SelectorKind`/`Resolved`/`Available` | Notes                          |
 |-------------------------------|---------------|-------------------------------------------------------|--------------------------------|
 | Vault entry / manifold output | zero          | zero/empty                                            | Pure manifest data             |
-| Arrow aggregate (installed)   | non-zero      | populated                                             | Result of an install command   |
+| Arrow aggregate (catalogued)  | zero until `_install` succeeds | populated                            | Result of an add, adoption or dependency install |
 
 The same struct serves both modes; the app layer decides which fields are valid
 in each context.
@@ -154,8 +170,9 @@ declarations.
 
 `IsActive()` returns true for `running`, `stopping`, `draining`, `installing`,
 `updating`. `CanTransitionTo(target)` consults the explicit transition map
-declared at the top of `arrow.go` and shown below — every edge in the diagram
-appears in that map.
+declared at the top of `arrow.go` and shown below — the diagram and that map
+are the same set of edges, in both directions: every edge drawn here is in the
+map, and every edge in the map is drawn here.
 
 ```mermaid
 stateDiagram-v2
@@ -173,6 +190,7 @@ stateDiagram-v2
     draining --> ready
     detached --> ready
     detached --> stopping
+    detached --> running
     installing --> ready
     installing --> absent
     uninstalling --> absent
@@ -180,6 +198,7 @@ stateDiagram-v2
     updating --> ready
     updating --> absent
     outdated --> ready
+    outdated --> running
     outdated --> uninstalling
     removed --> [*]
 ```
@@ -187,6 +206,20 @@ stateDiagram-v2
 `removed` is terminal — the transition map for it is empty. The only path that
 reaches `removed` is `uninstalling` followed by an explicit removal event in
 the runtime store, after `uninstalling` itself transitions to `absent`.
+
+### `outdated` is a badge, not a gate
+
+`outdated` says an update is *available*, not that one is *required*. An arrow
+sitting there is still installed and still idle, so it still runs: `outdated`
+reaches `running` directly, and `BeginExecution` accepts it anywhere it accepts
+`ready`. Applying an update is always an explicit trigger — never a precondition
+the user has to satisfy before the arrow can be used again.
+
+The one exception is an `outdated` carrying a `PendingDepSync`. That one was
+written by `MarkOutdated` to record that the arrow's *dependency graph* changed
+and has not been re-synced, which is a genuine reason not to run it; the drift
+flavour written by `MarkVersionOutdated` never carries one. `BeginExecution`
+tells the two apart on exactly that field.
 
 ### Update preserves the prior install
 
@@ -209,6 +242,7 @@ domain time).
 | `Tools`          | `[]DependencyEdge`            | Install-time arrow dependencies.                              |
 | `Services`       | `[]DependencyEdge`            | Runtime arrow dependencies (must be running for `_execute`).  |
 | `Exports`        | `map[string]string`           | Static key/value exports made available to dependents.        |
+| `Expose`         | `Expose`                      | CLI and desktop entries to place on the host (`ExposeEntry`: `Name`, `Path`, `Icon`, `Categories`). |
 | `Lifecycle`      | `TargetLifecycle`             | The five reserved step lists.                                 |
 | `Methods`        | `map[string]Method`           | Developer-defined custom actions.                             |
 
@@ -305,8 +339,8 @@ A resolved dependency link between two arrows. Used inside `Target.Tools` and
 
 | Field        | Type        | Notes                                                                      |
 |--------------|-------------|----------------------------------------------------------------------------|
-| `Namespace`  | `Namespace` | Concrete resolved namespace, ref included.                                 |
-| `Constraint` | `string`    | The original declared constraint, preserved so `_update` can re-resolve.   |
+| `Namespace`  | `Namespace` | The dependency's namespace as declared.                                    |
+| `Constraint` | `string`    | The declared selector. The dependency's row is `bare@<Constraint>` (or the namespace's own ref when empty), never the ref it resolves to. |
 | `Type`       | `DepType`   | `tool` or `service`.                                                       |
 
 `DepType` values: `ToolDep = "tool"`, `ServiceDep = "service"`. Tools must be
@@ -345,7 +379,7 @@ recovered on process restart.
 
 | Field            | Type            | Purpose                                                         |
 |------------------|-----------------|-----------------------------------------------------------------|
-| `Ref`            | `Namespace`     | Aggregate key — same `namespace@ref` as the matching Arrow.     |
+| `Ref`            | `Namespace`     | Aggregate key — same `namespace@selector` as the matching Arrow. |
 | `State`          | `ArrowState`    | Current state from §3.                                          |
 | `Execution`      | `*Execution`    | Non-nil only while a method is in flight.                       |
 | `LastReturn`     | `*Return`       | The most recent finished execution's outcome.                   |
@@ -363,6 +397,9 @@ the dep-sync reaction knows what changed.
 | `Variables` | `map[string]string`  | Values resolved at execution start.                             |
 | `PID`       | `int`                | Process id of the spawned child (for `_execute`).               |
 | `WorkDir`   | `string`             | Working directory of the child.                                 |
+| `Surface`   | `*Surface`           | The interface opened by the `ui` node of the `run` step currently running; nil until that run opens it, cleared when the run exits, dropped with the execution. |
+
+`Surface` is `{Mode, Path, Dir, Ready}`: `Mode` is `listen` or `static`, `Path` the initial path, `Dir` the absolute directory served in static mode (never exposed over the API), `Ready` whether it answers requests. See [surface.md](surface.md).
 
 ### `Return`
 
@@ -375,8 +412,10 @@ the dep-sync reaction knows what changed.
 
 ### `StepProgress` & `StepStatus`
 
-`StepProgress` carries `Index int`, `Status StepStatus`, `Error *string`, and a
-`Step` field whose value is the executed step (overrideable fields collapsed).
+`StepProgress` carries `Index int`, `Status StepStatus`, `Error *string`, an
+optional `Note *string` (an explanation on a step that completed without doing
+its work, such as an `auto` expose entry that found nothing; omitted from the
+JSON when unset), and a `Step` field whose value is the executed step (overrideable fields collapsed).
 The struct has explicit JSON marshaling so the polymorphic `Step` round-trips
 through `step.StepList`.
 
@@ -418,8 +457,12 @@ All concrete steps embed `BasicStep` (private fields written by
 |-------------------------|-----------------|----------|----------------------------------------------------------------------|
 | `StepTypeRun`           | `run`           | yes      | Executes a shell command.                                            |
 | `StepTypeFetch`         | `fetch`         | yes      | Downloads a URL to a path with optional checksum.                    |
+| `StepTypeExtract`       | `extract`       | yes      | Unpacks an archive into a directory.                                 |
+| `StepTypePortable`      | `portable`      | yes      | Materializes an app package (AppImage, dmg, archive, binary).        |
 | `StepTypeSignal`        | `signal`        | yes      | Sends a cross-platform process signal.                               |
 | `StepTypeDependencies`  | `dependencies`  | no       | Synthetic step injected by the app layer at index 0 of `_install`.   |
+| `StepTypeExpose`        | `expose`        | no       | Synthetic step appended to `_install`/`_update`, one per `expose` entry. |
+| `StepTypeUnexpose`      | `unexpose`      | no       | Synthetic step prepended to `_uninstall` of a target with `expose` entries. |
 
 ### `RunStep`
 
@@ -435,8 +478,25 @@ All concrete steps embed `BasicStep` (private fields written by
 |------------|------------------------|--------------------------------------------------------|
 | `URL`      | `Overrideable[string]` | Source URL.                                            |
 | `To`       | `Overrideable[string]` | Destination path.                                      |
-| `Checksum` | `Overrideable[string]` | `<algo>:<hex-digest>` form, e.g. `sha256:abc…`.        |
+| `Checksum` | `Overrideable[string]` | Bare SHA-256 hex digest, no algorithm prefix.          |
 | `Timeout`  | `Overrideable[string]` | Duration string.                                       |
+
+### `ExtractStep`
+
+| Field     | Type                   | Notes                                                  |
+|-----------|------------------------|--------------------------------------------------------|
+| `From`    | `Overrideable[string]` | Archive path.                                          |
+| `To`      | `Overrideable[string]` | Destination directory.                                 |
+| `Timeout` | `Overrideable[string]` | Duration string.                                       |
+
+### `PortableStep`
+
+| Field     | Type                   | Notes                                                                          |
+|-----------|------------------------|--------------------------------------------------------------------------------|
+| `From`    | `Overrideable[string]` | Package path (AppImage, dmg, archive or bare executable).                      |
+| `To`      | `Overrideable[string]` | Destination directory.                                                         |
+| `Timeout` | `Overrideable[string]` | Duration string.                                                               |
+| `Name`    | `string`               | Optional file name for a bare executable or single-file archive payload. Not overrideable; omitted from JSON when empty. |
 
 ### `SignalStep`
 
@@ -455,6 +515,16 @@ A marker step. Its constructor pins `exitOnFailure = true`. The app layer
 injects it as Step 0 of every `_install` execution; manifests must not author
 it. The wizard never receives it directly — Step 0 progress is reported by the
 app layer.
+
+### `ExposeStep` / `UnexposeStep`
+
+Synthetic, never authored, never fatal (`exitOnFailure = false`). `wizard.Plan`
+builds one `ExposeStep` per entry of the target's `expose` block — `Kind`
+(`cli` \| `desktop`), `Name`, `Path`, `Icon`, `Categories` copied from the entry,
+plus `MediaIcon` (the arrow's `media.icon`, the desktop icon fallback) — and
+appends them to `_install` and `_update`; it prepends one `UnexposeStep` (no
+fields) to `_uninstall`. The wizard runs them; see
+[wizard.md § Exposure](wizard.md#exposure).
 
 ### `Overrideable[T]`
 
@@ -498,9 +568,11 @@ state.
 | `Meta`         | `CollectionMeta`      | Display metadata.                                              |
 | `Arrows`       | `[]CollectionArrow`   | Resolved member arrows.                                        |
 
-`CollectionMeta` fields: `Name`, `Version`, `Description`, `URL`,
+`CollectionMeta` fields: `Name`, `Description`, `URL`,
 `Maintainers []string`, `Tags []string`, `Media CollectionMedia`. The
-`CollectionMedia` value carries `Icon` and `Banner` URLs.
+`CollectionMedia` value carries `Icon` and `Banner` URLs. There is no version
+field — a curated list names no artifact of its own, and each member carries the
+ref it is pinned at on its own namespace.
 
 `CollectionArrowEntry` is the raw translator output before namespace derivation
 — exactly one of `Path` or `Namespace` is set. After translation each entry
@@ -522,9 +594,9 @@ classDiagram
       map~OS,Target~ targets
       time installedAt
       bool userInstalled
-      string installedRef
-      string installedConstraint
-      Namespace upgradedFromNs
+      SelectorKind selectorKind
+      Resolved resolved
+      Available available
     }
     class ArrowRuntime {
       Namespace ref
@@ -577,7 +649,7 @@ classDiagram
     CollectionArrow ..> Arrow : may install
 ```
 
-`Arrow` and `ArrowRuntime` share the same `Namespace` (with ref) but live in
+`Arrow` and `ArrowRuntime` share the same `Namespace` (with selector) but live in
 distinct event streams. Neither type imports the other; the app layer
 coordinates them. `Collection` is independent — following a collection never
 implicitly creates an Arrow; users still install arrows by namespace.
@@ -599,11 +671,10 @@ Implications for the domain:
   reason — the inner `Step` is interface-typed.
 - Display metadata on `Arrow` is updated by emitting an event whose patch
   rewrites the relevant fields; older events stay valid.
-- The `UpgradedFromNs` field on `Arrow` only appears in the diff for the
-  `arrow.upgraded.*` event so reactions can pick up the cleanup target without
-  needing to walk the prior aggregate.
-- `ArrowRuntime` events flow through one stream per `Namespace` with ref —
-  installing two refs of the same software produces two independent event
+- An update is one `arrow.advanced.*` event on the existing aggregate: its
+  patch rewrites the manifest fields and `Resolved` and clears `Available`.
+- `ArrowRuntime` events flow through one stream per `Namespace` with selector —
+  installing two selectors of the same software produces two independent event
   histories.
 
 For the full event catalogue, see [commands.md](commands.md) and

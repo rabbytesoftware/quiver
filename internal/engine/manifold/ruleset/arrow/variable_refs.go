@@ -20,9 +20,10 @@ func (VariableRefsRule) Validate(
 	m *domain.Arrow,
 ) aerrors.RuleErrors {
 	known := buildKnownVars(m)
+	preinstalledKnown := buildPreinstalledKnownVars(m)
 	var errs aerrors.RuleErrors
 	for os, t := range m.Targets {
-		errs = append(errs, checkCompiledTargetVariableRefs(string(os), t, known)...)
+		errs = append(errs, checkCompiledTargetVariableRefs(string(os), t, known, preinstalledKnown)...)
 	}
 	if len(errs) == 0 {
 		return nil
@@ -34,10 +35,13 @@ func buildKnownVars(
 	m *domain.Arrow,
 ) map[string]bool {
 	known := map[string]bool{
-		"WORKDIR":         true,
-		"INSTALL_PATH":    true,
-		"ARROW_NAMESPACE": true,
-		"PLATFORM":        true,
+		"WORKDIR":               true,
+		"INSTALL_PATH":          true,
+		"ARROW_NAMESPACE":       true,
+		"PLATFORM":              true,
+		"REF":                   true,
+		domain.VarArrowUIListen: true,
+		domain.VarArrowApp:      true,
 	}
 	for _, v := range m.Variables {
 		known[v.Name] = true
@@ -48,10 +52,38 @@ func buildKnownVars(
 	return known
 }
 
+// buildPreinstalledKnownVars is the strict subset buildKnownVars offers every
+// other lifecycle. A preinstalled probe runs before any aggregate, workdir,
+// execution or netbridge port allocation exists for the namespace — see
+// arrow/preinstalled.go's preinstalledVars, which is the actual variable set
+// a probe is expanded against and this mirrors exactly. WORKDIR/INSTALL_PATH
+// and netbridge port names are never legal here, even though they are legal
+// everywhere else: nothing supplies them at probe time, so a step referencing
+// one would not fail to validate, it would silently expand to empty and
+// change what the step's command actually does. A manifest variable with no
+// default is excluded for the identical reason — preinstalledVars only adds a
+// variable when it has one.
+func buildPreinstalledKnownVars(
+	m *domain.Arrow,
+) map[string]bool {
+	known := map[string]bool{
+		"ARROW_NAMESPACE": true,
+		"PLATFORM":        true,
+		"REF":             true,
+	}
+	for _, v := range m.Variables {
+		if v.Default != "" {
+			known[v.Name] = true
+		}
+	}
+	return known
+}
+
 func checkCompiledTargetVariableRefs(
 	key string,
 	t domain.Target,
 	known map[string]bool,
+	preinstalledKnown map[string]bool,
 ) aerrors.RuleErrors {
 	prefix := fmt.Sprintf("targets[%s]", key)
 	var errs aerrors.RuleErrors
@@ -66,6 +98,7 @@ func checkCompiledTargetVariableRefs(
 	for _, steps := range allSteps {
 		errs = append(errs, checkStepListVars(prefix, steps, known)...)
 	}
+	errs = append(errs, checkStepListVars(prefix, t.Lifecycle.Preinstalled, preinstalledKnown)...)
 	for methodName, method := range t.Methods {
 		methodPrefix := fmt.Sprintf("targets[%s].methods[%s]", key, methodName)
 		errs = append(errs, checkStepListVars(methodPrefix, method.Steps, known)...)
@@ -107,6 +140,12 @@ func checkCompiledStepVars(
 		errs = append(errs, checkVarTokens(prefix, "command", overrideableValues(rs.Command), known)...)
 	case step.FetchStep:
 		errs = append(errs, checkVarTokens(prefix, "url", overrideableValues(rs.URL), known)...)
+		errs = append(errs, checkVarTokens(prefix, "to", overrideableValues(rs.To), known)...)
+	case step.ExtractStep:
+		errs = append(errs, checkVarTokens(prefix, "from", overrideableValues(rs.From), known)...)
+		errs = append(errs, checkVarTokens(prefix, "to", overrideableValues(rs.To), known)...)
+	case step.PortableStep:
+		errs = append(errs, checkVarTokens(prefix, "from", overrideableValues(rs.From), known)...)
 		errs = append(errs, checkVarTokens(prefix, "to", overrideableValues(rs.To), known)...)
 	}
 	return errs

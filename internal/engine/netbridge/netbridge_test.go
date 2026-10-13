@@ -3,11 +3,14 @@ package netbridge
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
+	asynxstore "github.com/char2cs/asynx/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rabbytesoftware/quiver.core/internal/core/config"
 	"github.com/rabbytesoftware/quiver.core/internal/domain/netbridge"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/mocks"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/store"
@@ -20,9 +23,10 @@ func buildNetbridgeWithStrategy(
 ) *netbridgeService {
 	t.Helper()
 
-	es := mocks.NewMemoryEventStore()
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
 
-	nb, err := New().WithEventStore(es).WithStrategies([]strategies.Strategy{strategy}).Build(context.Background())
+	nb, err := New().WithEventStore(es).WithSnapshotStore(ss).WithStrategies([]strategies.Strategy{strategy}).Build(context.Background())
 	require.NoError(t, err)
 
 	impl, ok := nb.(*netbridgeService)
@@ -35,9 +39,10 @@ func buildNetbridge(
 ) *netbridgeService {
 	t.Helper()
 
-	es := mocks.NewMemoryEventStore()
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
 
-	nb, err := New().WithEventStore(es).WithStrategies([]strategies.Strategy{}).Build(context.Background())
+	nb, err := New().WithEventStore(es).WithSnapshotStore(ss).WithStrategies([]strategies.Strategy{}).Build(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, nb)
 
@@ -49,9 +54,10 @@ func buildNetbridge(
 func TestBuilder_BuildSucceeds(
 	t *testing.T,
 ) {
-	es := mocks.NewMemoryEventStore()
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
 
-	nb, err := New().WithEventStore(es).Build(context.Background())
+	nb, err := New().WithEventStore(es).WithSnapshotStore(ss).Build(context.Background())
 	require.NoError(t, err)
 	assert.NotNil(t, nb)
 }
@@ -59,10 +65,11 @@ func TestBuilder_BuildSucceeds(
 func TestBuilder_WithStore(
 	t *testing.T,
 ) {
-	es := mocks.NewMemoryEventStore()
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
 
 	custom := store.NewPortMemory()
-	nb, err := New().WithStore(custom).WithEventStore(es).Build(context.Background())
+	nb, err := New().WithStore(custom).WithEventStore(es).WithSnapshotStore(ss).Build(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, nb)
 
@@ -73,9 +80,10 @@ func TestBuilder_WithStore(
 func TestBuilder_WithDatabasePath(
 	t *testing.T,
 ) {
-	es := mocks.NewMemoryEventStore()
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
 
-	nb, err := New().WithEventStore(es).Build(context.Background())
+	nb, err := New().WithEventStore(es).WithSnapshotStore(ss).Build(context.Background())
 	require.NoError(t, err)
 	assert.NotNil(t, nb)
 }
@@ -83,9 +91,10 @@ func TestBuilder_WithDatabasePath(
 func TestBuilder_WithDatabasePath_InvalidPath(
 	t *testing.T,
 ) {
-	es := mocks.NewMemoryEventStore()
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
 
-	nb, err := New().WithEventStore(es).Build(context.Background())
+	nb, err := New().WithEventStore(es).WithSnapshotStore(ss).Build(context.Background())
 	require.NoError(t, err)
 	assert.NotNil(t, nb)
 }
@@ -106,7 +115,7 @@ func TestAllocate_HonorsPreferredPort(
 ) {
 	nb := buildNetbridge(t)
 
-	const preferred = 54321
+	preferred := freePort(t)
 	port, err := nb.Allocate(context.Background(), "owner1", netbridge.ProtocolTCP, preferred)
 	require.NoError(t, err)
 	assert.Equal(t, preferred, port)
@@ -152,7 +161,7 @@ func TestAllocate_WithActiveStrategy_SetsForwarded(
 	nb := buildNetbridgeWithStrategy(t, strat)
 	ctx := context.Background()
 
-	const preferred = 54600
+	preferred := freePort(t)
 	port, err := nb.Allocate(ctx, "owner-fwd", netbridge.ProtocolTCP, preferred)
 	require.NoError(t, err)
 	assert.Equal(t, preferred, port)
@@ -182,11 +191,9 @@ func TestDeallocateByOwner_ReleasesAllPorts(
 	nb := buildNetbridge(t)
 	ctx := context.Background()
 
-	const (
-		preferred1 = 54400
-		preferred2 = 54401
-		ownerKey   = "owner-dealloc"
-	)
+	const ownerKey = "owner-dealloc"
+	free := freePorts(t, 2)
+	preferred1, preferred2 := free[0], free[1]
 
 	port1, err := nb.Allocate(ctx, ownerKey, netbridge.ProtocolTCP, preferred1)
 	require.NoError(t, err)
@@ -227,7 +234,7 @@ func TestDeallocateByOwner_WithActiveStrategy_CallsReverse(
 	nb := buildNetbridgeWithStrategy(t, strat)
 	ctx := context.Background()
 
-	const preferred = 54700
+	preferred := freePort(t)
 	port, err := nb.Allocate(ctx, "owner-rev", netbridge.ProtocolTCP, preferred)
 	require.NoError(t, err)
 	assert.Equal(t, preferred, port)
@@ -245,7 +252,7 @@ func TestDeallocateByOwner_SendErrorOnCancelledContext(
 ) {
 	nb := buildNetbridge(t)
 
-	const preferred = 54800
+	preferred := freePort(t)
 	port, allocErr := nb.Allocate(context.Background(), "owner-cancel", netbridge.ProtocolTCP, preferred)
 	require.NoError(t, allocErr)
 	assert.Equal(t, preferred, port)
@@ -274,10 +281,12 @@ func TestDeallocateByOwner_FindByOwnerError(
 func TestBuilder_WithEphemeralPortRange_AppliedToBuild(
 	t *testing.T,
 ) {
-	es := mocks.NewMemoryEventStore()
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
 
 	nb, err := New().
 		WithEventStore(es).
+		WithSnapshotStore(ss).
 		WithStrategies([]strategies.Strategy{}).
 		WithEphemeralPortRange(50000, 50100).
 		Build(context.Background())
@@ -297,13 +306,24 @@ func TestBuilder_Build_MissingEventStore_ReturnsError(
 	assert.ErrorIs(t, err, ErrBuildFailed)
 }
 
+func TestBuilder_Build_MissingSnapshotStoreReturnsError(
+	t *testing.T,
+) {
+	_, err := New().WithEventStore(asynxstore.New()).Build(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrBuildFailed)
+	assert.Contains(t, err.Error(), "missing SnapshotStore")
+}
+
 func TestAllocate_WithEphemeralPortRange_UsesCustomRange(
 	t *testing.T,
 ) {
-	es := mocks.NewMemoryEventStore()
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
 
 	nb, err := New().
 		WithEventStore(es).
+		WithSnapshotStore(ss).
 		WithStrategies([]strategies.Strategy{}).
 		WithEphemeralPortRange(50200, 50300).
 		Build(context.Background())
@@ -316,13 +336,32 @@ func TestAllocate_WithEphemeralPortRange_UsesCustomRange(
 	assert.LessOrEqual(t, port, 50300)
 }
 
+func TestNetbridge_Allocate_WritesSnapshot(
+	t *testing.T,
+) {
+	ss := asynxstore.NewSnapshots()
+	nb, err := New().
+		WithEventStore(asynxstore.New()).
+		WithSnapshotStore(ss).
+		WithStrategies([]strategies.Strategy{}).
+		Build(context.Background())
+	require.NoError(t, err)
+
+	port, err := nb.Allocate(context.Background(), "owner-1", netbridge.ProtocolTCP, 50000)
+	require.NoError(t, err)
+
+	_, found, err := ss.Get(context.Background(), strconv.Itoa(port))
+	require.NoError(t, err)
+	assert.True(t, found, "allocate must persist a snapshot; without one every read cold-replays the port's full history forever")
+}
+
 func TestAllocate_SamePreferredPortTwiceGetsDifferentPort(
 	t *testing.T,
 ) {
 	nb := buildNetbridge(t)
 	ctx := context.Background()
 
-	const preferred = 54500
+	preferred := freePort(t)
 
 	port1, err := nb.Allocate(ctx, "owner-a", netbridge.ProtocolTCP, preferred)
 	require.NoError(t, err)
@@ -335,4 +374,134 @@ func TestAllocate_SamePreferredPortTwiceGetsDifferentPort(
 	assert.NotEqual(t, preferred, port2)
 	assert.GreaterOrEqual(t, port2, testEphemeralPortStart)
 	assert.LessOrEqual(t, port2, testEphemeralPortEnd)
+}
+
+func TestShutdown_DrainsAsynx(
+	t *testing.T,
+) {
+	nb := buildNetbridge(t)
+
+	require.NoError(t, nb.Shutdown(context.Background()))
+
+	_, err := nb.Allocate(context.Background(), "owner-a", netbridge.ProtocolTCP, 0)
+	assert.Error(t, err, "a drained aggregate must reject new allocations")
+}
+
+func buildNetbridgeNoForwarding(
+	t *testing.T,
+	strategy strategies.Strategy,
+) *netbridgeService {
+	t.Helper()
+
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
+
+	nb, err := New().
+		WithEventStore(es).
+		WithSnapshotStore(ss).
+		WithStrategies([]strategies.Strategy{strategy}).
+		WithForwarding(false).
+		Build(context.Background())
+	require.NoError(t, err)
+
+	impl, ok := nb.(*netbridgeService)
+	require.True(t, ok)
+	return impl
+}
+
+func TestBuilder_ResolveForwarding_DefaultsToConfig(
+	t *testing.T,
+) {
+	assert.Equal(t, config.GetNetbridge().Enabled, New().resolveForwarding())
+}
+
+func TestBuilder_ResolveForwarding_OptionOverridesConfig(
+	t *testing.T,
+) {
+	testCases := []struct {
+		name    string
+		enabled bool
+	}{
+		{name: "explicitly enabled", enabled: true},
+		{name: "explicitly disabled", enabled: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.enabled, New().WithForwarding(tc.enabled).resolveForwarding())
+		})
+	}
+}
+
+func TestBuilder_WithForwarding_DisabledDropsInjectedStrategies(
+	t *testing.T,
+) {
+	nb := buildNetbridgeNoForwarding(t, &mocks.AlwaysAvailableStrategy{})
+
+	assert.Empty(t, nb.resolveStrategies())
+}
+
+func TestBuilder_WithForwarding_EnabledKeepsInjectedStrategies(
+	t *testing.T,
+) {
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
+
+	nb, err := New().
+		WithEventStore(es).
+		WithSnapshotStore(ss).
+		WithStrategies([]strategies.Strategy{&mocks.AlwaysAvailableStrategy{}}).
+		WithForwarding(true).
+		Build(context.Background())
+	require.NoError(t, err)
+
+	impl, ok := nb.(*netbridgeService)
+	require.True(t, ok)
+	assert.Len(t, impl.resolveStrategies(), 1)
+}
+
+// No preferred port is asked for: which port comes back is the allocator's
+// business and depends on what the machine already has bound, while what this
+// test is about is that nothing was forwarded.
+func TestAllocate_ForwardingDisabled_AllocatesWithoutForwarding(
+	t *testing.T,
+) {
+	nb := buildNetbridgeNoForwarding(t, &mocks.AlwaysAvailableStrategy{})
+	ctx := context.Background()
+
+	port, err := nb.Allocate(ctx, "owner-nofwd", netbridge.ProtocolTCP, 0)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, port, nb.portStart)
+	assert.LessOrEqual(t, port, nb.portEnd)
+
+	nb.waitForProjection()
+
+	alloc, err := nb.readModel.FindByPort(ctx, port)
+	require.NoError(t, err)
+	require.NotNil(t, alloc)
+	assert.False(t, alloc.Forwarded)
+}
+
+func TestDeallocateByOwner_ForwardingDisabled_SkipsReverse(
+	t *testing.T,
+) {
+	strat := &mocks.AlwaysAvailableStrategy{}
+	nb := buildNetbridgeNoForwarding(t, strat)
+	ctx := context.Background()
+
+	port, err := nb.Allocate(ctx, "owner-nofwd-rev", netbridge.ProtocolTCP, 0)
+	require.NoError(t, err)
+
+	nb.waitForProjection()
+
+	err = nb.DeallocateByOwner(ctx, "owner-nofwd-rev")
+	require.NoError(t, err)
+	nb.waitForProjection()
+
+	assert.Empty(t, strat.ReverseCalledWith)
+
+	// The port is free again, so asking for it by name gets it back.
+	realloc, err := nb.Allocate(ctx, "owner-nofwd-rev", netbridge.ProtocolTCP, port)
+	require.NoError(t, err)
+	assert.Equal(t, port, realloc)
 }

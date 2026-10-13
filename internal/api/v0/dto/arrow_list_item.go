@@ -5,21 +5,26 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 )
 
+// InstalledVersionItemDTO is one namespace@selector of a catalog entry. Ref is
+// the selector the row is filed under and is always set; ResolvedRef is the ref
+// it installed, empty until it resolved one.
 type InstalledVersionItemDTO struct {
-	Ref         string `json:"ref"`
-	Version     string `json:"version"`
-	State       string `json:"state"`
-	InstalledAt string `json:"installed_at"`
-	Constraint  string `json:"constraint,omitempty"`
+	Ref         string `json:"ref" yaml:"ref"`
+	ResolvedRef string `json:"resolved_ref" yaml:"resolved_ref"`
+	State       string `json:"state" yaml:"state"`
+	InstalledAt string `json:"installed_at,omitempty" yaml:"installed_at,omitempty"`
+	LastUsedAt  string `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
 }
 
 type ArrowListItemDTO struct {
-	Namespace   string                    `json:"namespace"`
-	Name        string                    `json:"name"`
-	Description string                    `json:"description"`
-	Tags        []string                  `json:"tags"`
-	Media       domain.ArrowMedia         `json:"media"`
-	Versions    []InstalledVersionItemDTO `json:"versions"`
+	Namespace   string                    `json:"namespace" yaml:"namespace"`
+	Name        string                    `json:"name" yaml:"name"`
+	Description string                    `json:"description" yaml:"description"`
+	Tags        []string                  `json:"tags" yaml:"tags"`
+	Media       domain.ArrowMedia         `json:"media" yaml:"media"`
+	Versions    []InstalledVersionItemDTO `json:"versions" yaml:"versions"`
+	Origin      string                    `json:"origin" yaml:"origin"`
+	Confidence  string                    `json:"confidence,omitempty" yaml:"confidence,omitempty"`
 }
 
 func ArrowListItemDTOFrom(
@@ -27,12 +32,20 @@ func ArrowListItemDTOFrom(
 ) ArrowListItemDTO {
 	versions := make([]InstalledVersionItemDTO, 0, len(a.Versions))
 	for _, v := range a.Versions {
+		installedAt := ""
+		if !v.InstalledAt.IsZero() {
+			installedAt = v.InstalledAt.Format("2006-01-02T15:04:05Z07:00")
+		}
+		lastUsedAt := ""
+		if !v.LastUsedAt.IsZero() {
+			lastUsedAt = v.LastUsedAt.Format("2006-01-02T15:04:05Z07:00")
+		}
 		versions = append(versions, InstalledVersionItemDTO{
 			Ref:         v.Ref,
-			Version:     v.Version,
+			ResolvedRef: v.ResolvedRef,
 			State:       string(v.State),
-			InstalledAt: v.InstalledAt.Format("2006-01-02T15:04:05Z07:00"),
-			Constraint:  v.Constraint,
+			InstalledAt: installedAt,
+			LastUsedAt:  lastUsedAt,
 		})
 	}
 	return ArrowListItemDTO{
@@ -42,5 +55,7 @@ func ArrowListItemDTOFrom(
 		Tags:        a.Tags,
 		Media:       a.Media,
 		Versions:    versions,
+		Origin:      a.Origin,
+		Confidence:  a.Confidence,
 	}
 }

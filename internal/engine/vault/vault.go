@@ -12,6 +12,9 @@ type Vault interface {
 	// GetArrow returns the cached raw manifest for the given namespace.
 	// Returns ErrNotCached if no entry exists.
 	// Returns ErrStale if TTL expired — ManifestFile is still returned.
+	// Returns ErrConfirmedAbsent if a fresh PutArrowNotFound marker exists —
+	// no ManifestFile content, since there was never any to cache, only the
+	// commit the marker was recorded for.
 	GetArrow(
 		ctx context.Context,
 		ns domain.Namespace,
@@ -36,6 +39,21 @@ type Vault interface {
 		ctx context.Context,
 		ns domain.Namespace,
 		file ManifestFile,
+	) error
+
+	// PutArrowNotFound records that ns's manifest was resolved live and
+	// definitively does not exist, so a later GetArrow reports
+	// ErrConfirmedAbsent instead of ErrNotCached until the same TTL as a
+	// positive entry expires. Callers must only call this for a genuine
+	// not-found (the fetch reached the repository and inspected its tree),
+	// never for a transient failure — caching a network blip as "absent"
+	// would convert a temporary outage into a false not-found for a full TTL.
+	// commit is the commit the fetch looked at, empty when unknown; GetArrow
+	// reports it on the ManifestFile it returns with ErrConfirmedAbsent.
+	PutArrowNotFound(
+		ctx context.Context,
+		ns domain.Namespace,
+		commit string,
 	) error
 
 	PutCollection(
@@ -64,19 +82,36 @@ type Vault interface {
 		ns domain.Namespace,
 	) error
 
-	RenameArrow(
-		ctx context.Context,
-		oldNs domain.Namespace,
-		newNs domain.Namespace,
-	) error
-
 	ListVersions(
 		ctx context.Context,
 		ns domain.Namespace,
 	) ([]string, error)
 
+	// SearchArrows queries the read model built from every manifest the vault
+	// has cached. Rows outlive the manifest bytes they were built from, so a
+	// hit does not imply GetArrow will succeed.
+	SearchArrows(
+		ctx context.Context,
+		q IndexQuery,
+	) ([]IndexRow, error)
+
+	// ForgetArrow drops every indexed ref under a namespace. The cached
+	// manifest files are left alone.
+	ForgetArrow(
+		ctx context.Context,
+		ns domain.Namespace,
+	) error
+
 	// Start launches the periodic manifest sweep goroutine.
 	// Sweeps run on the interval set by vault.sweep_interval in config.yaml (default 5m).
 	// The goroutine exits when ctx is cancelled.
 	Start(ctx context.Context)
+
+	// Close releases the index database opened by New. It is the counterpart the
+	// constructor owes its handle, and it makes Vault an io.Closer so a failed
+	// construction can discard it with the rest.
+	//
+	// Every method that reads or writes the index reports ErrClosed afterwards.
+	// Close is idempotent.
+	Close() error
 }

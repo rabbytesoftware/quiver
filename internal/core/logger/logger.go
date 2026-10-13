@@ -22,9 +22,36 @@ const (
 // When cfg.Enabled is false, logs go to stderr only.
 // When cfg.Enabled is true, logs go to both stdout and a rotating file
 // under the Quiver logs directory (~/.quiver/logs/Quiver.log).
+// Each wrap, if any, decorates the handler before it becomes slog.Default.
 // Returns a shutdown function that closes the log file; call it before process exit.
-func Init(cfg config.Logger) func() error {
-	roller, handler := buildHandler(cfg)
+func Init(
+	cfg config.Logger,
+	wrap ...func(slog.Handler) slog.Handler,
+) func() error {
+	return initAt("", cfg, wrap)
+}
+
+// InitAt is Init rooted at homeDir instead of the process-level HOME — used
+// when the caller was built with an explicit home override (tests, or a dev
+// build's checkout-local .quiver), so logging never lands in the real
+// ~/.quiver.
+func InitAt(
+	homeDir string,
+	cfg config.Logger,
+	wrap ...func(slog.Handler) slog.Handler,
+) func() error {
+	return initAt(homeDir, cfg, wrap)
+}
+
+func initAt(
+	homeDir string,
+	cfg config.Logger,
+	wrap []func(slog.Handler) slog.Handler,
+) func() error {
+	roller, handler := buildHandler(homeDir, cfg)
+	for _, decorate := range wrap {
+		handler = decorate(handler)
+	}
 	slog.SetDefault(slog.New(handler))
 	return func() error {
 		if roller != nil {
@@ -34,14 +61,20 @@ func Init(cfg config.Logger) func() error {
 	}
 }
 
-func buildHandler(cfg config.Logger) (*lumberjack.Logger, slog.Handler) {
+func buildHandler(homeDir string, cfg config.Logger) (*lumberjack.Logger, slog.Handler) {
 	opts := &slog.HandlerOptions{Level: parseLevel(cfg.Level)}
 
 	if !cfg.Enabled {
 		return nil, slog.NewTextHandler(os.Stderr, opts)
 	}
 
-	logsPath, err := paths.Logs()
+	var logsPath string
+	var err error
+	if homeDir != "" {
+		logsPath, err = paths.LogsAt(homeDir)
+	} else {
+		logsPath, err = paths.Logs()
+	}
 	if err != nil {
 		return nil, slog.NewTextHandler(os.Stderr, opts)
 	}

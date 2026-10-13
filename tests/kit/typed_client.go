@@ -4,6 +4,7 @@ package kit
 
 import (
 	"encoding/json"
+	"io"
 	"testing"
 
 	dto "github.com/rabbytesoftware/quiver.core/internal/api/v0/dto"
@@ -55,6 +56,18 @@ func (tc *TypedClient) List() ([]dto.ArrowListItemDTO, int) {
 	return env.Data, resp.StatusCode
 }
 
+// ListUserInstalled returns the user-installed catalog entries, what the
+// desktop library shows, and the HTTP status code.
+func (tc *TypedClient) ListUserInstalled() ([]dto.ArrowListItemDTO, int) {
+	resp := tc.raw.ListUserInstalled()
+	defer resp.Body.Close()
+	var env apiEnvelope[[]dto.ArrowListItemDTO]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		tc.t.Fatalf("TypedClient.ListUserInstalled: decode: %v", err)
+	}
+	return env.Data, resp.StatusCode
+}
+
 // GetDetail returns the arrow detail and the HTTP status code.
 func (tc *TypedClient) GetDetail(ns string) (dto.ArrowDetailDTO, int) {
 	resp := tc.raw.GetDetail(ns)
@@ -66,11 +79,58 @@ func (tc *TypedClient) GetDetail(ns string) (dto.ArrowDetailDTO, int) {
 	return env.Data, resp.StatusCode
 }
 
+// GetManifest returns the arrow manifest and the HTTP status code.
+func (tc *TypedClient) GetManifest(ns string) (dto.ArrowManifestDTO, int) {
+	resp := tc.raw.GetManifest(ns)
+	defer resp.Body.Close()
+	var env apiEnvelope[dto.ArrowManifestDTO]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		tc.t.Fatalf("TypedClient.GetManifest: decode: %v", err)
+	}
+	return env.Data, resp.StatusCode
+}
+
+// GetSub returns the status code and raw body of one of an arrow's detail
+// sub-resources.
+func (tc *TypedClient) GetSub(ns, sub string) (int, []byte) {
+	resp := tc.raw.GetSub(ns, sub)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		tc.t.Fatalf("TypedClient.GetSub %s: read: %v", sub, err)
+	}
+	return resp.StatusCode, body
+}
+
 // Update patches the arrow manifest and returns the HTTP status code.
 func (tc *TypedClient) Update(ns string, body map[string]any) int {
 	resp := tc.raw.Update(ns, body)
 	defer resp.Body.Close()
 	return resp.StatusCode
+}
+
+// CheckAvailable sends PATCH /v0/arrow/:ns, which re-resolves what is ahead
+// of the row, and returns what it reported and the HTTP status code.
+func (tc *TypedClient) CheckAvailable(ns string) (dto.UpdateResultDTO, int) {
+	resp := tc.raw.Update(ns, map[string]any{})
+	defer resp.Body.Close()
+	var env apiEnvelope[dto.UpdateResultDTO]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		tc.t.Fatalf("TypedClient.CheckAvailable: decode: %v", err)
+	}
+	return env.Data, resp.StatusCode
+}
+
+// Channels returns the channels ns's repository publishes and the HTTP
+// status code.
+func (tc *TypedClient) Channels(ns string) (dto.ChannelListDTO, int) {
+	resp := tc.raw.Channels(ns)
+	defer resp.Body.Close()
+	var env apiEnvelope[dto.ChannelListDTO]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		tc.t.Fatalf("TypedClient.Channels: decode: %v", err)
+	}
+	return env.Data, resp.StatusCode
 }
 
 // Execute triggers a lifecycle method and returns the HTTP status code.
@@ -98,6 +158,14 @@ func (tc *TypedClient) Stop(ns string) int {
 // Seed seeds the arrow from a raw manifest body and returns the HTTP status code.
 func (tc *TypedClient) Seed(ns string, body []byte) int {
 	resp := tc.raw.Seed(ns, body)
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
+// Adopt declares ns already installed at resolvedRef and returns the HTTP
+// status code.
+func (tc *TypedClient) Adopt(ns, resolvedRef string) int {
+	resp := tc.raw.Adopt(ns, resolvedRef)
 	defer resp.Body.Close()
 	return resp.StatusCode
 }
@@ -167,6 +235,67 @@ func (tc *TypedClient) CollectionValidateManifest(ns string, body []byte) (dto.V
 	return env.Data, resp.StatusCode
 }
 
+// Search returns the ranked local results and the HTTP status code.
+func (tc *TypedClient) Search(query string, params SearchParams) ([]dto.SearchResultDTO, int) {
+	resp := tc.raw.Search(query, params)
+	defer resp.Body.Close()
+	var env apiEnvelope[[]dto.SearchResultDTO]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		tc.t.Fatalf("TypedClient.Search: decode: %v", err)
+	}
+	return env.Data, resp.StatusCode
+}
+
+// Discover starts a discovery pass for query and returns the started job and
+// the HTTP status code.
+func (tc *TypedClient) Discover(query string) (dto.DiscoveryJobStartedDTO, int) {
+	body, err := json.Marshal(dto.DiscoverRequestDTO{Q: query})
+	if err != nil {
+		tc.t.Fatalf("TypedClient.Discover: marshal body: %v", err)
+	}
+	resp := tc.raw.Discover(string(body))
+	defer resp.Body.Close()
+	var env apiEnvelope[dto.DiscoveryJobStartedDTO]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		tc.t.Fatalf("TypedClient.Discover: decode: %v", err)
+	}
+	return env.Data, resp.StatusCode
+}
+
+// Home returns the home shelves and the HTTP status code.
+func (tc *TypedClient) Home() (dto.HomeDTO, int) {
+	resp := tc.raw.Home()
+	defer resp.Body.Close()
+	var env apiEnvelope[dto.HomeDTO]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		tc.t.Fatalf("TypedClient.Home: decode: %v", err)
+	}
+	return env.Data, resp.StatusCode
+}
+
+// RefreshHome asks for the home shelves to be rebuilt and returns the HTTP
+// status code and the response body, which is empty on success.
+func (tc *TypedClient) RefreshHome() (int, []byte) {
+	resp := tc.raw.RefreshHome()
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		tc.t.Fatalf("TypedClient.RefreshHome: read body: %v", err)
+	}
+	return resp.StatusCode, body
+}
+
+// DiscoveryJob returns the job summary and the HTTP status code.
+func (tc *TypedClient) DiscoveryJob(jobID string) (dto.DiscoveryJobDTO, int) {
+	resp := tc.raw.DiscoveryJob(jobID)
+	defer resp.Body.Close()
+	var env apiEnvelope[dto.DiscoveryJobDTO]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		tc.t.Fatalf("TypedClient.DiscoveryJob: decode: %v", err)
+	}
+	return env.Data, resp.StatusCode
+}
+
 // collectionManifestResponse mirrors domain.Collection JSON (no envelope, capital keys, no JSON tags).
 type collectionManifestResponse struct {
 	Meta   collectionMetaResponse    `json:"Meta"`
@@ -175,7 +304,6 @@ type collectionManifestResponse struct {
 
 type collectionMetaResponse struct {
 	Name        string   `json:"Name"`
-	Version     string   `json:"Version"`
 	Description string   `json:"Description"`
 	URL         string   `json:"URL"`
 	Maintainers []string `json:"Maintainers"`

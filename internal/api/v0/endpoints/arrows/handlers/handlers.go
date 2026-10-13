@@ -1,15 +1,17 @@
 package arrows
 
 import (
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/rabbytesoftware/quiver.core/internal/api/libs"
 	"github.com/rabbytesoftware/quiver.core/internal/api/libs/apierr"
 	apidto "github.com/rabbytesoftware/quiver.core/internal/api/v0/dto"
-	"github.com/rabbytesoftware/quiver.core/internal/app/models"
+	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
 	"github.com/rabbytesoftware/quiver.core/internal/app/usecases"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 )
@@ -22,73 +24,125 @@ func New(svc usecases.ArrowUsecase) *Handlers {
 	return &Handlers{svc: svc}
 }
 
+// validNamespace writes a 400 and reports false when ns is malformed.
+func validNamespace(c *gin.Context, ns domain.Namespace) bool {
+	err := ns.Validate()
+	if err == nil {
+		return true
+	}
+	status, msg := apierr.StatusAndMessage(fmt.Errorf("%w: %w", apperrors.ErrInvalidNamespace, err))
+	libs.WriteErr(c, status, msg, string(ns))
+	return false
+}
+
 // Add registers an arrow from an existing manifest in the Quiver registry.
 //
 // @Summary      Register arrow
-// @Description  Registers an arrow by its namespace. The manifest must already exist in the registry.
+// @Description  Registers an arrow by its namespace. The ref after @ is the selector the row tracks; a refless namespace follows the repository's default channel. The request takes no body.
 // @Tags         arrows
-// @Param        ns   path  string  true  "Arrow namespace (e.g. github.com/user/repo@v1.0.0)"
+// @Param        ns    path  string  true  "Arrow namespace (e.g. github.com/user/repo@v1.0.0)"
 // @Success      201  {object}  libs.MutationResponse  "Arrow registered"
 // @Failure      400  {object}  libs.ErrResponse       "Invalid namespace"
 // @Failure      404  {object}  libs.ErrResponse       "Manifest not found"
-// @Failure      409  {object}  libs.ErrResponse       "Arrow already registered"
+// @Failure      409  {object}  libs.ErrResponse       "A concurrent registration of the same identity won the race (re-registering is otherwise idempotent, 201), or another identity's workdir occupies this identity's path"
 // @Failure      500  {object}  libs.ErrResponse       "Internal error"
 // @Router       /arrow/{ns} [post]
 func (h *Handlers) Add(c *gin.Context) {
 	ns := domain.Namespace(c.Param("ns"))
+	if !validNamespace(c, ns) {
+		return
+	}
 	if err := h.svc.Add(c.Request.Context(), ns); err != nil {
 		status, msg := apierr.StatusAndMessage(err)
-		libs.WriteErr(c, status, msg, string(ns))
+		libs.WriteErr(c, status, msg, string(ns), err)
 		return
 	}
 	libs.WriteMutationOK(c, http.StatusCreated, string(ns))
 }
 
-// Update pulls the latest manifest for an arrow from the registry and re-registers it.
+// AdoptInstalled registers an arrow as already installed at a declared ref.
 //
-// @Summary      Update arrow manifest
-// @Description  Fetches the latest manifest for the arrow and updates its registration.
+// @Summary      Adopt installed arrow
+// @Description  Registers the arrow under the identity POST /arrow/{ns} would file it under (the ref after @ is the selector; a refless namespace follows the repository's default channel), recording it as already installed at resolved_ref instead of at what the selector points at now. For a client that installed itself and announces the build it actually runs, so the next version check offers the update that build needs. resolved_ref must be a tag or branch the repository holds and one the selector could resolve to: a member of the channel, a tag the constraint matches, the pin's own ref, or a ref at the commit. Re-adopting the same state writes nothing; adopting another state moves the row in place. The row is marked user-installed. Adopt declares the catalog state only and leaves the runtime untouched: a client that also needs the arrow's installed state detected (its preinstalled probe) must POST /arrow/{ns} first and then call /adopt.
 // @Tags         arrows
 // @Accept       json
-// @Param        ns   path  string  true  "Arrow namespace"
-// @Success      200  {object}  libs.MutationResponse  "Arrow updated"
+// @Param        ns    path  string                   true  "Arrow namespace (e.g. github.com/user/repo@stable)"
+// @Param        body  body  apidto.AdoptRequestDTO   true  "The ref the caller has installed"
+// @Success      201  {object}  libs.MutationResponse  "Arrow adopted, or already at the declared state"
+// @Failure      400  {object}  libs.ErrResponse       "Invalid namespace, a body that is not JSON, a missing resolved_ref, or a ref the selector could never resolve to"
+// @Failure      404  {object}  libs.ErrResponse       "Repository or ref not found"
+// @Failure      409  {object}  libs.ErrResponse       "A concurrent registration of the same identity won the race"
+// @Failure      422  {object}  libs.ErrResponse       "Invalid manifest at the declared ref"
+// @Failure      500  {object}  libs.ErrResponse       "Internal error"
+// @Failure      502  {object}  libs.ErrResponse       "Repository unreachable"
+// @Router       /arrow/{ns}/adopt [post]
+func (h *Handlers) AdoptInstalled(c *gin.Context) {
+	ns := domain.Namespace(c.Param("ns"))
+	if !validNamespace(c, ns) {
+		return
+	}
+
+	var req apidto.AdoptRequestDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		libs.WriteErr(c, http.StatusBadRequest, "body must be a json object with a resolved_ref field", string(ns))
+		return
+	}
+	if strings.TrimSpace(req.ResolvedRef) == "" {
+		libs.WriteErr(c, http.StatusBadRequest, "field resolved_ref is required", string(ns))
+		return
+	}
+
+	if err := h.svc.AdoptInstalled(c.Request.Context(), ns, req.ResolvedRef); err != nil {
+		status, msg := apierr.StatusAndMessage(err)
+		libs.WriteErr(c, status, msg, string(ns), err)
+		return
+	}
+	libs.WriteMutationOK(c, http.StatusCreated, string(ns))
+}
+
+// Update advances an arrow to what its selector points at now.
+//
+// @Summary      Update arrow
+// @Description  Re-checks the arrow's selector against its repository. A row nothing is installed from advances to the available ref at once and reports its dependency changes; an installed row keeps its version and reports the ref in `available`, which the runtime update moves it to. `available` is absent when the row is current. The request takes no body.
+// @Tags         arrows
+// @Produce      json
+// @Param        ns    path  string  true  "Arrow namespace"
+// @Success      200  {object}  libs.MutationResultResponse{data=apidto.UpdateResultDTO}  "Update result"
+// @Failure      400  {object}  libs.ErrResponse       "Invalid namespace"
 // @Failure      404  {object}  libs.ErrResponse       "Arrow not found"
+// @Failure      409  {object}  libs.ErrResponse       "Another identity's workdir occupies this identity's path"
 // @Failure      500  {object}  libs.ErrResponse       "Internal error"
 // @Router       /arrow/{ns} [patch]
 func (h *Handlers) Update(c *gin.Context) {
 	ns := domain.Namespace(c.Param("ns"))
-	opts := models.UpdateOptions{}
-	if c.Request.Body != nil {
-		_ = c.ShouldBindJSON(&opts)
-	}
-	if _, err := h.svc.Update(c.Request.Context(), ns, opts); err != nil {
-		status, msg := apierr.StatusAndMessage(err)
-		libs.WriteErr(c, status, msg, string(ns))
+	if !validNamespace(c, ns) {
 		return
 	}
-	libs.WriteMutationOK(c, http.StatusOK, string(ns))
+	result, err := h.svc.Update(c.Request.Context(), ns)
+	if err != nil {
+		status, msg := apierr.StatusAndMessage(err)
+		libs.WriteErr(c, status, msg, string(ns), err)
+		return
+	}
+	libs.WriteMutationResult(c, http.StatusOK, string(ns), apidto.UpdateResultDTOFrom(result))
 }
 
-// Remove deregisters a specific versioned arrow.
+// Remove deregisters an arrow, addressed by the namespace it was registered
+// under — bare (github.com/user/repo) or versioned (…@v1.0.0).
 //
 // @Summary      Remove arrow
-// @Description  Deregisters an arrow. The namespace must include a @ref (version) qualifier.
+// @Description  Deregisters an arrow, addressed by the namespace it was registered under (bare or versioned).
 // @Tags         arrows
-// @Param        ns   path  string  true  "Versioned arrow namespace (e.g. github.com/user/repo@v1.0.0)"
+// @Param        ns   path  string  true  "Arrow namespace (bare or versioned, e.g. github.com/user/repo@v1.0.0)"
 // @Success      200  {object}  libs.MutationResponse  "Arrow removed"
-// @Failure      400  {object}  libs.ErrResponse       "Namespace missing @ref"
 // @Failure      404  {object}  libs.ErrResponse       "Arrow not found"
 // @Failure      500  {object}  libs.ErrResponse       "Internal error"
 // @Router       /arrow/{ns} [delete]
 func (h *Handlers) Remove(c *gin.Context) {
 	ns := domain.Namespace(c.Param("ns"))
-	if ns.Ref() == "" {
-		libs.WriteErr(c, http.StatusBadRequest, "namespace must be versioned (include @ref) for DELETE", string(ns))
-		return
-	}
 	if err := h.svc.Remove(c.Request.Context(), ns); err != nil {
 		status, msg := apierr.StatusAndMessage(err)
-		libs.WriteErr(c, status, msg, string(ns))
+		libs.WriteErr(c, status, msg, string(ns), err)
 		return
 	}
 	libs.WriteMutationOK(c, http.StatusOK, string(ns))
@@ -113,7 +167,7 @@ func (h *Handlers) List(c *gin.Context) {
 	items, err := h.svc.List(c.Request.Context(), userInstalled)
 	if err != nil {
 		status, msg := apierr.StatusAndMessage(err)
-		libs.WriteErr(c, status, msg, "")
+		libs.WriteErr(c, status, msg, "", err)
 		return
 	}
 	dtos := make([]apidto.ArrowListItemDTO, 0, len(items))
@@ -126,12 +180,14 @@ func (h *Handlers) List(c *gin.Context) {
 // GetDetail returns the full detail view of a single arrow including runtime state.
 //
 // @Summary      Get arrow detail
-// @Description  Returns detailed information for an arrow including current state, active run, and last return. Use the WebSocket upgrade to stream live updates.
+// @Description  Returns detailed information for an arrow including current state, active run, and last return. An uncatalogued namespace resolves live, the same way the manifest and readme endpoints do, and reports state "absent". Use the WebSocket upgrade to stream live updates.
 // @Tags         arrows
 // @Produce      json
 // @Param        ns   path  string  true  "Arrow namespace"
 // @Success      200  {object}  libs.QueryResponse{data=apidto.ArrowDetailDTO}
 // @Failure      404  {object}  libs.ErrResponse
+// @Failure      422  {object}  libs.ErrResponse
+// @Failure      502  {object}  libs.ErrResponse
 // @Failure      500  {object}  libs.ErrResponse
 // @Router       /arrow/{ns} [get]
 func (h *Handlers) GetDetail(c *gin.Context) {
@@ -139,7 +195,7 @@ func (h *Handlers) GetDetail(c *gin.Context) {
 	detail, err := h.svc.GetDetail(c.Request.Context(), ns)
 	if err != nil {
 		status, msg := apierr.StatusAndMessage(err)
-		libs.WriteErr(c, status, msg, string(ns))
+		libs.WriteErr(c, status, msg, string(ns), err)
 		return
 	}
 	libs.WriteQueryOK(c, apidto.ArrowDetailDTOFrom(detail))
@@ -148,12 +204,14 @@ func (h *Handlers) GetDetail(c *gin.Context) {
 // GetManifest returns the raw manifest definition for an arrow.
 //
 // @Summary      Get arrow manifest
-// @Description  Returns the full manifest definition including targets, variables, and lifecycle steps.
+// @Description  Returns the manifest as its author wrote it (metadata, variables, netbridge, targets, readme). Quiver's own bookkeeping for the row (selector, resolved and available refs) is on the arrow detail, not here.
 // @Tags         arrows
 // @Produce      json
 // @Param        ns   path  string  true  "Arrow namespace"
 // @Success      200  {object}  libs.QueryResponse{data=apidto.ArrowManifestDTO}
 // @Failure      404  {object}  libs.ErrResponse
+// @Failure      422  {object}  libs.ErrResponse
+// @Failure      502  {object}  libs.ErrResponse
 // @Failure      500  {object}  libs.ErrResponse
 // @Router       /arrow/{ns}/manifest [get]
 func (h *Handlers) GetManifest(c *gin.Context) {
@@ -161,10 +219,100 @@ func (h *Handlers) GetManifest(c *gin.Context) {
 	result, err := h.svc.GetManifest(c.Request.Context(), ns)
 	if err != nil {
 		status, msg := apierr.StatusAndMessage(err)
-		libs.WriteErr(c, status, msg, string(ns))
+		libs.WriteErr(c, status, msg, string(ns), err)
 		return
 	}
 	libs.WriteQueryOK(c, apidto.ArrowManifestDTOFrom(result))
+}
+
+// GetReadme returns the prose documentation for an arrow.
+//
+// @Summary      Get arrow readme
+// @Description  Returns the prose surrounding the fenced manifest block when the arrow is delivered as ARROW.md. 404 if the arrow was delivered as arrow.yaml or carries no readme.
+// @Tags         arrows
+// @Produce      json
+// @Param        ns   path  string  true  "Arrow namespace"
+// @Success      200  {object}  libs.QueryResponse{data=apidto.ArrowReadmeDTO}
+// @Failure      404  {object}  libs.ErrResponse
+// @Failure      422  {object}  libs.ErrResponse
+// @Failure      502  {object}  libs.ErrResponse
+// @Failure      500  {object}  libs.ErrResponse
+// @Router       /arrow/{ns}/readme [get]
+func (h *Handlers) GetReadme(c *gin.Context) {
+	ns := domain.Namespace(c.Param("ns"))
+	result, err := h.svc.GetReadme(c.Request.Context(), ns)
+	if err != nil {
+		status, msg := apierr.StatusAndMessage(err)
+		libs.WriteErr(c, status, msg, string(ns))
+		return
+	}
+	libs.WriteQueryOK(c, apidto.ArrowReadmeDTOFrom(ns, result))
+}
+
+// GetDependents returns the arrows that depend on this arrow.
+//
+// @Summary      Get arrow dependents
+// @Description  Returns the namespaces of arrows that declare a dependency on this arrow, across all installed versions pointing at it.
+// @Tags         arrows
+// @Produce      json
+// @Param        ns   path  string  true  "Arrow namespace"
+// @Success      200  {object}  libs.QueryResponse{data=apidto.ArrowDependentsDTO}
+// @Failure      404  {object}  libs.ErrResponse
+// @Failure      500  {object}  libs.ErrResponse
+// @Router       /arrow/{ns}/dependents [get]
+func (h *Handlers) GetDependents(c *gin.Context) {
+	ns := domain.Namespace(c.Param("ns"))
+	dependents, err := h.svc.GetDependents(c.Request.Context(), ns)
+	if err != nil {
+		status, msg := apierr.StatusAndMessage(err)
+		libs.WriteErr(c, status, msg, string(ns))
+		return
+	}
+	libs.WriteQueryOK(c, apidto.ArrowDependentsDTOFrom(ns, dependents))
+}
+
+// GetDependencies returns the resolved, topologically ordered dependency plan for this arrow.
+//
+// @Summary      Get arrow dependencies
+// @Description  Returns the transitive dependency plan for this arrow, resolved from its manifest's tools and services, in dependency-first order.
+// @Tags         arrows
+// @Produce      json
+// @Param        ns   path  string  true  "Arrow namespace"
+// @Success      200  {object}  libs.QueryResponse{data=apidto.ArrowDependenciesDTO}
+// @Failure      404  {object}  libs.ErrResponse
+// @Failure      500  {object}  libs.ErrResponse
+// @Router       /arrow/{ns}/dependencies [get]
+func (h *Handlers) GetDependencies(c *gin.Context) {
+	ns := domain.Namespace(c.Param("ns"))
+	plan, err := h.svc.GetDependencies(c.Request.Context(), ns)
+	if err != nil {
+		status, msg := apierr.StatusAndMessage(err)
+		libs.WriteErr(c, status, msg, string(ns))
+		return
+	}
+	libs.WriteQueryOK(c, apidto.ArrowDependenciesDTOFrom(ns, plan))
+}
+
+// ListChannels reports every release channel an arrow's repository publishes.
+//
+// @Summary      List arrow channels
+// @Description  Buckets every tag the arrow's repository publishes into its release channel, plus the repository's default branch.
+// @Tags         arrows
+// @Produce      json
+// @Param        ns   path  string  true  "Arrow namespace"
+// @Success      200  {object}  libs.QueryResponse{data=apidto.ChannelListDTO}  "Channels"
+// @Failure      404  {object}  libs.ErrResponse  "Arrow not found"
+// @Failure      500  {object}  libs.ErrResponse  "Internal error"
+// @Router       /arrow/{ns}/channels [get]
+func (h *Handlers) ListChannels(c *gin.Context) {
+	ns := domain.Namespace(c.Param("ns"))
+	channels, err := h.svc.ListChannels(c.Request.Context(), ns)
+	if err != nil {
+		status, msg := apierr.StatusAndMessage(err)
+		libs.WriteErr(c, status, msg, string(ns), err)
+		return
+	}
+	libs.WriteQueryOK(c, apidto.ChannelListDTOFrom(channels))
 }
 
 // Seed uploads a raw YAML manifest for an arrow and registers it immediately.
@@ -176,7 +324,8 @@ func (h *Handlers) GetManifest(c *gin.Context) {
 // @Param        ns    path  string  true   "Arrow namespace"
 // @Param        body  body  string  true   "Raw YAML manifest"
 // @Success      201   {object}  libs.MutationResponse  "Manifest seeded and arrow registered"
-// @Failure      400   {object}  libs.ErrResponse       "Failed to read body"
+// @Failure      400   {object}  libs.ErrResponse       "Failed to read body, or a namespace without a ref or with an empty ref component"
+// @Failure      409   {object}  libs.ErrResponse       "A concurrent registration of the same identity won the race"
 // @Failure      422   {object}  libs.ErrResponse       "Invalid manifest"
 // @Failure      500   {object}  libs.ErrResponse       "Internal error"
 // @Router       /arrow/{ns}/manifest [post]
@@ -191,7 +340,7 @@ func (h *Handlers) Seed(c *gin.Context) {
 
 	if err := h.svc.Seed(c.Request.Context(), ns, body); err != nil {
 		status, msg := apierr.StatusAndMessage(err)
-		libs.WriteErr(c, status, msg, string(ns))
+		libs.WriteErr(c, status, msg, string(ns), err)
 		return
 	}
 
@@ -224,7 +373,7 @@ func (h *Handlers) Validate(c *gin.Context) {
 	result, err := h.svc.ValidateManifest(c.Request.Context(), body)
 	if err != nil {
 		status, msg := apierr.StatusAndMessage(err)
-		libs.WriteErr(c, status, msg, string(ns))
+		libs.WriteErr(c, status, msg, string(ns), err)
 		return
 	}
 

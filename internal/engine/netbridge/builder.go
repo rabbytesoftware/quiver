@@ -15,11 +15,13 @@ import (
 
 // Builder constructs a Netbridge instance.
 type Builder struct {
-	readModel  store.PortStore
-	eventStore models.Store
-	strategies []strategies.Strategy
-	portStart  int
-	portEnd    int
+	readModel     store.PortStore
+	eventStore    models.Store
+	snapshotStore models.SnapshotStore
+	strategies    []strategies.Strategy
+	forwarding    *bool
+	portStart     int
+	portEnd       int
 }
 
 func New() *Builder {
@@ -35,12 +37,21 @@ func (b *Builder) WithStore(
 	return b
 }
 
-// WithEventStorePath configures a SQLite database at path for event persistence.
-// If not set, events are stored in memory (testing only).
+// WithEventStore injects the asynx event store used for command persistence.
+// Required; Build returns an error if it is not set.
 func (b *Builder) WithEventStore(
 	es models.Store,
 ) *Builder {
 	b.eventStore = es
+	return b
+}
+
+// WithSnapshotStore injects the asynx snapshot store used for aggregate
+// snapshots. Required; Build returns an error if it is not set.
+func (b *Builder) WithSnapshotStore(
+	ss models.SnapshotStore,
+) *Builder {
+	b.snapshotStore = ss
 	return b
 }
 
@@ -64,15 +75,31 @@ func (b *Builder) WithEphemeralPortRange(
 	return b
 }
 
+// WithForwarding enables or disables best-effort router port forwarding.
+// When disabled, ports are still allocated and recorded, but no UPnP or
+// NAT-PMP call is ever made: strategy discovery is skipped at build time and
+// every allocation is recorded as not forwarded. If not set, falls back to
+// netbridge.enabled in configuration.
+func (b *Builder) WithForwarding(
+	enabled bool,
+) *Builder {
+	b.forwarding = &enabled
+	return b
+}
+
 func (b *Builder) Build(
 	ctx context.Context,
 ) (Netbridge, error) {
 	if b.eventStore == nil {
 		return nil, fmt.Errorf("%w: %s", ErrBuildFailed, "missing EventStore")
 	}
+	if b.snapshotStore == nil {
+		return nil, fmt.Errorf("%w: %s", ErrBuildFailed, "missing SnapshotStore")
+	}
 
 	ax, err := asynx.New[ports.PortAllocation]().
 		WithEventStore(b.eventStore).
+		WithSnapshotStore(b.snapshotStore).
 		WithShardingOpts(asynx.ShardingOpts{
 			Shards:     8,
 			QueueDepth: 1000,
@@ -96,6 +123,12 @@ func (b *Builder) discoverStrategies(
 	ctx context.Context,
 ) <-chan []strategies.Strategy {
 	ch := make(chan []strategies.Strategy, 1)
+
+	if !b.resolveForwarding() {
+		ch <- nil
+		close(ch)
+		return ch
+	}
 
 	if b.strategies != nil {
 		ch <- b.strategies
@@ -127,6 +160,14 @@ func (b *Builder) resolveStore() (store.PortStore, error) {
 	}
 
 	return store.NewPortMemory(), nil
+}
+
+func (b *Builder) resolveForwarding() bool {
+	if b.forwarding != nil {
+		return *b.forwarding
+	}
+
+	return config.GetNetbridge().Enabled
 }
 
 func (b *Builder) resolvePortRange() (int, int) {

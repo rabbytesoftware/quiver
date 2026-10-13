@@ -69,6 +69,16 @@ func (c *Client) Remove(ns string) *http.Response {
 	return resp
 }
 
+// ListUserInstalled lists what the desktop library shows.
+func (c *Client) ListUserInstalled() *http.Response {
+	c.t.Helper()
+	resp, err := c.http.Get(c.url("/v0/arrow?user_installed=true"))
+	if err != nil {
+		c.t.Fatalf("Client.ListUserInstalled: do request: %v", err)
+	}
+	return resp
+}
+
 func (c *Client) List() *http.Response {
 	c.t.Helper()
 	resp, err := c.http.Get(c.url("/v0/arrow"))
@@ -78,11 +88,40 @@ func (c *Client) List() *http.Response {
 	return resp
 }
 
+func (c *Client) GetManifest(ns string) *http.Response {
+	c.t.Helper()
+	resp, err := c.http.Get(c.url("/v0/arrow/" + url.PathEscape(ns) + "/manifest"))
+	if err != nil {
+		c.t.Fatalf("Client.GetManifest: do request: %v", err)
+	}
+	return resp
+}
+
 func (c *Client) GetDetail(ns string) *http.Response {
 	c.t.Helper()
 	resp, err := c.http.Get(c.url("/v0/arrow/" + url.PathEscape(ns)))
 	if err != nil {
 		c.t.Fatalf("Client.GetDetail: do request: %v", err)
+	}
+	return resp
+}
+
+func (c *Client) Channels(ns string) *http.Response {
+	c.t.Helper()
+	resp, err := c.http.Get(c.url("/v0/arrow/" + url.PathEscape(ns) + "/channels"))
+	if err != nil {
+		c.t.Fatalf("Client.Channels: do request: %v", err)
+	}
+	return resp
+}
+
+// GetSub issues a plain GET of one of an arrow's detail sub-resources, such as
+// "manifest", "readme", "channels", "dependents" or "dependencies".
+func (c *Client) GetSub(ns, sub string) *http.Response {
+	c.t.Helper()
+	resp, err := c.http.Get(c.url("/v0/arrow/" + url.PathEscape(ns) + "/" + sub))
+	if err != nil {
+		c.t.Fatalf("Client.GetSub %s: do request: %v", sub, err)
 	}
 	return resp
 }
@@ -150,6 +189,25 @@ func (c *Client) Seed(ns string, body []byte) *http.Response {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		c.t.Fatalf("Client.Seed: do request: %v", err)
+	}
+	return resp
+}
+
+// Adopt declares ns already installed at resolvedRef.
+func (c *Client) Adopt(ns, resolvedRef string) *http.Response {
+	c.t.Helper()
+	b, err := json.Marshal(map[string]string{"resolved_ref": resolvedRef})
+	if err != nil {
+		c.t.Fatalf("Client.Adopt: marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.url("/v0/arrow/"+url.PathEscape(ns)+"/adopt"), bytes.NewReader(b))
+	if err != nil {
+		c.t.Fatalf("Client.Adopt: create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatalf("Client.Adopt: do request: %v", err)
 	}
 	return resp
 }
@@ -257,6 +315,88 @@ func (c *Client) CollectionValidateManifest(ns string, body []byte) *http.Respon
 	return resp
 }
 
+// SearchParams are the optional query-string knobs of GET /v0/search. A zero
+// value sends nothing, which is how the default limit and the absent OS filter
+// are exercised.
+type SearchParams struct {
+	OS    string
+	Limit string
+}
+
+// Search issues GET /v0/search. The query is sent verbatim, so a blank or
+// whitespace-only q reaches the handler unchanged.
+func (c *Client) Search(query string, params SearchParams) *http.Response {
+	c.t.Helper()
+	values := url.Values{}
+	values.Set("q", query)
+	if params.OS != "" {
+		values.Set("os", params.OS)
+	}
+	if params.Limit != "" {
+		values.Set("limit", params.Limit)
+	}
+	resp, err := c.http.Get(c.url("/v0/search?" + values.Encode()))
+	if err != nil {
+		c.t.Fatalf("Client.Search: do request: %v", err)
+	}
+	return resp
+}
+
+// Discover issues POST /v0/search/discover with the given raw JSON body.
+func (c *Client) Discover(body string) *http.Response {
+	c.t.Helper()
+	req, err := http.NewRequest(http.MethodPost, c.url("/v0/search/discover"), strings.NewReader(body))
+	if err != nil {
+		c.t.Fatalf("Client.Discover: create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatalf("Client.Discover: do request: %v", err)
+	}
+	return resp
+}
+
+// DiscoveryJob issues the plain GET of a discovery job, which returns the
+// summary rather than the stream.
+func (c *Client) DiscoveryJob(jobID string) *http.Response {
+	c.t.Helper()
+	resp, err := c.http.Get(c.url("/v0/search/discover/" + url.PathEscape(jobID)))
+	if err != nil {
+		c.t.Fatalf("Client.DiscoveryJob: do request: %v", err)
+	}
+	return resp
+}
+
+// Home issues GET /v0/home.
+func (c *Client) Home() *http.Response {
+	c.t.Helper()
+	resp, err := c.http.Get(c.url("/v0/home"))
+	if err != nil {
+		c.t.Fatalf("Client.Home: do request: %v", err)
+	}
+	return resp
+}
+
+// RefreshHome issues POST /v0/home/refresh.
+func (c *Client) RefreshHome() *http.Response {
+	c.t.Helper()
+	resp, err := c.http.Post(c.url("/v0/home/refresh"), "application/json", nil)
+	if err != nil {
+		c.t.Fatalf("Client.RefreshHome: do request: %v", err)
+	}
+	return resp
+}
+
+// DialDiscovery opens the WebSocket result stream of a discovery job.
+func (c *Client) DialDiscovery(jobID string) (*websocket.Conn, error) {
+	c.t.Helper()
+	wsURL := strings.Replace(c.baseURL, "http://", "ws://", 1)
+	wsURL += "/v0/search/discover/" + url.PathEscape(jobID)
+	conn, _, err := unixWSDialer(c.socketPath).Dial(wsURL, nil) //nolint:bodyclose
+	return conn, err
+}
+
 // DialRuntime opens a WebSocket connection to the arrow runtime stream.
 func (c *Client) DialRuntime(ns string) (*websocket.Conn, error) {
 	c.t.Helper()
@@ -271,6 +411,42 @@ func (c *Client) DialRuntime(ns string) (*websocket.Conn, error) {
 	}
 	conn, _, err := dialer.Dial(wsURL, nil)
 	return conn, err
+}
+
+// ConsoleExec runs one console command line and returns the response, whose
+// body is the newline-delimited JSON frame stream.
+func (c *Client) ConsoleExec(
+	line string,
+) *http.Response {
+	c.t.Helper()
+	body, err := json.Marshal(map[string]string{"line": line})
+	if err != nil {
+		c.t.Fatalf("Client.ConsoleExec: marshal: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.url("/v0/console/exec"), bytes.NewReader(body))
+	if err != nil {
+		c.t.Fatalf("Client.ConsoleExec: create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatalf("Client.ConsoleExec: do request: %v", err)
+	}
+	return resp
+}
+
+// DialConsoleLogs opens the console log stream; query is appended verbatim,
+// for example "?level=debug".
+func (c *Client) DialConsoleLogs(
+	query string,
+) (*websocket.Conn, error) {
+	c.t.Helper()
+	wsURL := strings.Replace(c.baseURL, "http://", "ws://", 1) + "/v0/console/logs" + query
+	conn, resp, err := unixWSDialer(c.socketPath).Dial(wsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	return conn, resp.Body.Close()
 }
 
 func (c *Client) url(path string) string {

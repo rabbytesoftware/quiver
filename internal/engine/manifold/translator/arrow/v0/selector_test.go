@@ -166,6 +166,37 @@ func TestSelectTarget_BaseChainInherited(t *testing.T) {
 	}
 }
 
+// TestSelectTarget_PreinstalledLifecycle_ResolvedAndInherited: preinstalled
+// steps survive base-chain inheritance and OS resolution exactly like every
+// other lifecycle field, landing in the final resolved Target.
+func TestSelectTarget_PreinstalledLifecycle_ResolvedAndInherited(t *testing.T) {
+	targets := makeTargets(map[string]models.PrecompiledTarget{
+		"_common": {
+			Lifecycle: domain.TargetLifecycle{
+				Preinstalled: step.StepList{step.NewRunStep("preinstall", "base-preinstall", false, "", true)},
+			},
+		},
+		"linux/*": {
+			Base: "_common",
+			Lifecycle: domain.TargetLifecycle{
+				Install: step.StepList{step.NewRunStep("install", "child-install", false, "", true)},
+			},
+		},
+	})
+
+	rt, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rt.Lifecycle.Preinstalled) == 0 {
+		t.Fatal("expected preinstalled steps inherited from _common")
+	}
+	got := rt.Lifecycle.Preinstalled[0].(step.RunStep).Command.Default
+	if got != "base-preinstall" {
+		t.Fatalf("expected base-preinstall, got %q", got)
+	}
+}
+
 func TestSelectTarget_ChildOverridesParentInstall(t *testing.T) {
 	targets := makeTargets(map[string]models.PrecompiledTarget{
 		"_base": {
@@ -236,6 +267,104 @@ func TestSelectTarget_AmbiguousExportOSArch_ReturnsError(t *testing.T) {
 	var ambig *models.AmbiguousTargetError
 	if !errors.As(err, &ambig) {
 		t.Fatalf("expected *AmbiguousTargetError for tied export OSArch keys, got %v", err)
+	}
+}
+
+// A step field's Overrideable keys are resolved through the same
+// resolveOverrideable exports use, so an equal-specificity tie must raise the
+// same *AmbiguousTargetError — naming both keys and the OS, not silently
+// picking whichever key Go's map iteration handed over first.
+func TestSelectTarget_AmbiguousStepFieldOSArch_ReturnsError(t *testing.T) {
+	install := step.NewRunStep("install", "", false, "", true)
+	install.Command = step.Overrideable[string]{
+		OSArch: map[string]string{
+			"linux/*": "echo by-os",
+			"*/amd64": "echo by-arch",
+		},
+	}
+
+	targets := makeTargets(map[string]models.PrecompiledTarget{
+		"linux/*": {
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{install},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "", true)},
+			},
+		},
+	})
+
+	_, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+	var ambig *models.AmbiguousTargetError
+	if !errors.As(err, &ambig) {
+		t.Fatalf("expected *AmbiguousTargetError for tied step-field OSArch keys, got %v", err)
+	}
+	if ambig.OS != string(domain.OSLinuxAMD64) {
+		t.Errorf("OS = %q, want %q", ambig.OS, domain.OSLinuxAMD64)
+	}
+	if !tieKeysMatch(ambig.Key1, ambig.Key2, "linux/*", "*/amd64") {
+		t.Errorf("tie keys = (%q, %q), want linux/* and */amd64", ambig.Key1, ambig.Key2)
+	}
+}
+
+// The same tie on a step inside a custom method is the same error — methods go
+// through the same resolver as a lifecycle does.
+func TestSelectTarget_AmbiguousMethodStepOSArch_ReturnsError(t *testing.T) {
+	backup := step.NewRunStep("backup", "", false, "", true)
+	backup.Command = step.Overrideable[string]{
+		OSArch: map[string]string{
+			"linux/*": "./backup",
+			"*/amd64": "./backup-amd64",
+		},
+	}
+
+	targets := makeTargets(map[string]models.PrecompiledTarget{
+		"linux/*": {
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "", true)},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "", true)},
+			},
+			Methods: map[string]domain.Method{
+				"backup": {
+					AvailableIn: []domain.ArrowState{domain.ArrowStateReady},
+					Steps:       step.StepList{backup},
+				},
+			},
+		},
+	})
+
+	_, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+	var ambig *models.AmbiguousTargetError
+	if !errors.As(err, &ambig) {
+		t.Fatalf("expected *AmbiguousTargetError for a tied method step field, got %v", err)
+	}
+	if ambig.OS != string(domain.OSLinuxAMD64) {
+		t.Errorf("OS = %q, want %q", ambig.OS, domain.OSLinuxAMD64)
+	}
+	if !tieKeysMatch(ambig.Key1, ambig.Key2, "linux/*", "*/amd64") {
+		t.Errorf("tie keys = (%q, %q), want linux/* and */amd64", ambig.Key1, ambig.Key2)
+	}
+}
+
+// A step type with no Overrideable fields has nothing to resolve and must come
+// through untouched, whatever the OS.
+func TestSelectTarget_DependenciesStep_PassesThroughUnchanged(t *testing.T) {
+	targets := makeTargets(map[string]models.PrecompiledTarget{
+		"linux/*": {
+			Lifecycle: domain.TargetLifecycle{
+				Install: step.StepList{
+					step.NewDependenciesStep("deps"),
+					step.NewRunStep("install", "echo ok", false, "", true),
+				},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "", true)},
+			},
+		},
+	})
+
+	target, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if _, ok := target.Lifecycle.Install[0].(step.DependenciesStep); !ok {
+		t.Fatalf("expected a dependencies step, got %T", target.Lifecycle.Install[0])
 	}
 }
 
@@ -330,6 +459,15 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return true
+}
+
+func tieKeysMatch(
+	gotKey1 string,
+	gotKey2 string,
+	wantA string,
+	wantB string,
+) bool {
+	return (gotKey1 == wantA && gotKey2 == wantB) || (gotKey1 == wantB && gotKey2 == wantA)
 }
 
 func TestSelectTarget_MergeExports_ParentAndChild(t *testing.T) {
@@ -630,6 +768,81 @@ func TestSelectTarget_OverrideableResolution(t *testing.T) {
 	}
 }
 
+type fromToKind struct {
+	name  string
+	build func(from, to step.Overrideable[string]) step.Step
+	from  func(step.Step) string
+}
+
+func fromToSteps() []fromToKind {
+	return []fromToKind{
+		{
+			name:  "extract",
+			build: func(from, to step.Overrideable[string]) step.Step { return step.ExtractStep{From: from, To: to} },
+			from:  func(s step.Step) string { return s.(step.ExtractStep).From.Default },
+		},
+		{
+			name:  "portable",
+			build: func(from, to step.Overrideable[string]) step.Step { return step.PortableStep{From: from, To: to} },
+			from:  func(s step.Step) string { return s.(step.PortableStep).From.Default },
+		},
+	}
+}
+
+func TestSelectTarget_FromToSteps_OverrideableResolution(t *testing.T) {
+	for _, tc := range fromToSteps() {
+		t.Run(tc.name, func(t *testing.T) {
+			from := step.Overrideable[string]{
+				Default: "./default",
+				OSArch:  map[string]string{"linux/amd64": "./linux-amd64"},
+			}
+			targets := makeTargets(map[string]models.PrecompiledTarget{
+				"linux/*": {
+					Lifecycle: domain.TargetLifecycle{
+						Install: step.StepList{tc.build(from, step.Overrideable[string]{Default: "./"})},
+					},
+				},
+			})
+
+			for os, want := range map[domain.OS]string{domain.OSLinuxAMD64: "./linux-amd64", domain.OSLinuxARM64: "./default"} {
+				rt, err := v0.SelectTarget(targets, os)
+				if err != nil {
+					t.Fatalf("%s: unexpected error: %v", os, err)
+				}
+				if got := tc.from(rt.Lifecycle.Install[0]); got != want {
+					t.Fatalf("%s: expected %s, got %q", os, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestSelectTarget_FromToSteps_AmbiguousOSArch_ReturnsError(t *testing.T) {
+	for _, tc := range fromToSteps() {
+		t.Run(tc.name, func(t *testing.T) {
+			to := step.Overrideable[string]{OSArch: map[string]string{"linux/*": "./by-os/", "*/amd64": "./by-arch/"}}
+			targets := makeTargets(map[string]models.PrecompiledTarget{
+				"linux/*": {
+					Lifecycle: domain.TargetLifecycle{
+						Install:   step.StepList{tc.build(step.Overrideable[string]{Default: "./in"}, to)},
+						Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "", true)},
+					},
+				},
+			})
+
+			_, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+
+			var ambig *models.AmbiguousTargetError
+			if !errors.As(err, &ambig) {
+				t.Fatalf("expected *AmbiguousTargetError for tied OSArch keys, got %v", err)
+			}
+			if !tieKeysMatch(ambig.Key1, ambig.Key2, "linux/*", "*/amd64") {
+				t.Errorf("tied keys = %q, %q, want linux/* and */amd64 in either order", ambig.Key1, ambig.Key2)
+			}
+		})
+	}
+}
+
 func TestSelectTarget_BaseInheritance_OmittedChildLifecycle(t *testing.T) {
 	// A child target that declares install: but omits execute:
 	// must inherit execute: from the abstract base — not override it with empty.
@@ -677,5 +890,121 @@ func TestSelectTarget_BaseInheritance_OmittedChildLifecycle(t *testing.T) {
 	execCmd := result.Lifecycle.Execute[0].(step.RunStep).Command.Default
 	if execCmd != "echo base-execute" {
 		t.Fatalf("expected base execute, got %q", execCmd)
+	}
+}
+
+func TestSelectTarget_MergeExpose_ChildInheritsParent(t *testing.T) {
+	targets := makeTargets(map[string]models.PrecompiledTarget{
+		"_base": {
+			Expose: domain.Expose{
+				CLI: []domain.ExposeEntry{
+					{Name: "mytool", Path: "${INSTALL_PATH}/bin/mytool"},
+				},
+			},
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "", true)},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "", true)},
+			},
+		},
+		"linux/*": {
+			Base:      "_base",
+			Lifecycle: domain.TargetLifecycle{},
+		},
+	})
+	rt, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rt.Expose.CLI) != 1 || rt.Expose.CLI[0].Name != "mytool" {
+		t.Fatalf("Expose.CLI = %v, want inherited entry from parent", rt.Expose.CLI)
+	}
+}
+
+func TestSelectTarget_MergeExpose_ChildReplacesParent(t *testing.T) {
+	targets := makeTargets(map[string]models.PrecompiledTarget{
+		"_base": {
+			Expose: domain.Expose{
+				CLI: []domain.ExposeEntry{
+					{Name: "basetool", Path: "${INSTALL_PATH}/bin/basetool"},
+				},
+			},
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "", true)},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "", true)},
+			},
+		},
+		"linux/*": {
+			Base: "_base",
+			Expose: domain.Expose{
+				CLI: []domain.ExposeEntry{
+					{Name: "childtool", Path: "${INSTALL_PATH}/bin/childtool"},
+				},
+			},
+			Lifecycle: domain.TargetLifecycle{},
+		},
+	})
+	rt, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rt.Expose.CLI) != 1 || rt.Expose.CLI[0].Name != "childtool" {
+		t.Fatalf("Expose.CLI = %v, want only childtool (child replaces parent)", rt.Expose.CLI)
+	}
+}
+
+func TestSelectTarget_MergeExpose_EmptyChildOverridesParent(t *testing.T) {
+	targets := makeTargets(map[string]models.PrecompiledTarget{
+		"_base": {
+			Expose: domain.Expose{
+				CLI: []domain.ExposeEntry{
+					{Name: "basetool", Path: "${INSTALL_PATH}/bin/basetool"},
+				},
+			},
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "", true)},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "", true)},
+			},
+		},
+		"linux/*": {
+			Base:      "_base",
+			Expose:    domain.Expose{CLI: []domain.ExposeEntry{}},
+			Lifecycle: domain.TargetLifecycle{},
+		},
+	})
+	rt, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rt.Expose.CLI) != 0 {
+		t.Fatalf("Expose.CLI = %v, want empty (child declared cli: [])", rt.Expose.CLI)
+	}
+}
+
+func TestSelectTarget_BuildResolvedTarget_Expose(t *testing.T) {
+	targets := makeTargets(map[string]models.PrecompiledTarget{
+		"linux/*": {
+			Expose: domain.Expose{
+				CLI: []domain.ExposeEntry{
+					{Name: "mytool", Path: "${INSTALL_PATH}/bin/mytool"},
+				},
+				Desktop: []domain.ExposeEntry{
+					{Name: "MyApp", Path: domain.ExposeAuto, Icon: "${INSTALL_PATH}/icon.png"},
+				},
+			},
+			Lifecycle: domain.TargetLifecycle{
+				Install:   step.StepList{step.NewRunStep("install", "echo ok", false, "", true)},
+				Uninstall: step.StepList{step.NewRunStep("uninstall", "echo bye", false, "", true)},
+			},
+		},
+	})
+	rt, err := v0.SelectTarget(targets, domain.OSLinuxAMD64)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rt.Expose.CLI) != 1 || rt.Expose.CLI[0].Path != "${INSTALL_PATH}/bin/mytool" {
+		t.Fatalf("Expose.CLI = %v, want one entry with resolved path", rt.Expose.CLI)
+	}
+	if len(rt.Expose.Desktop) != 1 || rt.Expose.Desktop[0].Icon != "${INSTALL_PATH}/icon.png" {
+		t.Fatalf("Expose.Desktop = %v, want one entry with icon", rt.Expose.Desktop)
 	}
 }

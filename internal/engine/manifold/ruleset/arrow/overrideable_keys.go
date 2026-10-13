@@ -101,6 +101,7 @@ func checkTargetKeys(
 		{"execute", target.Lifecycle.Execute},
 		{"stop", target.Lifecycle.Stop},
 		{"uninstall", target.Lifecycle.Uninstall},
+		{"preinstalled", target.Lifecycle.Preinstalled},
 	}
 	for _, phase := range phases {
 		errs = append(errs, checkStepListKeys(targetKey, phase.name, phase.steps)...)
@@ -132,6 +133,14 @@ func checkStepListKeys(
 			errs = append(errs, checkStringKeys(v.URL.OSArch, stepField("url"))...)
 			errs = append(errs, checkStringKeys(v.To.OSArch, stepField("to"))...)
 			errs = append(errs, checkStringKeys(v.Checksum.OSArch, stepField("checksum"))...)
+			errs = append(errs, checkStringKeys(v.Timeout.OSArch, stepField("timeout"))...)
+		case step.ExtractStep:
+			errs = append(errs, checkStringKeys(v.From.OSArch, stepField("from"))...)
+			errs = append(errs, checkStringKeys(v.To.OSArch, stepField("to"))...)
+			errs = append(errs, checkStringKeys(v.Timeout.OSArch, stepField("timeout"))...)
+		case step.PortableStep:
+			errs = append(errs, checkStringKeys(v.From.OSArch, stepField("from"))...)
+			errs = append(errs, checkStringKeys(v.To.OSArch, stepField("to"))...)
 			errs = append(errs, checkStringKeys(v.Timeout.OSArch, stepField("timeout"))...)
 		case step.SignalStep:
 			errs = append(errs, checkSignalKindKeys(v.Signal.OSArch, stepField("signal"))...)

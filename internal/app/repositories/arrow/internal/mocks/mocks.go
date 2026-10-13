@@ -2,9 +2,13 @@ package mocks
 
 import (
 	"context"
+	"time"
 
 	"github.com/rabbytesoftware/quiver.core/internal/app/models"
+	arrowstore "github.com/rabbytesoftware/quiver.core/internal/app/repositories/arrow/internal/store"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
 )
 
 // MockCQRS is a test double for arrowstore.Store.
@@ -14,7 +18,18 @@ type MockCQRS struct {
 	GetDetailFn         func(ctx context.Context, ns domain.Namespace) (*models.ArrowDetailView, error)
 	GetManifestFn       func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error)
 	ResolveManifestFn   func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error)
-	ResolveForInstallFn func(ctx context.Context, ns domain.Namespace) (domain.Namespace, *domain.Arrow, string, error)
+	ResolveCataloguedFn func(ctx context.Context, ns domain.Namespace) (domain.Namespace, error)
+	SearchFn            func(ctx context.Context, q models.SearchQuery) ([]models.CatalogHit, error)
+	ProjectFn           func(ctx context.Context, arrow domain.Arrow) error
+	ProjectForgetFn     func(ctx context.Context, arrow domain.Arrow) error
+	HeldChannelsFn      func(ctx context.Context, ns domain.Namespace) ([]manifold.ChannelInfo, bool)
+	NeedsVersionCheckFn func(ctx context.Context, ns domain.Namespace, lastCheckedAt time.Time) (bool, error)
+	ResolveInstallFn    func(ctx context.Context, ns domain.Namespace) (domain.Namespace, *domain.Arrow, error)
+	ResolveAdoptionFn   func(ctx context.Context, ns domain.Namespace, resolvedRef string) (arrowstore.Adoption, error)
+	CheckDriftFn        func(ctx context.Context, arrow domain.Arrow) (*domain.Available, bool)
+	CachedAtCommitFn    func(ctx context.Context, identity domain.Namespace, target domain.Available) (*domain.Arrow, vault.ManifestFile, bool)
+	RecordAbsentCalls   []domain.Available
+	KnownAbsentFn       func(ctx context.Context, identity domain.Namespace, target domain.Available) bool
 }
 
 func (m *MockCQRS) List(
@@ -67,12 +82,129 @@ func (m *MockCQRS) ResolveManifest(
 	return nil, nil
 }
 
-func (m *MockCQRS) ResolveForInstall(
+func (m *MockCQRS) ResolveCatalogued(
 	ctx context.Context,
 	ns domain.Namespace,
-) (domain.Namespace, *domain.Arrow, string, error) {
-	if m.ResolveForInstallFn != nil {
-		return m.ResolveForInstallFn(ctx, ns)
+) (domain.Namespace, error) {
+	if m.ResolveCataloguedFn != nil {
+		return m.ResolveCataloguedFn(ctx, ns)
 	}
-	return ns, nil, "", nil
+	return ns, nil
+}
+
+func (m *MockCQRS) Search(
+	ctx context.Context,
+	q models.SearchQuery,
+) ([]models.CatalogHit, error) {
+	if m.SearchFn != nil {
+		return m.SearchFn(ctx, q)
+	}
+	return nil, nil
+}
+
+func (m *MockCQRS) Project(
+	ctx context.Context,
+	arrow domain.Arrow,
+) error {
+	if m.ProjectFn != nil {
+		return m.ProjectFn(ctx, arrow)
+	}
+	return nil
+}
+
+func (m *MockCQRS) ProjectForget(
+	ctx context.Context,
+	arrow domain.Arrow,
+) error {
+	if m.ProjectForgetFn != nil {
+		return m.ProjectForgetFn(ctx, arrow)
+	}
+	return nil
+}
+
+func (m *MockCQRS) Wait() {}
+
+func (m *MockCQRS) Stop() {}
+
+func (m *MockCQRS) HeldChannels(
+	ctx context.Context,
+	ns domain.Namespace,
+) ([]manifold.ChannelInfo, bool) {
+	if m.HeldChannelsFn != nil {
+		return m.HeldChannelsFn(ctx, ns)
+	}
+	return nil, false
+}
+
+func (m *MockCQRS) NeedsVersionCheck(
+	ctx context.Context,
+	ns domain.Namespace,
+	lastCheckedAt time.Time,
+) (bool, error) {
+	if m.NeedsVersionCheckFn != nil {
+		return m.NeedsVersionCheckFn(ctx, ns, lastCheckedAt)
+	}
+	return false, nil
+}
+
+func (m *MockCQRS) ResolveInstall(
+	ctx context.Context,
+	ns domain.Namespace,
+	_ ...arrowstore.InstallOption,
+) (domain.Namespace, *domain.Arrow, error) {
+	if m.ResolveInstallFn != nil {
+		return m.ResolveInstallFn(ctx, ns)
+	}
+	return ns, &domain.Arrow{Namespace: ns}, nil
+}
+
+func (m *MockCQRS) ResolveAdoption(
+	ctx context.Context,
+	ns domain.Namespace,
+	resolvedRef string,
+) (arrowstore.Adoption, error) {
+	if m.ResolveAdoptionFn != nil {
+		return m.ResolveAdoptionFn(ctx, ns, resolvedRef)
+	}
+	return arrowstore.Adoption{}, nil
+}
+
+func (m *MockCQRS) CheckDrift(
+	ctx context.Context,
+	arrow domain.Arrow,
+) (*domain.Available, bool) {
+	if m.CheckDriftFn != nil {
+		return m.CheckDriftFn(ctx, arrow)
+	}
+	return nil, false
+}
+
+func (m *MockCQRS) CachedAtCommit(
+	ctx context.Context,
+	identity domain.Namespace,
+	target domain.Available,
+) (*domain.Arrow, vault.ManifestFile, bool) {
+	if m.CachedAtCommitFn != nil {
+		return m.CachedAtCommitFn(ctx, identity, target)
+	}
+	return nil, vault.ManifestFile{}, false
+}
+
+func (m *MockCQRS) KnownAbsent(
+	ctx context.Context,
+	identity domain.Namespace,
+	target domain.Available,
+) bool {
+	if m.KnownAbsentFn != nil {
+		return m.KnownAbsentFn(ctx, identity, target)
+	}
+	return false
+}
+
+func (m *MockCQRS) RecordAbsent(
+	_ context.Context,
+	_ domain.Namespace,
+	target domain.Available,
+) {
+	m.RecordAbsentCalls = append(m.RecordAbsentCalls, target)
 }

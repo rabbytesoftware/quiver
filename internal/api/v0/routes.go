@@ -4,14 +4,37 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/arrows"
+	authendpoint "github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/auth"
 	quivers "github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/collections"
+	consoleendpoint "github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/console"
 	"github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/health"
+	"github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/home"
 	"github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/runtime"
+	"github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/search"
+	"github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/system"
+	"github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/ui"
 )
 
+// Register mounts every v0 route. Everything except health and the pairing
+// endpoints themselves sits behind AuthGate.RequireBearer — a no-op when the
+// daemon is bound to unix://, enforced once it is bound to tcp:// (set by
+// internal.Container.Start). The pairing group gates itself per-route
+// instead: generate/list/revoke are loopback-only, and redeem carries no
+// token at all since the whole point is to mint one.
 func (c *Container) Register(rg *gin.RouterGroup) {
-	arrows.Register(rg, c.arrowSvc, c.wsHandler.Arrow.Handle)
-	runtime.Register(rg, c.runtimeSvc, c.wsHandler.Runtime.Handle)
-	quivers.Register(rg, c.collectionSvc, c.wsHandler.Collection.Handle)
+	protected := rg.Group("")
+	protected.Use(c.AuthGate.RequireBearer())
+
+	arrows.Register(protected, c.arrowSvc, c.wsHandler.Arrow.Handle)
+	runtime.Register(protected, c.runtimeSvc, c.wsHandler.Runtime.Handle)
+	ui.Register(protected, c.surfaceSvc)
+	quivers.Register(protected, c.collectionSvc, c.wsHandler.Collection.Handle)
+	search.Register(protected, c.searchSvc, c.discoverySvc, c.wsHandler.Discovery.Handle)
+	home.Register(protected, c.homeSvc)
+	system.Register(protected, c.configSvc, c.pathSvc, c.systemSvc)
+	if c.ConsoleLogs != nil {
+		consoleendpoint.Register(protected, c.ConsoleLogs, c.ConsoleVersion)
+	}
 	health.Register(rg)
+	authendpoint.Register(rg, c.authSvc, c.AuthGate, c.rateLimiter)
 }

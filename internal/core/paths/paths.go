@@ -8,6 +8,7 @@ package paths
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/rabbytesoftware/quiver.core/internal/core/metadata"
@@ -82,4 +83,72 @@ func Logs() (string, error) {
 	return ensure(
 		metadata.GetLogsPath(),
 	)
+}
+
+// LogsAt returns the absolute path to the logs directory rooted at homeDir
+// instead of the process-level HOME, creating it if it does not exist.
+func LogsAt(homeDir string) (string, error) {
+	return ensure(
+		metadata.GetLogsPathAt(homeDir),
+	)
+}
+
+// Self returns the absolute path to the directory holding the currently
+// installed quiver.core binary — stable across versions, unlike Namespaces
+// (which is per-@ref). Desktop's sidecar launcher and this daemon's own
+// post-boot promotion step both read/write here.
+func Self() (string, error) {
+	return ensure(
+		metadata.GetSelfPath(),
+	)
+}
+
+// SelfAt returns the absolute path to the self-install directory rooted at
+// homeDir instead of the process-level HOME, creating it if it does not exist.
+func SelfAt(homeDir string) (string, error) {
+	return ensure(metadata.GetSelfPathAt(homeDir))
+}
+
+func Bin() (string, error) {
+	return ensure(
+		metadata.GetBinPath(),
+	)
+}
+
+func BinAt(
+	homeDir string,
+) (string, error) {
+	return ensure(metadata.GetBinPathAt(homeDir))
+}
+
+// Run returns the absolute path to the arrow surface socket directory,
+// creating it if it does not exist.
+func Run() (string, error) {
+	return ensure(
+		metadata.GetRunPath(),
+	)
+}
+
+// RunAt returns the absolute path to the arrow surface socket directory rooted
+// at homeDir instead of the process-level HOME, creating it if it does not exist.
+func RunAt(
+	homeDir string,
+) (string, error) {
+	return ensure(
+		metadata.GetRunPathAt(homeDir),
+	)
+}
+
+// SelfAsidePrefix names the files a self-update moves the previous binary to,
+// next to the self path.
+const SelfAsidePrefix = "quiver.old-"
+
+// SweepSelfAsides removes the previous binaries earlier self-updates left in
+// dir. It is best effort: a file that cannot be removed now (still running on
+// Windows) is swept at the next boot.
+func SweepSelfAsides(dir string) {
+	stale, _ := filepath.Glob(filepath.Join(dir, SelfAsidePrefix+"*"))
+	for _, path := range stale {
+		_ = os.Remove(path)
+	}
 }

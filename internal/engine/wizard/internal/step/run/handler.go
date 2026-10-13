@@ -14,6 +14,10 @@ import (
 
 var ErrNonZeroExit = errors.New("run: process exited with non-zero code")
 
+// ErrNoWorkDir means a run step was asked to start without a workdir: it
+// would run in the daemon's own working directory, so it never starts.
+var ErrNoWorkDir = errors.New("run: no workdir")
+
 type handler struct {
 	rt runtime.Runtime
 }
@@ -29,6 +33,9 @@ func (h *handler) Execute(
 	req wizstep.Request,
 	s domainstep.RunStep,
 ) error {
+	if req.WorkDir == "" {
+		return ErrNoWorkDir
+	}
 	stepCtx := ctx
 	var cancel context.CancelFunc
 	if ts := s.Timeout.Resolve(req.OSArch.String()); ts != "" {
@@ -40,19 +47,24 @@ func (h *handler) Execute(
 		defer cancel()
 	}
 
-	config := runtime.NewConfig([]string{s.Command.Resolve(req.OSArch.String())})
+	command := req.Expand(s.Command.Resolve(req.OSArch.String()))
+
+	closeSurface, err := openSurface(req, s.UI)
+	if err != nil {
+		return err
+	}
+	defer closeSurface()
+
+	config := runtime.NewConfig([]string{command})
 	config.ShellWrap = true
 	config.WorkDir = req.WorkDir
-	config.Env = req.Vars
 
 	proc, err := h.rt.Start(stepCtx, config)
 	if err != nil {
 		return err
 	}
 
-	if req.Emit != nil {
-		req.Emit(models.Event{Kind: models.EventKindPID, PID: proc.PID()})
-	}
+	emit(req, models.Event{Kind: models.EventKindPID, PID: proc.PID()})
 
 	if err := proc.Wait(stepCtx); err != nil {
 		return err

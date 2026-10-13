@@ -6,6 +6,8 @@ A **Collection** is a curated set of arrow references — the discovery and auth
 
 This spec describes the on-disk manifest format, the schema validation rules, the lifecycle a Collection follows in the engine and app layers, and the HTTP surface exposed under `/v0/collection`.
 
+A Collection has no version of its own — neither the list nor its entries declare one. Every ref in play belongs to a namespace: the Collection's, or a member's. See [§3.1](#31-metadata-fields) and [§8](#8-versioning).
+
 Cross-references: [arrow.md](arrow.md) · [manifold.md](../../manifold.md) · [vault.md](../../vault.md) · [domain.md](../../domain.md) · [http-api.md](../../http-api.md) · [usecases.md](../../usecases.md)
 
 ---
@@ -48,7 +50,6 @@ schema: "collection@v0"
 
 metadata:
   name: "Gaming Collection"
-  version: "1.0.0"
   description: "Game servers and utilities curated by char2cs"
   url: "https://gaming.example.com"
   maintainers:
@@ -63,6 +64,8 @@ metadata:
 arrows:
   - path: servers/cs2                       # local arrow, lives in this repo
   - path: tools/minecraft                   # local arrow
+  - auid: appimage-runtime                  # local arrow, explicit identity...
+    path: tools/legacy/appimage-runtime     # ...decoupled from its file's location
   - namespace: github.com/valve/steamcmd    # external arrow, full namespace
   - github.com/valve/steamcmd               # string shorthand, external
 ```
@@ -73,7 +76,6 @@ arrows:
 |-------|----------|-------------|
 | `name` | yes | Human-readable display name. |
 | `description` | yes | One-line summary shown in lists and detail views. |
-| `version` | no | Author-declared display version (`"2.1.0"`, `"2024-Q1"`). Independent from the git ref. |
 | `url` | no | Project homepage. |
 | `maintainers` | no | List of maintainer handles or names. |
 | `tags` | no | Free-form tags used for browsing and filtering. |
@@ -82,6 +84,10 @@ arrows:
 
 The JSON schema marks `name` and `description` as `required` and rejects unknown keys at metadata level (`additionalProperties: false`). The Ruleset re-checks that `name` and `description` are non-empty after translation.
 
+**There is no `version:` field.** A Collection is a curated list of arrows, and each member carries its own `namespace@ref` (§3.2). A version on the list itself names no artifact: nothing is fetched at it, nothing resolves against it, and it is the only string in the manifest that no other fact can contradict — so it could say anything and stay true of nothing. Which revision of the list a client is reading is the Collection's own `@ref` (§8), which reaches every response through `namespace`.
+
+A `version:` key under `metadata:` is tolerated and ignored. The schema still lists the property — metadata sets `additionalProperties: false`, so dropping it would turn the key into a hard validation error — but no Go type models it, so the authored value has nowhere to land and is discarded during translation. Old manifests keep validating unchanged; they simply no longer influence anything. Write nothing there.
+
 ### 3.2 Arrow entries
 
 The `arrows` array enumerates the arrows the Collection points to. Each entry takes one of three forms — they are all mutually exclusive on a per-entry basis.
@@ -89,6 +95,7 @@ The `arrows` array enumerates the arrows the Collection points to. Each entry ta
 | Form | Example | Resulting namespace |
 |------|---------|---------------------|
 | Local (object, `path` only) | `path: servers/cs2` | `<bare collection ns>/cs2` |
+| Local (object, `path` + `auid`) | `auid: appimage-runtime`, `path: tools/legacy/appimage-runtime` | `<bare collection ns>/appimage-runtime` |
 | External (object, `namespace` only) | `namespace: github.com/valve/steamcmd` | `github.com/valve/steamcmd` |
 | External (string shorthand) | `github.com/valve/steamcmd` | `github.com/valve/steamcmd` |
 
@@ -96,19 +103,21 @@ The custom `UnmarshalYAML` on `arrowEntryV0` (`v0/types.go`) handles both scalar
 
 #### Local namespace derivation
 
-For local entries (`path` set, `namespace` empty), the manifold computes the resolved namespace by appending the **last segment** of the `path` to the **bare namespace** of the Collection itself:
+For local entries (`path` set, `namespace` empty), the manifold computes the resolved namespace by appending an **AUID** to the **bare namespace** of the Collection itself. The AUID is the entry's explicit `auid:` when given; otherwise it is the **last segment** of `path`:
 
 ```
 collection ns: github.com/char2cs/gaming.collection@v1.0.0
 entry:        path: servers/cs2
 
 bare ns:      github.com/char2cs/gaming.collection
-last segment: cs2
+auid:         cs2                 # no auid: given, so last segment of path
 
 resolved:     github.com/char2cs/gaming.collection/cs2
 ```
 
-Intermediate path segments (`servers/`) are discarded for namespace purposes — they represent the on-disk location inside the source repo, not the addressable identity. Local arrows have `IsLocal: true` set on the resolved `CollectionArrow`.
+`path` is always kept in full (minus any authored `@ref`, replaced by the Collection's own ref — see below) as the arrow's `SourcePath`: the file it names may live anywhere in the repository, not only at its own root. Explicit `auid:` decouples identity from location entirely — renaming or moving the file's directory does not change the arrow's public namespace, provided `auid:` in the entry stays the same. `auid:` is only valid on a local (`path`) entry, and must not contain `/` or `@`. Local arrows have `IsLocal: true` set on the resolved `CollectionArrow`.
+
+An arrow addressed directly by its quiver-hosted namespace — e.g. from another arrow's `tools:` list, without ever following the collection — resolves the same way: the owning collection (its first three namespace segments) is fetched, the AUID is matched against its derived arrow list, and that entry's `SourcePath` is used to fetch the file. Following the collection is never required to install one of its arrows.
 
 If the path produces an empty trailing segment (e.g. `path: ""` or `path: "/"`), the manifold returns `manifold: arrow path %q produces an empty namespace segment`.
 
@@ -116,7 +125,15 @@ If the path produces an empty trailing segment (e.g. `path: ""` or `path: "/"`),
 
 External entries (`namespace` set, `path` empty) are passed through verbatim. The namespace must already be a fully qualified value (`domain/user/repo` or `domain/user/repo/auid`); short names like `cs2` are not promoted. Resolved entries have `IsLocal: false`.
 
-No `description`, `version`, or other arrow fields appear on an entry — that information is read from the arrow's own manifest at resolution time.
+No `description` or other arrow fields appear on an entry — that information is read from the arrow itself at resolution time.
+
+#### Member refs
+
+An entry's namespace string already supports the `@` suffix, so an external member behaves exactly like any other namespace: the suffix is the selector it is installed under (a channel, constraint, pinned ref or commit — see [versioning.md §2](./versioning.md#2-selectors)), and a member without one follows its repository's default channel (see [versioning.md §6](./versioning.md#6-refless-resolution)).
+
+Local entries are different. A local member's namespace is derived from the Collection's **bare** namespace, so the ref is dropped during derivation — and the derived value (`github.com/char2cs/gaming.collection/cs2`) names a file inside a repository, not a repository with tags or releases of its own. It has no channels of its own for a refless member to follow.
+
+A local member must therefore carry an explicit ref, and the only ref that is true of it is the Collection's own — the file was read at that ref (§8). A local entry that cannot be given one is rejected at collection-parse time rather than silently resolving to a default branch.
 
 ---
 
@@ -132,6 +149,9 @@ Defined in `internal/engine/manifold/ruleset/collection/arrow_entry.go`. Runs ag
 |------|-------|---------|
 | `exclusive_fields` | `arrows[i]` | `arrow entry must have either path or namespace, not both` |
 | `required_field` | `arrows[i]` | `arrow entry must have either path or namespace` |
+| `auid_with_namespace` | `arrows[i].auid` | `auid may only be set on a local (path) entry, not alongside namespace` |
+| `invalid_auid` | `arrows[i].auid` | `auid %q must not contain '/' or '@'` |
+| `invalid_path` | `arrows[i].path` | `path %q must not contain '..', '\\', '?', or '#'` |
 
 Errors collect into a single `RuleErrors` slice rather than failing on the first violation.
 
@@ -148,7 +168,7 @@ Runs against the assembled `*domain.Collection` (`internal/engine/manifold/rules
 
 Duplicate detection (`duplicate_namespaces.go`) compares **resolved** namespaces — local and external arrows are normalised to their final namespace before comparison, so `path: tools/x` and `namespace: github.com/.../tools/x` would clash if the bare collection namespace produced the same suffix.
 
-The JSON schema layer (`v0/schema.json`) provides a structural pre-check before either ruleset phase runs: it enforces the metadata key set, that each arrow entry is either a string or an object with at most `path` / `namespace`, and that `additionalProperties: false` holds at the document, metadata, and entry levels.
+The JSON schema layer (`v0/schema.json`) provides a structural pre-check before either ruleset phase runs: it enforces the metadata key set, that each arrow entry is either a string or an object with at most `path` / `namespace` / `auid`, and that `additionalProperties: false` holds at the document, metadata, and entry levels.
 
 ---
 
@@ -159,10 +179,10 @@ The JSON schema layer (`v0/schema.json`) provides a structural pre-check before 
 | Type | Purpose |
 |------|---------|
 | `Collection` | Aggregate combining manifest data, follow state, and resolution failures. Persisted by Asynx (followed) and Vault (cached). |
-| `CollectionMeta` | Manifest metadata block (name, version, description, url, maintainers, tags, media). |
+| `CollectionMeta` | Manifest metadata block (name, description, url, maintainers, tags, media). |
 | `CollectionMedia` | Icon + banner URL pair. |
-| `CollectionArrowEntry` | Raw translator output; exactly one of `Path` / `Namespace` set. |
-| `CollectionArrow` | Resolved arrow reference. Holds the final `Namespace` and an `IsLocal` flag. |
+| `CollectionArrowEntry` | Raw translator output; exactly one of `Path` / `Namespace` set. `AUID` is optional and only valid alongside `Path` — it overrides the identity that otherwise derives from `Path`'s last segment. |
+| `CollectionArrow` | Resolved arrow reference. Holds the final `Namespace`, an `IsLocal` flag, and `SourcePath` — the arrow's location inside the collection's own repository (empty for an external arrow). |
 
 `Collection.Arrows` is the resolved list (after derivation); the raw `CollectionArrowEntry` values live transiently inside `translator.CollectionModule.Entries` between translation and rule application and are not stored.
 
@@ -240,20 +260,13 @@ sequenceDiagram
     participant Repo as collectionService.Follow
     participant Arrows as ArrowUsecase
     participant Asynx
-    participant Mfd as Manifold
 
     Client->>API: POST /collection/:ns/follow
     API->>UC: Follow(ctx, ns)
     UC->>Repo: Get(ctx, ns)
     Repo-->>UC: *Collection
     loop for each arrow in coll.Arrows
-        alt arrow.IsLocal
-            UC->>Mfd: ResolveArrow(ctx, arrow.ns)
-            Mfd-->>UC: bytes
-            UC->>Arrows: Seed(ctx, arrow.ns, bytes)
-        else external
-            UC->>Arrows: ResolveManifest(ctx, arrow.ns)
-        end
+        UC->>Arrows: ResolveManifest(ctx, arrow.ns)
         Note over UC: retried up to config.arrows.auto_retry.retries
         Note over UC: failures collected into FailedArrows
     end
@@ -264,15 +277,15 @@ sequenceDiagram
     UC-->>API: 201 Created
 ```
 
-Caching every referenced arrow is part of Follow rather than Get so the user has a working local copy of every arrow the moment they subscribe. Auto-retry behaviour is driven by `config.arrows.auto_retry` (`enabled` + `retries`); a count of `0` retries means a single attempt with no fallback.
+Warming the manifest cache of every referenced arrow is part of Follow rather than Get so search and the collection screen can read every member the moment the user subscribes. `ResolveManifest` previews through the vault and never writes the arrow catalog: the catalog is the user's library, and a subscription must not fill it with every arrow the Collection lists. A member enters the catalog only when the user adds or installs it. Auto-retry behaviour is driven by `config.arrows.auto_retry` (`enabled` + `retries`); a count of `0` retries means a single attempt with no fallback.
 
 Already-followed namespaces return `apperrors.ErrAlreadyExists` (mapped to HTTP 409) — `FollowCollection.Validate` rejects re-application of the command at the asynx layer.
 
 ### 6.3 FailedArrows
 
-When a referenced arrow fails to resolve during Follow, its namespace is appended to `coll.FailedArrows` instead of failing the whole Follow. The Follow command persists the aggregate with this list intact; subsequent `GET` enrichment uses the list to skip per-arrow `ResolveManifest` calls and emit `Resolved: false` entries with no name, version, or description fields populated.
+When a referenced arrow fails to resolve during Follow, its namespace is appended to `coll.FailedArrows` instead of failing the whole Follow. The Follow command persists the aggregate with this list intact; subsequent `GET` enrichment uses the list to skip per-arrow `ResolveManifest` calls and emit `Resolved: false` entries with no name or description fields populated.
 
-This keeps a Collection partially usable: the user sees every reference, with a flag distinguishing the ones that resolved cleanly from the ones that didn't. There is no automatic retry of failed arrows post-Follow; recovery happens on the next Follow re-issue or out-of-band arrow seed.
+This keeps a Collection partially usable: the user sees every reference — namespace and ref included, since those come from the manifest and not from the failed lookup — with a flag distinguishing the ones that resolved cleanly from the ones that didn't. There is no automatic retry of failed arrows post-Follow; recovery happens on the next Follow re-issue or out-of-band arrow seed.
 
 ---
 
@@ -324,18 +337,13 @@ Sweep behaviour: `sweepQuivers` walks `namespacesPath`, reads only the `cached_a
 
 ## 8. Versioning
 
-Two independent dimensions identify a Collection version:
+One dimension identifies a Collection version: the `@ref` on its namespace, e.g. `@v1.0.0`, `@latest`, `@release-jan-2026`. It drives which git ref the resolver fetches, and it is what the aggregate, the vault envelope and every API response are keyed and filed by.
 
-| Dimension | Source | Used for |
-|-----------|--------|----------|
-| `@ref` (git ref) | Namespace suffix, e.g. `@v1.0.0`, `@latest`, `@release-jan-2026` | Resolution and pinning. Drives which git ref the resolver fetches. |
-| `metadata.version` (manifest field) | Inside the YAML body | Display. The author's declared version string shown in UIs. |
-
-These dimensions are not required to match. A repo tagged `release-jan-2026` may declare `version: "2.0.0"` — the engine treats them as orthogonal facts.
+`metadata.version` was a second, authored dimension declared not to have to match the first. That was the whole defect: two strings for one thing, one of them checked against nothing. A repo tagged `release-jan-2026` could declare `version: "2.0.0"` and no code path anywhere could tell which of the two a client should believe, because the manifest version was fetched at the ref that contradicted it. It is gone — see [§3.1](#31-metadata-fields) for the tolerate-and-ignore rule that keeps existing manifests parsing.
 
 Pinning works the same way it does for arrows: a Collection followed at `github.com/char2cs/gaming@v1.0.0` and one followed at `github.com/char2cs/gaming@v2.0.0` are distinct aggregates with separate vault and asynx entries.
 
-Local arrows derived from a Collection inherit the Collection's **bare** namespace as their prefix (the `@ref` is not propagated through derivation — `BareNamespace()` strips it). They have no git ref of their own; they live inside the Collection's repo and are resolved at the Collection's ref. Their `metadata.version` in the inner arrow manifest is their only version identity.
+Local arrows derived from a Collection inherit the Collection's **bare** namespace as their prefix (`BareNamespace()` strips the `@ref` during derivation). They have no release stream of their own; they live inside the Collection's repo and are resolved at the Collection's ref, which is the ref they must be given back before they can be installed — an arrow manifest declares no version of its own (see [versioning.md §7](./versioning.md#7-the-ref-is-the-version)). Following the Collection does not adopt its members: they enter the catalog only when the user adds or installs one.
 
 ---
 
@@ -379,7 +387,6 @@ followed:     bool
 # CollectionDetailDTO
 namespace:    string
 name:         string
-version:      string   # omitempty
 description:  string
 url:          string   # omitempty
 maintainers:  [string]
@@ -392,11 +399,13 @@ followed:     bool
 namespace:    string
 resolved:     bool
 name:         string   # omitempty
-version:      string   # omitempty
 description:  string   # omitempty
+media:        { icon: string, banner: string }   # the member's own, from its resolved manifest; empty when unresolved
 ```
 
-`resolved: false` indicates either an arrow that lives in `FailedArrows` (was never resolvable at follow time) or an arrow whose post-Follow `ResolveManifest` returned an error during enrichment. Name / version / description are populated on a best-effort basis from the underlying arrow's manifest when resolution succeeded.
+Neither shape carries a `version`. The Collection's own ref is the `@ref` on its `namespace`; a member's ref is the `@ref` on the member's `namespace`. A scalar restating either would be a copy of the field beside it, and on a member it would be worse than redundant: it was populated only on the resolved branch, so two entries pinned at the same ref reported it differently depending on whether an unrelated manifest fetch had succeeded.
+
+`resolved: false` indicates either an arrow that lives in `FailedArrows` (was never resolvable at follow time) or an arrow whose post-Follow `ResolveManifest` returned an error during enrichment. Name and description are populated on a best-effort basis from the underlying arrow's manifest when resolution succeeded; `namespace` comes from the Collection manifest and is present either way.
 
 ### 9.3 Validation response
 
@@ -444,7 +453,17 @@ The store projection (`internal/app/repositories/collection/internal/store/store
 ## 11. Out of scope (v0)
 
 - Composition / playlist semantics — Collections do not declare an execution order or runtime arguments. Future work may layer a Playlist primitive on top.
-- Per-entry overrides — entries cannot pin an arrow ref different from the arrow's own namespace; a Collection cannot say "use steamcmd@v2 instead of @latest".
+- Per-entry overrides — entries cannot pin an arrow ref different from the arrow's own namespace; a Collection cannot say "use steamcmd@v2 instead of @stable".
 - Collection-level dependency graphs — Collections do not declare dependencies between their referenced arrows.
 - Collection-level events for per-arrow resolution failures — `FailedArrows` is exposed via `Get` but not as a separate event stream.
 - Auto-retry backoff — retry uses a fixed count with no jitter; advanced retry policy is a future config addition.
+
+---
+
+## 12. Migration note
+
+`collection@v0` is still in active development. A local arrow's on-disk file used to be
+implicit: a flat `<auid>.yaml` at the repository root. It is now the explicit `path:` the
+entry declares (verbatim, minus any authored `@ref`), which may be nested anywhere in the
+repository — see [§3.2](#32-arrow-entries). No schema version bump accompanies this change:
+there are zero production collections today, so there is nothing to migrate.

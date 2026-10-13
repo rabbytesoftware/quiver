@@ -26,7 +26,11 @@ SWAG           := $(GOBIN)/swag
 # BUILD_ID counts seconds elapsed since that moment.
 QUIVER_EPOCH := 1775932380
 BUILD_ID     := $(shell expr \( $$(date +%s) - $(QUIVER_EPOCH) \) / 86400)
-LDFLAGS      := -ldflags "-X main.version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 'dev') -X main.buildID=$(BUILD_ID)"
+BUILT_AT     := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+# QUIVER_CHANNEL is the release channel a build is published under; empty for
+# a local build, which then registers itself pinned to its own version.
+QUIVER_CHANNEL ?=
+LDFLAGS      := -ldflags "-X main.version=$(shell git describe --tags --always --dirty --exclude='nightly*' 2>/dev/null || echo 'dev') -X main.commit=$(shell git rev-parse HEAD 2>/dev/null) -X main.channel=$(QUIVER_CHANNEL) -X main.builtAt=$(BUILT_AT) -X main.buildID=$(BUILD_ID)"
 BUILD_FLAGS := -a -installsuffix cgo
 
 # Colors for terminal output
@@ -36,7 +40,7 @@ YELLOW := $(shell printf '\033[0;33m')
 BLUE   := $(shell printf '\033[0;34m')
 NC     := $(shell printf '\033[0m')
 
-.PHONY: help build run test test-coverage test-integration bench bench-update benchmark test-all test-docker lint clean docker-build docker-run pr-checks setup deps fmt vet security icons generate-icons build-release build-cross-platform build-macos-app
+.PHONY: help build install run test test-coverage test-integration bench bench-update test-all test-docker test-e2e-docker lint clean docker-build docker-run pr-checks setup deps fmt vet security icons generate-icons build-release build-cross-platform build-macos-app
 
 # Default target
 all: clean deps fmt vet test build
@@ -56,6 +60,7 @@ help:
 	@echo "  test              - Run all tests"
 	@echo "  test-coverage     - Run tests with coverage report"
 	@echo "  test-docker       - Run tests in Docker container"
+	@echo "  test-e2e-docker   - Real end-to-end run on Linux in Docker (network; E2E_PLATFORM=linux/amd64 for amd64)"
 	@echo "  bench             - Run integration benchmarks, check 1.25× regression"
 	@echo "  bench-update      - Re-generate benchmark baseline for this machine"
 	@echo "  missing-tests     - List files without tests"
@@ -114,6 +119,29 @@ build: clean deps fmt vet
 	@CGO_ENABLED=0 go build $(BUILD_FLAGS) $(LDFLAGS) -o $(BINARY_PATH) $(MAIN_PATH)
 	@echo "$(GREEN)Build completed: $(BINARY_PATH)$(NC)"
 
+# Install the built binary onto PATH.
+#
+# The daemon holds an open handle to its own binary, so a plain copy fails with
+# "text file busy" and, worse, a copy that lands still leaves the OLD daemon
+# serving the socket. Stopping it first is not a convenience: a stale daemon
+# and a fresh client is a version skew that shows up as decode panics.
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+install: build
+	@echo "$(BLUE)Stopping any running daemon...$(NC)"
+	@if [ -f "$(HOME)/.quiver/quiver.pid" ]; then \
+		kill -TERM "$$(cat $(HOME)/.quiver/quiver.pid)" 2>/dev/null || true; \
+		for i in 1 2 3 4 5 6 7 8 9 10; do \
+			kill -0 "$$(cat $(HOME)/.quiver/quiver.pid)" 2>/dev/null || break; \
+			sleep 0.3; \
+		done; \
+	fi
+	@pkill -TERM -f '[$(shell printf %.1s $(APP_NAME))]$(shell echo $(APP_NAME) | cut -c2-) daemon' 2>/dev/null || true
+	@mkdir -p $(INSTALL_DIR)
+	@cp $(BINARY_PATH) $(INSTALL_DIR)/$(APP_NAME)
+	@echo "$(GREEN)Installed: $(INSTALL_DIR)/$(APP_NAME)$(NC)"
+	@echo "$(YELLOW)The daemon will boot fresh on the next command.$(NC)"
+
 # Clean build artifacts and coverage files
 clean:
 	@echo "$(BLUE)Cleaning build artifacts...$(NC)"
@@ -151,13 +179,6 @@ test-integration:
 		./tests/integration/... 2>&1 | grep -v "malformed LC_DYSYMTAB"
 	@echo "$(GREEN)Integration tests passed!$(NC)"
 
-# Run benchmarks (no race detector — timing would be meaningless with it)
-benchmark:
-	@echo "$(BLUE)Running benchmarks...$(NC)"
-	@set -o pipefail; go test -tags integration -v -timeout 600s -p 1 \
-		./tests/bench/... 2>&1 | grep -v "malformed LC_DYSYMTAB"
-	@echo "$(GREEN)Benchmarks passed!$(NC)"
-
 # Run integration benchmarks and check for regressions against baseline.json.
 # Each benchmark measures request → WebSocket event latency (no polling).
 # Run 'make bench-update' first to establish a baseline on your machine.
@@ -194,6 +215,24 @@ test-docker:
 		go tool cover -func=$(COVERAGE_FILE)"
 	@echo "$(GREEN)Docker tests completed!$(NC)"
 
+# Real end-to-end run of a built quiver binary on Linux: installs, updates and
+# uninstalls github.com/char2cs/crowbar@nightly from GitHub, then force-moves a
+# rolling tag on a container-local git host under an installed row. Needs
+# network access; not part of pr-checks.
+#   E2E_PLATFORM    image/container platform (default: the Docker host's own
+#                   architecture, so the default run is native; the other one
+#                   runs under emulation)
+#   E2E_ARGS        extra `docker run` arguments, e.g. -e E2E_PHASES=B
+E2E_HOST_ARCH = $(shell docker version -f '{{.Server.Arch}}' 2>/dev/null | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+E2E_PLATFORM ?= linux/$(or $(E2E_HOST_ARCH),amd64)
+E2E_ARGS     ?=
+test-e2e-docker:
+	@echo "$(BLUE)Running the docker end-to-end suite on $(E2E_PLATFORM)...$(NC)"
+	docker build --platform $(E2E_PLATFORM) -f tests/e2e/docker/Dockerfile \
+		--build-arg QUIVER_COMMIT=$(shell git rev-parse HEAD 2>/dev/null) -t quiver-e2e .
+	docker run --rm --platform $(E2E_PLATFORM) -e E2E_HOST_ARCH=$(E2E_HOST_ARCH) $(E2E_ARGS) quiver-e2e
+	@echo "$(GREEN)End-to-end suite passed on $(E2E_PLATFORM)!$(NC)"
+
 # Run linting checks
 lint:
 	@echo "$(BLUE)Running linting checks...$(NC)"
@@ -206,7 +245,11 @@ security:
 	@echo "$(BLUE)Installing gosec if not present...$(NC)"
 	@go install github.com/securego/gosec/v2/cmd/gosec@latest
 	@echo "$(BLUE)Running gosec security scan...$(NC)"
-	@gosec ./... 2>&1 | grep -v "Checking " || { echo "$(RED)Security issues found. Review the output above.$(NC)"; exit 1; }
+	@out=$$(gosec ./... 2>&1); status=$$?; echo "$$out" | grep -v "Checking "; \
+	if [ $$status -ne 0 ]; then \
+		echo "$(RED)Security issues found. Review the output above.$(NC)"; \
+		exit 1; \
+	fi
 	@echo "$(GREEN)Security checks completed!$(NC)"
 
 # Build Docker image

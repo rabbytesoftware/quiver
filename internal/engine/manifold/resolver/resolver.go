@@ -2,11 +2,12 @@ package resolver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/rabbytesoftware/quiver.core/internal/core/metadata"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/hosts"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/resolver/resolvers"
 )
 
@@ -16,6 +17,16 @@ type Resolver interface {
 	ResolveArrow(
 		ctx context.Context,
 		namespace domain.Namespace,
+	) ([]byte, string, error)
+
+	// ResolveArrowAt fetches a manifest at an explicit path within the
+	// namespace's repository (markdown tried before YAML), for a
+	// quiver-hosted arrow whose location was already looked up in its
+	// owning collection.
+	ResolveArrowAt(
+		ctx context.Context,
+		namespace domain.Namespace,
+		path string,
 	) ([]byte, string, error)
 
 	ResolveCollection(
@@ -31,8 +42,12 @@ type resolver struct {
 	fetchers []resolvers.Fetcher
 }
 
+// New builds a resolver that tries each host's raw-file URL before cloning.
+// A namespace on a host the lookup does not know still resolves: git needs no
+// host knowledge.
 func New(
 	timeout time.Duration,
+	lookup hosts.Lookup,
 ) Resolver {
 	if timeout == 0 {
 		timeout = defaultFetchTimeout
@@ -41,7 +56,7 @@ func New(
 	return &resolver{
 		timeout: timeout,
 		fetchers: []resolvers.Fetcher{
-			resolvers.NewHTTP(metadata.GetPlatforms()),
+			resolvers.NewHTTP(lookup),
 			resolvers.NewGit(),
 		},
 	}
@@ -51,12 +66,24 @@ func (r *resolver) ResolveArrow(
 	ctx context.Context,
 	namespace domain.Namespace,
 ) ([]byte, string, error) {
-	filePaths, err := resolveArrowParts(namespace)
-	if err != nil {
-		return nil, "", err
+	if err := namespace.BareNamespace().Validate(); err != nil {
+		return nil, "", fmt.Errorf("resolver: invalid namespace: %w", err)
 	}
+	return r.fetchManifest(ctx, namespace, []string{"ARROW.md", "arrow.yaml"})
+}
 
-	return r.fetchManifest(ctx, namespace, filePaths)
+func (r *resolver) ResolveArrowAt(
+	ctx context.Context,
+	namespace domain.Namespace,
+	path string,
+) ([]byte, string, error) {
+	if err := namespace.BareNamespace().Validate(); err != nil {
+		return nil, "", fmt.Errorf("resolver: invalid namespace: %w", err)
+	}
+	if path == "" {
+		return nil, "", fmt.Errorf("resolver: resolve arrow at %s: empty path", namespace)
+	}
+	return r.fetchManifest(ctx, namespace, []string{path + ".md", path + ".yaml"})
 }
 
 func (r *resolver) ResolveCollection(
@@ -71,45 +98,55 @@ func (r *resolver) ResolveCollection(
 	return data, err
 }
 
+// fetchManifest tries each fetcher in turn, handing it the full candidate
+// list in one call rather than looping over candidates itself. This means
+// the global trying order is "every candidate via HTTP, then every
+// candidate via git" rather than the reverse nesting ("ARROW.md via every
+// fetcher, then arrow.yaml via every fetcher") — a deliberate choice, not a
+// side effect: HTTP has no per-attempt cost, so exhausting it fully before
+// ever paying for a git clone is strictly better, and no candidate-vs-host
+// ordering here carries any correctness meaning of its own.
 func (r *resolver) fetchManifest(
 	ctx context.Context,
 	namespace domain.Namespace,
 	filePaths []string,
 ) ([]byte, string, error) {
-	var lastErr error
+	var failure, absence error
 
-	for _, filePath := range filePaths {
-		for _, f := range r.fetchers {
-			if !f.CanResolve(namespace) {
-				continue
-			}
-			data, err := f.Fetch(ctx, namespace, filePath, r.timeout)
-			if err == nil {
-				return data, filePath, nil
-			}
-			lastErr = err
+	for _, f := range r.fetchers {
+		if !f.CanResolve(namespace) {
+			continue
 		}
+		data, matchedPath, err := f.Fetch(ctx, namespace, filePaths, r.timeout)
+		if err == nil {
+			return data, matchedPath, nil
+		}
+		if errors.Is(err, resolvers.ErrAbsentAtRef) {
+			return nil, "", fmt.Errorf("%w: %s: %v", resolvers.ErrManifestNotFound, namespace, err)
+		}
+		failure, absence = classifyFailure(failure, absence, err)
 	}
 
-	if lastErr != nil {
-		return nil, "", lastErr
+	if failure != nil {
+		return nil, "", failure
+	}
+	if absence != nil {
+		return nil, "", fmt.Errorf("%w: %s: %v", resolvers.ErrManifestNotFound, namespace, absence)
 	}
 
 	return nil, "", fmt.Errorf("%w: no fetcher could resolve %s", resolvers.ErrFetchFailed, namespace)
 }
 
-func resolveArrowParts(
-	namespace domain.Namespace,
-) ([]string, error) {
-	bare := namespace.BareNamespace()
-	if err := bare.Validate(); err != nil {
-		return nil, fmt.Errorf("resolver: invalid namespace: %w", err)
+func classifyFailure(
+	failure error,
+	absence error,
+	err error,
+) (error, error) {
+	if errors.Is(err, resolvers.ErrNotFound) {
+		return failure, err
 	}
-
-	auid := bare.GetAUID()
-	if auid != "" {
-		return []string{auid + ".md", auid + ".yaml"}, nil
+	if failure == nil {
+		return err, absence
 	}
-
-	return []string{"ARROW.md", "arrow.yaml"}, nil
+	return failure, absence
 }

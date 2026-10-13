@@ -10,13 +10,15 @@ import (
 )
 
 type AddArrow struct {
-	Namespace           domain.Namespace
-	ArrowMeta           domain.ArrowMeta
-	Variables           []domain.Variable
-	Netbridge           []netbridge.PortDef
-	Targets             map[domain.OS]domain.Target
-	DirectInstall       bool
-	InstalledConstraint string
+	Namespace     domain.Namespace
+	ArrowMeta     domain.ArrowMeta
+	Variables     []domain.Variable
+	Netbridge     []netbridge.PortDef
+	Targets       map[domain.OS]domain.Target
+	Readme        string
+	DirectInstall bool
+	SelectorKind  domain.SelectorKind
+	Resolved      domain.Resolved
 }
 
 func (c AddArrow) AggregateID() string {
@@ -44,12 +46,14 @@ func (c AddArrow) EmitEvent(
 	_ *domain.Arrow,
 ) domain.Arrow {
 	return domain.Arrow{
-		Namespace:           c.Namespace,
-		ArrowMeta:           c.ArrowMeta,
-		Variables:           c.Variables,
-		Netbridge:           c.Netbridge,
-		Targets:             c.Targets,
-		UserInstalled:       c.DirectInstall,
-		InstalledConstraint: c.InstalledConstraint,
+		Namespace:     c.Namespace,
+		ArrowMeta:     c.ArrowMeta,
+		Variables:     c.Variables,
+		Netbridge:     c.Netbridge,
+		Targets:       c.Targets,
+		Readme:        c.Readme,
+		UserInstalled: c.DirectInstall,
+		SelectorKind:  c.SelectorKind,
+		Resolved:      c.Resolved,
 	}
 }

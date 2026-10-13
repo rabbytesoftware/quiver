@@ -2,21 +2,39 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"sync/atomic"
+	"time"
 
 	"github.com/char2cs/asynx"
-	asynxModels "github.com/char2cs/asynx/models"
 	gormdb "gorm.io/gorm"
 
+	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
 	apphub "github.com/rabbytesoftware/quiver.core/internal/app/hub"
 	"github.com/rabbytesoftware/quiver.core/internal/app/models"
 	repoarrow "github.com/rabbytesoftware/quiver.core/internal/app/repositories/arrow"
+	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/cascade"
 	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/collection"
+	repoconfig "github.com/rabbytesoftware/quiver.core/internal/app/repositories/config"
+	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/device"
+	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/discovery"
 	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/graph"
+	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/lifecycle"
+	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/pairingcode"
+	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/recommendation"
 	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/runtime"
+	"github.com/rabbytesoftware/quiver.core/internal/core/config"
+	"github.com/rabbytesoftware/quiver.core/internal/core/metadata"
+	"github.com/rabbytesoftware/quiver.core/internal/core/shutdown"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	authdomain "github.com/rabbytesoftware/quiver.core/internal/domain/auth"
 	domainRuntime "github.com/rabbytesoftware/quiver.core/internal/domain/runtime"
+	domainStep "github.com/rabbytesoftware/quiver.core/internal/domain/runtime/step"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/provider"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/surface"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
 	wizardPkg "github.com/rabbytesoftware/quiver.core/internal/engine/wizard"
 )
@@ -26,6 +44,40 @@ type Container struct {
 	Runtime    runtime.Runtime
 	Collection collection.Collection
 	Graph      graph.Graph
+	Lifecycle  lifecycle.Lifecycle
+	Cascade    cascade.Cascade
+	Discovery  discovery.Discovery
+	// Recommendation is nil when Discovery is: it refreshes through it.
+	Recommendation recommendation.Recommendation
+	Config         repoconfig.Config
+	PairingCode    pairingcode.PairingCode
+	Device         device.Device
+}
+
+type repoOpts struct {
+	versionCheckInterval *time.Duration
+}
+
+// Option configures repositories.New.
+type Option func(*repoOpts)
+
+// WithVersionCheckInterval overrides arrows.version_check_interval, the
+// period of the installed rows' version check; zero turns it off.
+func WithVersionCheckInterval(
+	d time.Duration,
+) Option {
+	return func(o *repoOpts) { o.versionCheckInterval = &d }
+}
+
+func resolveOpts(
+	opts []Option,
+) repoOpts {
+	cfg := repoOpts{}
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	return cfg
 }
 
 func New(
@@ -37,17 +89,30 @@ func New(
 	v vault.Vault,
 	m manifold.Manifold,
 	w wizardPkg.Wizard,
+	surfaces surface.Surface,
 	os domain.OS,
 	hub apphub.WebSocketHub,
+	providers []provider.Provider,
+	listRuntimeAggregates runtime.ListRuntimeAggregatesFn,
+	axPairingCode asynx.Asynx[authdomain.PairingCode],
+	axDevice asynx.Asynx[authdomain.Device],
+	deviceDB *gormdb.DB,
+	opts ...Option,
 ) (*Container, error) {
-	g, err := graph.New(db, axArrow, os, m, resolveManifestFrom(axArrow, m))
-	if err != nil {
-		return nil, fmt.Errorf("repositories: graph: %w", err)
-	}
-
-	cat, err := repoarrow.New(db, axArrow, v, m, hub)
+	cfg := resolveOpts(opts)
+	cat, err := repoarrow.New(db, axArrow, v, m, hub, arrowOptions(w, axRuntime, os, cfg.versionCheckInterval)...)
 	if err != nil {
 		return nil, fmt.Errorf("repositories: arrow: %w", err)
+	}
+
+	// cat.ResolveManifest, not a raw asynx+manifold lookup: it is the same
+	// vault-aware resolver GetManifest/GetReadme/GetDetail already resolve
+	// through, so a manifest fetched once for one endpoint serves the graph
+	// walk too instead of every /dependencies call paying its own live
+	// manifold fetch for the same namespace.
+	g, err := graph.New(db, os, cat.ResolveManifest)
+	if err != nil {
+		return nil, fmt.Errorf("repositories: graph: %w", err)
 	}
 
 	coll, err := collection.NewFromDBPath(axCollection, collectionDBPath, v, m)
@@ -55,46 +120,425 @@ func New(
 		return nil, fmt.Errorf("repositories: quiver: %w", err)
 	}
 
-	getArrow := func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error) {
-		got, err := axArrow.Get(ctx, ns.String())
-		if err != nil {
-			return nil, err
-		}
-		return &got, nil
-	}
-
-	rt, err := runtime.New(
-		getArrow,
-		axRuntime,
-		w,
-		v,
-		cat.MarkInstalled,
-		func(ctx context.Context, ns domain.Namespace) (bool, error) {
-			return g.HasDependents(ctx, ns, domain.Namespace(""))
-		},
-		func(ctx context.Context) ([]models.ArrowView, error) {
-			return cat.List(ctx, nil)
-		},
-		os,
-	)
+	targets := &updateTargets{}
+	rt, err := newRuntime(cat, axArrow, axRuntime, w, surfaces, v, g, os, listRuntimeAggregates, targets.lookup)
 	if err != nil {
+		discardCollection(coll)
 		return nil, fmt.Errorf("repositories: runtime: %w", err)
 	}
 
+	fc, err := cascade.New(db, rt.Forget)
+	if err != nil {
+		discardCollection(coll)
+		return nil, fmt.Errorf("repositories: cascade: %w", err)
+	}
+
+	disc, err := newDiscovery(providers, m, v, cat)
+	if err != nil {
+		discardCollection(coll)
+		return nil, fmt.Errorf("repositories: discovery: %w", err)
+	}
+
+	rec, err := newRecommendation(db, disc, v, cat)
+	if err != nil {
+		discardCollection(coll)
+		return nil, fmt.Errorf("repositories: recommendation: %w", err)
+	}
+
+	pc, err := pairingcode.New(axPairingCode)
+	if err != nil {
+		discardCollection(coll)
+		return nil, fmt.Errorf("repositories: pairingcode: %w", err)
+	}
+
+	dev, err := device.New(deviceDB, axDevice)
+	if err != nil {
+		discardCollection(coll)
+		return nil, fmt.Errorf("repositories: device: %w", err)
+	}
+
+	lc := lifecycle.New(cat, rt, g)
+	targets.set(lc.UpdateTarget)
+
 	c := &Container{
-		Arrow:      cat,
-		Runtime:    rt,
-		Collection: coll,
-		Graph:      g,
+		Arrow:          cat,
+		Runtime:        rt,
+		Collection:     coll,
+		Graph:          g,
+		Lifecycle:      lc,
+		Cascade:        fc,
+		Discovery:      disc,
+		Recommendation: rec,
+		Config:         repoconfig.New(),
+		PairingCode:    pc,
+		Device:         dev,
 	}
 
 	if err := c.wireCallbacks(); err != nil {
+		discardCollection(coll)
+		return nil, err
+	}
+
+	if err := c.wireLifecycle(); err != nil {
+		discardCollection(coll)
 		return nil, err
 	}
 
 	return c, nil
 }
 
+func newRuntime(
+	cat repoarrow.Arrow,
+	axArrow asynx.Asynx[domain.Arrow],
+	axRuntime asynx.Asynx[domainRuntime.ArrowRuntime],
+	w wizardPkg.Wizard,
+	surfaces surface.Surface,
+	v vault.Vault,
+	g graph.Graph,
+	os domain.OS,
+	listRuntimeAggregates runtime.ListRuntimeAggregatesFn,
+	updateTarget func(domain.Namespace) (domain.Available, bool),
+) (runtime.Runtime, error) {
+	return runtime.New(
+		arrowGetter(axArrow),
+		cat.Get,
+		axRuntime,
+		w,
+		surfaces,
+		v,
+		cat.MarkInstalled,
+		cat.MarkUninstalled,
+		cat.MarkLastUsed,
+		dependentsChecker(g),
+		catalogLister(cat),
+		os,
+		listRuntimeAggregates,
+		manifestRefresher(cat, updateTarget),
+	)
+}
+
+// manifestRefresher stages the manifest of the release a run builds, read
+// again from its host: the row's installed release for an install, and for an
+// update the target the update began toward — never the row's Available,
+// which a check may have moved past it since. A rolling release re-published
+// under the same tag drafts new digests this way.
+func manifestRefresher(
+	cat repoarrow.Arrow,
+	updateTarget func(domain.Namespace) (domain.Available, bool),
+) runtime.RefreshManifestFn {
+	return func(ctx context.Context, ns domain.Namespace, method string) error {
+		row, err := cat.Get(ctx, ns)
+		if err != nil {
+			return fmt.Errorf("refresh manifest %s: %w", ns, err)
+		}
+		release := domain.Available{Ref: row.Resolved.Ref, Commit: row.Resolved.Commit}
+		if method == domain.MethodUpdate {
+			target, ok := updateTarget(ns)
+			if !ok {
+				return fmt.Errorf("refresh manifest %s: no update in flight: %w", ns, apperrors.ErrStateViolation)
+			}
+			release = target
+		}
+		if _, err := cat.RefreshToTarget(ctx, ns, release); err != nil {
+			return fmt.Errorf("refresh manifest %s: %w", ns, err)
+		}
+		return nil
+	}
+}
+
+// updateTargets hands the runtime, built before the lifecycle, the lifecycle's
+// remembered update targets once it exists.
+type updateTargets struct {
+	of atomic.Pointer[func(domain.Namespace) (domain.Available, bool)]
+}
+
+func (u *updateTargets) set(
+	of func(domain.Namespace) (domain.Available, bool),
+) {
+	u.of.Store(&of)
+}
+
+func (u *updateTargets) lookup(
+	ns domain.Namespace,
+) (domain.Available, bool) {
+	of := u.of.Load()
+	if of == nil {
+		return domain.Available{}, false
+	}
+	return (*of)(ns)
+}
+
+// arrowOptions assembles what the arrow repository needs from the runtime
+// side, handed over as closures since runtime.New itself takes the arrow
+// repository's MarkInstalled and friends, so neither can be constructed first.
+func arrowOptions(
+	w wizardPkg.Wizard,
+	axRuntime asynx.Asynx[domainRuntime.ArrowRuntime],
+	os domain.OS,
+	versionCheckInterval *time.Duration,
+) []repoarrow.Option {
+	opts := []repoarrow.Option{
+		repoarrow.WithVersionOutdatedSync(runtime.SetVersionOutdated(axRuntime)),
+	}
+	if versionCheckInterval != nil {
+		opts = append(opts, repoarrow.WithVersionCheckInterval(*versionCheckInterval))
+	}
+
+	return append(opts, preinstalledDetection(w, axRuntime, os)...)
+}
+
+// preinstalledDetection wires Add-time preinstalled detection into the arrow
+// repository, or nothing when there is no wizard to probe with. It runs as a
+// direct, synchronous probe-then-mark on the Add caller's own goroutine,
+// not a reaction to arrow.added.*: a reaction would have to re-probe inside
+// an asynx projection worker, risking the cross-instance circular wait
+// internal/app/container.go's newAsynx documents. Probe, not Start, since
+// this is a question, not a process meant to outlive daemon shutdown.
+func preinstalledDetection(
+	w wizardPkg.Wizard,
+	axRuntime asynx.Asynx[domainRuntime.ArrowRuntime],
+	os domain.OS,
+) []repoarrow.Option {
+	if w == nil {
+		return nil
+	}
+
+	return []repoarrow.Option{
+		repoarrow.WithPreinstalledDetection(
+			os,
+			preinstalledProbe(w),
+			runtime.MarkPreinstalled(axRuntime),
+			runtime.ForgetPreinstalled(axRuntime),
+		),
+	}
+}
+
+// preinstalledProbe adapts the wizard's synchronous runner to the narrow
+// function the arrow repository takes; there is no workdir or PID, since the
+// namespace has no aggregate yet to have allocated either.
+func preinstalledProbe(
+	w wizardPkg.Wizard,
+) repoarrow.PreinstalledProbeFn {
+	return func(
+		ctx context.Context,
+		ns domain.Namespace,
+		steps domainStep.StepList,
+		vars map[string]string,
+	) error {
+		return w.Probe(ctx, wizardPkg.RunRequest{
+			Namespace: ns,
+			Variables: vars,
+			Steps:     steps,
+		})
+	}
+}
+
+// arrowGetter hands the runtime a read of the arrow aggregate without handing
+// it the aggregate.
+func arrowGetter(
+	axArrow asynx.Asynx[domain.Arrow],
+) func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error) {
+	return func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error) {
+		got, err := axArrow.Get(ctx, ns.String())
+		if err != nil {
+			return nil, err
+		}
+		return &got, nil
+	}
+}
+
+// dependentsChecker asks the graph whether anything still needs ns. No arrow is
+// excluded: the runtime asks on behalf of nobody in particular.
+func dependentsChecker(
+	g graph.Graph,
+) runtime.HasDependentsFn {
+	return func(ctx context.Context, ns domain.Namespace) (bool, error) {
+		return g.HasDependents(ctx, ns, domain.Namespace(""))
+	}
+}
+
+func catalogLister(
+	cat repoarrow.Arrow,
+) func(ctx context.Context) ([]models.ArrowView, error) {
+	return func(ctx context.Context) ([]models.ArrowView, error) {
+		return cat.List(ctx, nil)
+	}
+}
+
+// newDiscovery reads the search settings once, per CLAUDE.md §15.2, and gives
+// the pipeline a catalog lookup so an arrow the machine already knows is
+// flagged rather than dropped. Discovery cannot verify anything without a
+// manifold to parse with and a vault to write to, so a container built without
+// them has no discovery rather than a half-built one.
+func newDiscovery(
+	providers []provider.Provider,
+	m manifold.Manifold,
+	v vault.Vault,
+	cat repoarrow.Arrow,
+) (discovery.Discovery, error) {
+	if m == nil || v == nil {
+		return nil, nil
+	}
+
+	search := config.GetSearch()
+
+	return discovery.New(providers, m, v, catalogHas(cat), discovery.Config{
+		Topics:           metadata.GetDiscovery().Topics,
+		PerProviderLimit: search.PerProviderLimit,
+		FetchConcurrency: search.FetchConcurrency,
+		Unmarked: discovery.UnmarkedConfig{
+			MinStars:   search.Unmarked.MinStars,
+			ProbeLimit: search.Unmarked.ProbeLimit,
+		},
+	})
+}
+
+// newRecommendation reads the recommendation settings once, per CLAUDE.md
+// §15.2. It refreshes through discovery, so a container without discovery has no
+// recommendation rather than one that can never fill.
+func newRecommendation(
+	db *gormdb.DB,
+	disc discovery.Discovery,
+	v vault.Vault,
+	cat repoarrow.Arrow,
+) (recommendation.Recommendation, error) {
+	if disc == nil {
+		return nil, nil
+	}
+
+	cfg := config.GetRecommendation()
+
+	return recommendation.New(db, disc, v, catalogHas(cat), recommendation.Config{
+		Enabled:         cfg.Enabled,
+		RefreshInterval: cfg.RefreshInterval,
+		CandidateBudget: cfg.CandidateBudget,
+		MinEntries:      cfg.MinEntries,
+		Shelves:         shelvesOf(cfg.Shelves),
+	})
+}
+
+func shelvesOf(
+	configured []config.RecommendationShelf,
+) []recommendation.ShelfConfig {
+	shelves := make([]recommendation.ShelfConfig, 0, len(configured))
+	for _, shelf := range configured {
+		sources := make([]recommendation.SourceConfig, 0, len(shelf.Sources))
+		for _, source := range shelf.Sources {
+			sources = append(sources, recommendation.SourceConfig{
+				Host:         source.Host,
+				Sort:         source.Sort,
+				MinStars:     source.MinStars,
+				MaxStars:     source.MaxStars,
+				PushedWithin: source.PushedWithin,
+			})
+		}
+		shelves = append(shelves, recommendation.ShelfConfig{
+			ID:      shelf.ID,
+			Title:   shelf.Title,
+			Limit:   shelf.Limit,
+			Sources: sources,
+		})
+	}
+	return shelves
+}
+
+func catalogHas(
+	cat repoarrow.Arrow,
+) discovery.KnownFn {
+	return func(ctx context.Context, ns domain.Namespace) (bool, error) {
+		_, err := cat.Get(ctx, ns)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, apperrors.ErrNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("catalog has %s: %w", ns, err)
+	}
+}
+
+// discardCollection closes the collections database opened by NewFromDBPath when
+// a later step of New fails, so a half-built container never leaves the file open
+// with no owner.
+func discardCollection(coll collection.Collection) {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdown.DiscardTimeout)
+	defer cancel()
+
+	if err := coll.Shutdown(ctx); err != nil {
+		slog.Warn("repositories: close collection store after failed construction", "err", err)
+	}
+}
+
+// Shutdown drains every aggregate, blocking until in-flight commands have been
+// persisted or ctx expires.
+//
+// Cascade drains first: its background goroutine calls Runtime.Forget, so it
+// must finish (or be cut off) before Runtime itself shuts down underneath it.
+//
+// Runtime drains next and Arrow last. When an install finishes, the runtime
+// reaction's onEnd writes arrow.MarkInstalled and only then commits
+// EndExecution (runtime/internal/hooks.go). Draining Arrow first would lose
+// MarkInstalled while EndExecution still commits, leaving a ready runtime whose
+// arrow carries no installed ref — nothing reconciles that. Draining Runtime
+// first makes EndExecution the write that fails instead, so the runtime stays
+// in `installing`, which RecoverTransients re-drives on the next boot
+// (runtime/internal/recovery.go).
+//
+// Every phase runs even when an earlier one fails, and each gets its own share of
+// ctx rather than all three sharing it: an arrow whose process refuses to die
+// makes the runtime drain spend the whole budget, and with a shared context
+// Collection and Arrow would then be handed a dead one and skip their drain
+// entirely — right before the adapters close the databases under them.
+func (c *Container) Shutdown(ctx context.Context) error {
+	return shutdown.Split(ctx, "repositories", []shutdown.Phase{
+		{Name: "recommendation shutdown", Run: c.shutdownRecommendation},
+		{Name: "cascade shutdown", Run: c.Cascade.Shutdown},
+		{Name: "runtime shutdown", Run: c.Runtime.Shutdown},
+		{Name: "collection shutdown", Run: c.Collection.Shutdown},
+		{Name: "arrow shutdown", Run: c.Arrow.Shutdown},
+		{Name: "pairingcode shutdown", Run: c.PairingCode.Shutdown},
+		{Name: "device shutdown", Run: c.Device.Shutdown},
+	})
+}
+
+// shutdownRecommendation stops the refresh loop first: it reads through
+// discovery and the vault, which must outlive it.
+func (c *Container) shutdownRecommendation(
+	ctx context.Context,
+) error {
+	if c.Recommendation == nil {
+		return nil
+	}
+	return c.Recommendation.Shutdown(ctx)
+}
+
+// StartRecommendation launches the home refresh loop. It returns at once and the
+// loop ends when ctx is cancelled. A container without recommendation does
+// nothing.
+func (c *Container) StartRecommendation(
+	ctx context.Context,
+) {
+	if c.Recommendation == nil {
+		return
+	}
+	c.Recommendation.Start(ctx)
+}
+
+// RecoverForgetCascade finishes any forget cascade a prior crash left pending.
+// Call once at boot, before anything else touches the namespaces involved —
+// mirrors runtimeRepository.Start's use of RecoverTransients
+// (runtime/internal/recovery.go) for the same crash-recovery role on the other
+// side of an arrow removal.
+func (c *Container) RecoverForgetCascade(ctx context.Context) {
+	if err := c.Cascade.Drain(ctx); err != nil {
+		slog.ErrorContext(ctx, "repositories: forget cascade recovery", "err", err)
+	}
+}
+
+// wireCallbacks runs before any other registration, so the dependency graph is
+// the first reaction to every arrow event. The arrow repository invokes
+// callbacks in registration order and only makes the arrow readable afterwards,
+// which is what makes "readable in the catalog" imply "its edges exist".
 func (c *Container) wireCallbacks() error {
 	if err := c.Arrow.OnArrowAdded(func(ctx context.Context, ns domain.Namespace, a domain.Arrow) error {
 		return c.Graph.SyncDependencies(ctx, ns, &a)
@@ -112,9 +556,21 @@ func (c *Container) wireCallbacks() error {
 		if err := c.Graph.RemoveDependencies(ctx, ns); err != nil {
 			return err
 		}
-		return c.Runtime.Forget(ctx, ns)
+		return c.Cascade.Enqueue(ctx, ns)
 	}); err != nil {
 		return fmt.Errorf("repositories: wire OnArrowRemoved: %w", err)
+	}
+
+	return nil
+}
+
+// wireLifecycle lets a version check hold the badge of a row whose update is
+// settling, and subscribes the lifecycle's reactions to a runtime's end.
+func (c *Container) wireLifecycle() error {
+	c.Arrow.HoldBadgeWhile(c.Lifecycle.HoldBadge)
+
+	if err := c.Lifecycle.Start(); err != nil {
+		return fmt.Errorf("repositories: wire lifecycle: %w", err)
 	}
 
 	return nil
@@ -145,6 +601,12 @@ func (c *Container) RegisterHubProjections(hub apphub.WebSocketHub) error {
 		return fmt.Errorf("repositories: hub OnRuntimeDetached: %w", err)
 	}
 
+	if err := c.Runtime.OnRuntimeSurfaceSet(func(_ context.Context, rt domainRuntime.ArrowRuntime) {
+		hub.BroadcastArrowRuntime(rt)
+	}); err != nil {
+		return fmt.Errorf("repositories: hub OnRuntimeSurfaceSet: %w", err)
+	}
+
 	if err := c.Runtime.OnRuntimePIDRecorded(func(_ context.Context, rt domainRuntime.ArrowRuntime) {
 		hub.BroadcastArrowRuntime(rt)
 	}); err != nil {
@@ -169,6 +631,12 @@ func (c *Container) RegisterHubProjections(hub apphub.WebSocketHub) error {
 		return fmt.Errorf("repositories: hub OnRuntimeStepAdvanced: %w", err)
 	}
 
+	if err := c.Runtime.OnRuntimePreinstalled(func(_ context.Context, rt domainRuntime.ArrowRuntime) {
+		hub.BroadcastArrowRuntime(rt)
+	}); err != nil {
+		return fmt.Errorf("repositories: hub OnRuntimePreinstalled: %w", err)
+	}
+
 	if err := c.Collection.OnCollectionFollowed(func(_ context.Context, q domain.Collection) {
 		hub.BroadcastCollection(apphub.CollectionEvent{Kind: apphub.CatalogUpserted, Collection: q})
 	}); err != nil {
@@ -182,32 +650,4 @@ func (c *Container) RegisterHubProjections(hub apphub.WebSocketHub) error {
 	}
 
 	return nil
-}
-
-// resolveManifestFrom builds a resolveManifest func for graph.New, falling back to manifold.
-func resolveManifestFrom(
-	axArrow asynx.Asynx[domain.Arrow],
-	m manifold.Manifold,
-) func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error) {
-	return func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error) {
-		got, err := axArrow.Get(ctx, ns.String())
-		if err == nil {
-			return &got, nil
-		}
-		if !isNotFound(err) {
-			return nil, fmt.Errorf("resolve manifest: asynx: %w", err)
-		}
-		if m == nil {
-			return nil, fmt.Errorf("resolve manifest: not found: %s", ns)
-		}
-		arrow, _, _, fetchErr := m.ResolveArrow(ctx, ns)
-		if fetchErr != nil {
-			return nil, fmt.Errorf("resolve manifest: %w", fetchErr)
-		}
-		return arrow, nil
-	}
-}
-
-func isNotFound(err error) bool {
-	return err != nil && err.Error() == asynxModels.ErrNotFound.Error()
 }

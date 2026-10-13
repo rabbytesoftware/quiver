@@ -43,6 +43,7 @@ func checkTimeoutFormat(
 		{"lifecycle.execute", target.Lifecycle.Execute},
 		{"lifecycle.stop", target.Lifecycle.Stop},
 		{"lifecycle.uninstall", target.Lifecycle.Uninstall},
+		{"lifecycle.preinstalled", target.Lifecycle.Preinstalled},
 	}
 	for _, lc := range lcGroups {
 		errs = append(errs, checkStepListTimeouts(key, lc.name, lc.steps)...)
@@ -85,6 +86,10 @@ func extractStepTimeout(
 	case step.RunStep:
 		return v.Timeout.Default
 	case step.FetchStep:
+		return v.Timeout.Default
+	case step.ExtractStep:
+		return v.Timeout.Default
+	case step.PortableStep:
 		return v.Timeout.Default
 	case step.SignalStep:
 		return v.Timeout.Default

@@ -12,11 +12,11 @@ func ArrowListDTOsFrom(
 		vDTOs := make([]models.InstalledVersionDTO, 0, len(v.Versions))
 		for _, ver := range v.Versions {
 			vDTOs = append(vDTOs, models.InstalledVersionDTO{
-				Ref:         ver.Metadata.InstalledRef,
-				Version:     ver.Metadata.Version,
+				Ref:         ver.Namespace.Ref(),
+				ResolvedRef: ver.Metadata.Resolved.Ref,
 				State:       ver.State,
 				InstalledAt: ver.Metadata.InstalledAt,
-				Constraint:  ver.Metadata.InstalledConstraint,
+				LastUsedAt:  ver.Metadata.LastUsedAt,
 			})
 		}
 		result = append(result, models.ArrowListDTO{
@@ -26,6 +26,8 @@ func ArrowListDTOsFrom(
 			Tags:        v.Metadata.Tags,
 			Media:       v.Metadata.Media,
 			Versions:    vDTOs,
+			Origin:      v.Metadata.Origin(),
+			Confidence:  v.Metadata.Confidence(),
 		})
 	}
 	return result

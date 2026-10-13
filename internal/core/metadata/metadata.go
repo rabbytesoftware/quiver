@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	yaml "gopkg.in/yaml.v3"
+
+	"github.com/rabbytesoftware/quiver.core/internal/domain"
 )
 
 var (
@@ -15,6 +17,14 @@ var (
 	metadata     *Metadata
 	once         sync.Once
 )
+
+// homeOverrideEnv lets a dev build (see cmd/quiver's daemon command) point the
+// whole home tree — config.yaml included — at a directory scoped to the
+// checkout it was started from, instead of the real ~/.quiver. This is process
+// bootstrapping, not a Quiver config value read from the environment: home
+// resolution is already env-driven today via $HOME, this just lets it be
+// overridden the same way.
+const homeOverrideEnv = "QUIVER_HOME"
 
 type Version struct {
 	Number   string `yaml:"number"`
@@ -45,20 +55,64 @@ type Paths struct {
 	Config     string          `yaml:"config"`
 	Logs       string          `yaml:"logs"`
 	Vault      string          `yaml:"vault"`
+	Self       string          `yaml:"self"`
+	Bin        string          `yaml:"bin"`
+	Run        string          `yaml:"run"`
 }
 
+// Kind names the host a platform is, which is what decides how its answers are
+// read: the shape of its search response. Every platform declares one, because a host Quiver has
+// no code for is a host it cannot read.
+const (
+	KindGitHub    = "github"
+	KindGitLab    = "gitlab"
+	KindBitbucket = "bitbucket"
+)
+
+// Platform describes how one git host serves raw files and, optionally, how it
+// answers repository searches. DefaultBranches is tried in order when a
+// namespace carries no explicit ref.
+//
+// SearchURL is optional in the same way: a platform without one still serves
+// manifests, it just answers no query.
 type Platform struct {
-	RawURL        string `yaml:"raw_url"`
-	DefaultBranch string `yaml:"default_branch"`
+	Kind              string   `yaml:"kind"`
+	RawURL            string   `yaml:"raw_url"`
+	DefaultBranches   []string `yaml:"default_branches"`
+	SearchURL         string   `yaml:"search_url"`
+	ExpandedAssetsURL string   `yaml:"expanded_assets_url"`
+	RepoPageURL       string   `yaml:"repo_page_url"`
+	RepoAPIURL        string   `yaml:"repo_api_url"`
+	OwnerAvatarURL    string   `yaml:"owner_avatar_url"`
+	BlobURL           string   `yaml:"blob_url"`
+	ReleaseAPIURL     string   `yaml:"release_api_url"`
+	PackagesAPIURL    string   `yaml:"packages_api_url"`
 }
 
 type Platforms map[string]Platform
 
+// Discovery holds the markers a repository must carry to be considered an
+// arrow candidate. Topics is a list so new markers can be added without a
+// schema change.
+type Discovery struct {
+	Topics []string `yaml:"topics"`
+}
+
+// Namespaces holds the module paths quiver.core registers itself and its
+// companion quiver.desktop GUI under in the arrow catalog, resolved through
+// the same namespace machinery as any other arrow.
+type Namespaces struct {
+	Core    string `yaml:"core"`
+	Desktop string `yaml:"desktop"`
+}
+
 type Metadata struct {
-	Version   Version      `yaml:"version"`
-	Metadata  MetadataInfo `yaml:"metadata"`
-	Paths     Paths        `yaml:"paths"`
-	Platforms Platforms    `yaml:"platforms"`
+	Version    Version      `yaml:"version"`
+	Metadata   MetadataInfo `yaml:"metadata"`
+	Paths      Paths        `yaml:"paths"`
+	Namespaces Namespaces   `yaml:"namespaces"`
+	Platforms  Platforms    `yaml:"platforms"`
+	Discovery  Discovery    `yaml:"discovery"`
 }
 
 func Get() *Metadata {
@@ -112,6 +166,19 @@ func GetPlatforms() Platforms {
 	return Get().Platforms
 }
 
+// GetDiscovery returns the discovery markers used to recognise arrow
+// candidates on a git host.
+func GetDiscovery() Discovery {
+	return Get().Discovery
+}
+
+// GetSelfNamespaces returns the namespaces quiver.core registers itself and
+// quiver.desktop under in the arrow catalog.
+func GetSelfNamespaces() (core, desktop domain.Namespace) {
+	ns := Get().Namespaces
+	return domain.Namespace(ns.Core), domain.Namespace(ns.Desktop)
+}
+
 func GetHomePath() string {
 	return resolveHome()
 }
@@ -152,8 +219,44 @@ func GetConfigPath() string {
 	return resolvePath(Get().Paths.Config, resolveHome())
 }
 
+func GetConfigPathAt(homeDir string) string {
+	return resolvePath(Get().Paths.Config, homeDir)
+}
+
 func GetLogsPath() string {
 	return resolvePath(Get().Paths.Logs, resolveHome())
+}
+
+func GetLogsPathAt(homeDir string) string {
+	return resolvePath(Get().Paths.Logs, homeDir)
+}
+
+func GetSelfPath() string {
+	return resolvePath(Get().Paths.Self, resolveHome())
+}
+
+func GetSelfPathAt(homeDir string) string {
+	return resolvePath(Get().Paths.Self, homeDir)
+}
+
+func GetBinPath() string {
+	return resolvePath(Get().Paths.Bin, resolveHome())
+}
+
+func GetBinPathAt(
+	homeDir string,
+) string {
+	return resolvePath(Get().Paths.Bin, homeDir)
+}
+
+func GetRunPath() string {
+	return resolvePath(Get().Paths.Run, resolveHome())
+}
+
+func GetRunPathAt(
+	homeDir string,
+) string {
+	return resolvePath(Get().Paths.Run, homeDir)
 }
 
 // resolvePath replaces {{home}} in a path template with the resolved home,
@@ -192,7 +295,7 @@ func defaultMetadata() *Metadata {
 			Home: OsValue[string]{
 				Default: "~/.quiver",
 				OS: map[string]string{
-					"windows": `C:\Users\{{USER}}\Documents\.quiver`,
+					"windows": `{{PROFILE}}\Documents\.quiver`,
 				},
 			},
 			Events:     "{{home}}/state/events",
@@ -201,20 +304,45 @@ func defaultMetadata() *Metadata {
 			Config:     "{{home}}/config.yaml",
 			Logs:       "{{home}}/logs",
 			Vault:      "{{home}}/vault",
+			Self:       "{{home}}/self",
+			Bin:        "{{home}}/bin",
+			Run:        "{{home}}/run",
+		},
+		Namespaces: Namespaces{
+			Core:    "github.com/rabbytesoftware/quiver.core",
+			Desktop: "github.com/rabbytesoftware/quiver.desktop",
 		},
 		Platforms: Platforms{
 			"github.com": {
-				RawURL:        "https://raw.githubusercontent.com/{user}/{repo}/{branch}/{file}",
-				DefaultBranch: "main",
+				Kind:              KindGitHub,
+				RawURL:            "https://raw.githubusercontent.com/{user}/{repo}/{branch}/{file}",
+				DefaultBranches:   []string{"main", "master"},
+				SearchURL:         "https://api.github.com/search/repositories?q={query}",
+				ExpandedAssetsURL: "https://github.com/{user}/{repo}/releases/expanded_assets/{tag}",
+				RepoPageURL:       "https://github.com/{user}/{repo}",
+				RepoAPIURL:        "https://api.github.com/repos/{user}/{repo}",
+				OwnerAvatarURL:    "https://github.com/{user}.png",
+				BlobURL:           "https://github.com/{user}/{repo}/blob/{branch}/{file}",
 			},
 			"gitlab.com": {
-				RawURL:        "https://gitlab.com/{user}/{repo}/-/raw/{branch}/{file}",
-				DefaultBranch: "main",
+				Kind:            KindGitLab,
+				RawURL:          "https://gitlab.com/{user}/{repo}/-/raw/{branch}/{file}",
+				DefaultBranches: []string{"main", "master"},
+				SearchURL:       "https://gitlab.com/api/v4/projects?search={query}&topic={topic}",
+				BlobURL:         "https://gitlab.com/{user}/{repo}/-/blob/{branch}/{file}",
+				RepoPageURL:     "https://gitlab.com/{user}/{repo}",
+				ReleaseAPIURL:   "https://gitlab.com/api/v4/projects/{user}%2F{repo}/releases/{tag}",
+				PackagesAPIURL:  "https://gitlab.com/api/v4/projects/{project}/packages",
 			},
 			"bitbucket.org": {
-				RawURL:        "https://bitbucket.org/{user}/{repo}/raw/{branch}/{file}",
-				DefaultBranch: "main",
+				Kind:            KindBitbucket,
+				RawURL:          "https://bitbucket.org/{user}/{repo}/raw/{branch}/{file}",
+				DefaultBranches: []string{"main", "master"},
+				BlobURL:         "https://bitbucket.org/{user}/{repo}/src/{branch}/{file}",
 			},
+		},
+		Discovery: Discovery{
+			Topics: []string{"quiver-arrow"},
 		},
 	}
 }

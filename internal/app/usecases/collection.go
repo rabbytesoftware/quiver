@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
 	"github.com/rabbytesoftware/quiver.core/internal/app/models"
@@ -18,11 +19,6 @@ import (
 )
 
 type arrowCache interface {
-	Seed(
-		ctx context.Context,
-		ns domain.Namespace,
-		data []byte,
-	) error
 	ResolveManifest(
 		ctx context.Context,
 		ns domain.Namespace,
@@ -113,28 +109,21 @@ func (u *quiverUsecase) Follow(
 		return apperrors.ErrNotFound
 	}
 
+	// Following warms the cache of every member (what search and the collection
+	// screen read) and nothing else: ResolveManifest previews through the vault
+	// and never writes the arrow catalog, because the catalog is the user's
+	// library and a subscription must not fill it with every arrow the
+	// collection lists. A member enters the catalog only when the user adds or
+	// installs it.
 	retries := retryCount()
 	var failures []domain.Namespace
 	for _, arrow := range coll.Arrows {
 		arrowNS := arrow.Namespace
-		seedLocal := func() error {
-			_, b, _, e := u.manifold.ResolveArrow(ctx, arrowNS)
-			if e != nil {
-				return e
-			}
-			return u.arrows.Seed(ctx, arrowNS, b)
-		}
-		resolveRemote := func() error {
+		err := withRetry(retries, func() error {
 			_, e := u.arrows.ResolveManifest(ctx, arrowNS)
 			return e
-		}
-		var cacheErr error
-		if arrow.IsLocal {
-			cacheErr = withRetry(retries, seedLocal)
-		} else {
-			cacheErr = withRetry(retries, resolveRemote)
-		}
-		if cacheErr != nil {
+		})
+		if err != nil {
 			failures = append(failures, arrowNS)
 		}
 	}
@@ -166,27 +155,13 @@ func (u *quiverUsecase) Get(
 		failedSet[failedNS] = struct{}{}
 	}
 
-	arrows := make([]models.CollectionArrowDTO, len(coll.Arrows))
-	for i, a := range coll.Arrows {
-		dto := models.CollectionArrowDTO{Namespace: a.Namespace}
-		if _, isFailed := failedSet[a.Namespace]; !isFailed {
-			arrowManifest, _ := u.arrows.ResolveManifest(ctx, a.Namespace)
-			if arrowManifest != nil {
-				dto.Resolved = true
-				dto.Name = arrowManifest.Name
-				dto.Version = arrowManifest.Version
-				dto.Description = arrowManifest.Description
-			}
-		}
-		arrows[i] = dto
-	}
+	arrows := u.describeMembers(ctx, coll.Arrows, failedSet)
 
 	followed, _ := u.repo.IsFollowed(ctx, ns)
 
 	return &models.CollectionDetailDTO{
 		Namespace:   ns,
 		Name:        coll.Meta.Name,
-		Version:     coll.Meta.Version,
 		Description: coll.Meta.Description,
 		URL:         coll.Meta.URL,
 		Maintainers: coll.Meta.Maintainers,
@@ -195,6 +170,53 @@ func (u *quiverUsecase) Get(
 		Arrows:      arrows,
 		Followed:    followed,
 	}, nil
+}
+
+const memberResolveConcurrency = 8
+
+func (u *quiverUsecase) describeMembers(
+	ctx context.Context,
+	members []domain.CollectionArrow,
+	failed map[domain.Namespace]struct{},
+) []models.CollectionArrowDTO {
+	dtos := make([]models.CollectionArrowDTO, len(members))
+	slots := make(chan struct{}, memberResolveConcurrency)
+	var wg sync.WaitGroup
+
+	for i, member := range members {
+		dtos[i] = models.CollectionArrowDTO{Namespace: member.Namespace}
+		if _, isFailed := failed[member.Namespace]; isFailed {
+			continue
+		}
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			u.describeMember(ctx, &dtos[i])
+		}()
+	}
+
+	wg.Wait()
+	return dtos
+}
+
+func (u *quiverUsecase) describeMember(
+	ctx context.Context,
+	dto *models.CollectionArrowDTO,
+) {
+	manifest, _ := u.arrows.ResolveManifest(ctx, dto.Namespace)
+	if manifest == nil {
+		return
+	}
+	dto.Resolved = true
+	dto.Name = manifest.Name
+	dto.Description = manifest.Description
+	dto.Media = manifest.Media
 }
 
 func (u *quiverUsecase) List(
@@ -279,7 +301,7 @@ func (u *quiverUsecase) Seed(
 ) error {
 	coll, err := u.manifold.ParseCollection(data, ns)
 	if err != nil {
-		return fmt.Errorf("seed quiver: %w", err)
+		return fmt.Errorf("seed quiver: %w: %w", apperrors.ErrInvalidManifest, err)
 	}
 	if _, err := u.vault.PutCollection(ctx, ns, coll); err != nil {
 		return fmt.Errorf("seed quiver: %w", err)

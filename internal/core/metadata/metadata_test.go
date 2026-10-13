@@ -9,6 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	yaml "gopkg.in/yaml.v3"
+
+	"github.com/rabbytesoftware/quiver.core/internal/domain"
 )
 
 func TestGet_ReturnsSingleton(t *testing.T) {
@@ -72,6 +75,7 @@ func TestDefaultMetadata_PathsPopulated(t *testing.T) {
 	assert.NotEmpty(t, d.Paths.Config)
 	assert.NotEmpty(t, d.Paths.Logs)
 	assert.NotEmpty(t, d.Paths.Vault)
+	assert.NotEmpty(t, d.Paths.Bin)
 }
 
 func TestGetHomePath_NonEmpty(t *testing.T) {
@@ -143,6 +147,33 @@ func TestGetVaultPath(t *testing.T) {
 	)
 }
 
+func TestGetSelfPath(t *testing.T) {
+	path := GetSelfPath()
+	assert.NotEmpty(t, path)
+	// path should end in /self (or \self on Windows)
+	assert.True(
+		t,
+		strings.HasSuffix(path, "/self") || strings.HasSuffix(path, `\self`),
+		"expected path to end in /self, got: %s", path,
+	)
+}
+
+func TestGetBinPath(t *testing.T) {
+	assert.True(t, strings.HasPrefix(GetBinPath(), GetHomePath()))
+}
+
+func TestGetBinPathAt_UsesProvidedHome(t *testing.T) {
+	home := t.TempDir()
+	got := GetBinPathAt(home)
+	assert.Contains(t, got, home)
+}
+
+func TestMetadataYAML_BinPathAgreesWithDefault(t *testing.T) {
+	var parsed Metadata
+	require.NoError(t, yaml.Unmarshal(metadataByte, &parsed))
+	assert.Equal(t, defaultMetadata().Paths.Bin, parsed.Paths.Bin)
+}
+
 func TestGetPlatforms_ReturnsKnownDomains(t *testing.T) {
 	platforms := GetPlatforms()
 	require.NotNil(t, platforms)
@@ -154,7 +185,86 @@ func TestGetPlatforms_ReturnsKnownDomains(t *testing.T) {
 func TestGetPlatforms_GitHubRawURL(t *testing.T) {
 	github := GetPlatforms()["github.com"]
 	assert.Contains(t, github.RawURL, "raw.githubusercontent.com")
-	assert.Equal(t, "main", github.DefaultBranch)
+	assert.Equal(t, []string{"main", "master"}, github.DefaultBranches)
+}
+
+func TestDefaultMetadata_DefaultBranchesInOrder(t *testing.T) {
+	platforms := defaultMetadata().Platforms
+	for _, host := range []string{"github.com", "gitlab.com", "bitbucket.org"} {
+		assert.Equal(
+			t,
+			[]string{"main", "master"},
+			platforms[host].DefaultBranches,
+			"host %q", host,
+		)
+	}
+}
+
+func TestDefaultMetadata_SearchableHostsHaveSearchURL(t *testing.T) {
+	platforms := defaultMetadata().Platforms
+
+	assert.Contains(t, platforms["github.com"].SearchURL, "api.github.com")
+	assert.Equal(t, KindGitHub, platforms["github.com"].Kind)
+
+	assert.Contains(t, platforms["gitlab.com"].SearchURL, "gitlab.com/api")
+	assert.Equal(t, KindGitLab, platforms["gitlab.com"].Kind)
+}
+
+// Bitbucket answers no query, which is a missing capability and not a missing
+// platform: it still declares the kind that says how to read what it does
+// answer.
+func TestDefaultMetadata_BitbucketHasNoSearchURL(t *testing.T) {
+	bitbucket := defaultMetadata().Platforms["bitbucket.org"]
+	assert.Empty(t, bitbucket.SearchURL)
+	assert.Equal(t, KindBitbucket, bitbucket.Kind)
+	assert.NotEmpty(t, bitbucket.RawURL)
+	assert.NotEmpty(t, bitbucket.DefaultBranches)
+}
+
+// Every platform declares a kind: a host Quiver has no code for is a host it
+// cannot read, and silently building a generic provider for it would hide that.
+func TestDefaultMetadata_EveryPlatformDeclaresAKind(t *testing.T) {
+	for host, platform := range defaultMetadata().Platforms {
+		assert.NotEmpty(t, platform.Kind, "host %q", host)
+	}
+}
+
+func TestGetPlatforms_BitbucketHasNoSearchURL(t *testing.T) {
+	assert.Empty(t, GetPlatforms()["bitbucket.org"].SearchURL)
+}
+
+func TestGetDiscovery_DefaultTopics(t *testing.T) {
+	assert.Equal(t, []string{"quiver-arrow"}, GetDiscovery().Topics)
+}
+
+func TestDefaultMetadata_DiscoveryTopics(t *testing.T) {
+	assert.Equal(t, []string{"quiver-arrow"}, defaultMetadata().Discovery.Topics)
+}
+
+func TestMetadataYAML_RoundTripsPlatformsAndDiscovery(t *testing.T) {
+	var parsed Metadata
+	require.NoError(t, yaml.Unmarshal(metadataByte, &parsed))
+
+	assert.Equal(t, []string{"main", "master"}, parsed.Platforms["github.com"].DefaultBranches)
+	assert.Equal(t, KindGitHub, parsed.Platforms["github.com"].Kind)
+	assert.Equal(t, KindGitLab, parsed.Platforms["gitlab.com"].Kind)
+	assert.Equal(t, KindBitbucket, parsed.Platforms["bitbucket.org"].Kind)
+	assert.Empty(t, parsed.Platforms["bitbucket.org"].SearchURL)
+	assert.Equal(t, []string{"quiver-arrow"}, parsed.Discovery.Topics)
+
+	// Metadata as a whole cannot round-trip: OsValue implements UnmarshalYAML
+	// without a matching MarshalYAML, so paths.home re-reads as a map. Only the
+	// keys this task owns are round-tripped.
+	encoded, err := yaml.Marshal(struct {
+		Platforms Platforms `yaml:"platforms"`
+		Discovery Discovery `yaml:"discovery"`
+	}{Platforms: parsed.Platforms, Discovery: parsed.Discovery})
+	require.NoError(t, err)
+
+	var again Metadata
+	require.NoError(t, yaml.Unmarshal(encoded, &again))
+	assert.Equal(t, parsed.Platforms, again.Platforms)
+	assert.Equal(t, parsed.Discovery, again.Discovery)
 }
 
 func TestMetadataConsistency(t *testing.T) {
@@ -201,6 +311,13 @@ func TestGet_InvalidYAML_FallsBackToDefault(t *testing.T) {
 	m := Get()
 	require.NotNil(t, m)
 	assert.Equal(t, "Quiver", m.Metadata.Name, "should fall back to defaultMetadata")
+}
+
+func TestResolveHome_QuiverHomeEnvSet_ReturnsItDirectly(t *testing.T) {
+	t.Setenv("QUIVER_HOME", "/tmp/dev-quiver-home")
+
+	result := GetHomePath()
+	assert.Equal(t, "/tmp/dev-quiver-home", result)
 }
 
 func TestResolveHome_UserHomeDirFails_ReturnsRaw(t *testing.T) {
@@ -280,4 +397,55 @@ func TestGetVaultPathAt_UsesProvidedHome(t *testing.T) {
 	home := t.TempDir()
 	got := GetVaultPathAt(home)
 	assert.Contains(t, got, home)
+}
+
+func TestGetConfigPathAt_UsesProvidedHome(t *testing.T) {
+	home := t.TempDir()
+	got := GetConfigPathAt(home)
+	assert.Contains(t, got, home)
+}
+
+func TestGetLogsPathAt_UsesProvidedHome(t *testing.T) {
+	home := t.TempDir()
+	got := GetLogsPathAt(home)
+	assert.Contains(t, got, home)
+}
+
+func TestGetSelfPathAt_UsesProvidedHome(t *testing.T) {
+	home := t.TempDir()
+	got := GetSelfPathAt(home)
+	assert.Contains(t, got, home)
+}
+
+func TestGetSelfNamespaces_ReturnsBothNamespaces(t *testing.T) {
+	core, desktop := GetSelfNamespaces()
+	assert.Equal(t, domain.Namespace("github.com/rabbytesoftware/quiver.core"), core)
+	assert.Equal(t, domain.Namespace("github.com/rabbytesoftware/quiver.desktop"), desktop)
+}
+
+func TestDefaultMetadata_NamespacesPopulated(t *testing.T) {
+	d := defaultMetadata()
+	assert.NotEmpty(t, d.Namespaces.Core)
+	assert.NotEmpty(t, d.Namespaces.Desktop)
+}
+
+func TestMetadataYAML_PlatformsAgreeWithDefault(t *testing.T) {
+	var parsed Metadata
+	require.NoError(t, yaml.Unmarshal(metadataByte, &parsed))
+
+	assert.Equal(t, defaultMetadata().Platforms, parsed.Platforms)
+}
+
+func TestGetRunPath(t *testing.T) {
+	path := GetRunPath()
+	assert.True(
+		t,
+		strings.HasSuffix(path, "/run") || strings.HasSuffix(path, `\run`),
+		"expected path to end in /run, got: %s", path,
+	)
+}
+
+func TestGetRunPathAt_UsesProvidedHome(t *testing.T) {
+	home := t.TempDir()
+	assert.Equal(t, filepath.Join(home, "run"), GetRunPathAt(home))
 }

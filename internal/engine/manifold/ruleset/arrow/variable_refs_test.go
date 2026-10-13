@@ -3,6 +3,10 @@ package arrow
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/stretchr/testify/assert"
+
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/domain/netbridge"
 	"github.com/rabbytesoftware/quiver.core/internal/domain/runtime/step"
@@ -65,6 +69,58 @@ func TestVariableRefsRule_Valid_WorkdirBuiltin(t *testing.T) {
 	errs := rule.Validate(m)
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors for WORKDIR builtin, got: %v", errs)
+	}
+}
+
+func TestVariableRefsRule_Valid_RefBuiltin(t *testing.T) {
+	rule := VariableRefsRule{}
+	m := &domain.Arrow{
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64: {
+				Lifecycle: domain.TargetLifecycle{
+					Install: step.StepList{
+						step.NewFetchStep(
+							"dl",
+							"https://example.com/releases/download/${REF}/app.tar.gz",
+							"${WORKDIR}/app.tar.gz",
+							"",
+							"10s",
+							true,
+						),
+						step.NewRunStep("install", "./install.sh --ref ${REF}", false, "10s", true),
+					},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(m)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors for REF builtin, got: %v", errs)
+	}
+}
+
+func TestVariableRefsRule_RefBuiltin_UnknownSiblingStillRejected(t *testing.T) {
+	rule := VariableRefsRule{}
+	m := &domain.Arrow{
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64: {
+				Lifecycle: domain.TargetLifecycle{
+					Install: step.StepList{
+						step.NewRunStep("install", "./install.sh ${REF} ${VERSION}", false, "10s", true),
+					},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(m)
+	if len(errs) != 1 {
+		t.Fatalf("expected exactly one error, got: %v", errs)
+	}
+	if errs[0].Rule != "unresolved_variable" {
+		t.Fatalf("expected rule %q, got %q", "unresolved_variable", errs[0].Rule)
+	}
+	if errs[0].Message != "unknown variable ${VERSION}" {
+		t.Fatalf("expected VERSION to be the rejected token, got %q", errs[0].Message)
 	}
 }
 
@@ -282,6 +338,171 @@ func TestVariableRefsRule_FetchStep_OSArchVariantUnresolvedVar(t *testing.T) {
 	}
 }
 
+// TestVariableRefsRule_Preinstalled_WorkdirRejected closes the gap a prior
+// review found: WORKDIR is legal for every other lifecycle, but nothing
+// supplies it at probe time (arrow/preinstalled.go's preinstalledVars
+// deliberately excludes it), so a step referencing it would not fail to
+// validate here, it would silently expand to empty at runtime and change
+// what the step's command actually does — turning e.g. "test -d
+// ${WORKDIR}/bin" into "test -d /bin", which is true on virtually every Unix
+// system regardless of whether the arrow is actually installed.
+func TestVariableRefsRule_Preinstalled_WorkdirRejected(t *testing.T) {
+	rule := VariableRefsRule{}
+	m := &domain.Arrow{
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64: {
+				Lifecycle: domain.TargetLifecycle{
+					Preinstalled: step.StepList{
+						step.NewRunStep("detect", "test -d ${WORKDIR}/bin", false, "10s", true),
+					},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(m)
+	if len(errs) == 0 {
+		t.Fatal("expected WORKDIR to be rejected in a preinstalled step, got no errors")
+	}
+	if errs[0].Rule != "unresolved_variable" {
+		t.Fatalf("expected rule %q, got %q", "unresolved_variable", errs[0].Rule)
+	}
+	if errs[0].Message != "unknown variable ${WORKDIR}" {
+		t.Fatalf("expected WORKDIR to be the rejected token, got %q", errs[0].Message)
+	}
+}
+
+// TestVariableRefsRule_Preinstalled_InstallPathRejected: same reasoning as
+// WORKDIR — preinstalledVars never supplies it either.
+func TestVariableRefsRule_Preinstalled_InstallPathRejected(t *testing.T) {
+	rule := VariableRefsRule{}
+	m := &domain.Arrow{
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64: {
+				Lifecycle: domain.TargetLifecycle{
+					Preinstalled: step.StepList{
+						step.NewRunStep("detect", "test -x ${INSTALL_PATH}/bin/app", false, "10s", true),
+					},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(m)
+	if len(errs) == 0 {
+		t.Fatal("expected INSTALL_PATH to be rejected in a preinstalled step, got no errors")
+	}
+	if errs[0].Message != "unknown variable ${INSTALL_PATH}" {
+		t.Fatalf("expected INSTALL_PATH to be the rejected token, got %q", errs[0].Message)
+	}
+}
+
+// TestVariableRefsRule_Preinstalled_NetbridgeRejected: no port is allocated
+// at probe time either — same class of gap as WORKDIR, different source.
+func TestVariableRefsRule_Preinstalled_NetbridgeRejected(t *testing.T) {
+	rule := VariableRefsRule{}
+	m := &domain.Arrow{
+		Netbridge: []netbridge.PortDef{
+			{Name: "GAME_PORT", Protocol: "tcp", Default: 27015},
+		},
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64: {
+				Lifecycle: domain.TargetLifecycle{
+					Preinstalled: step.StepList{
+						step.NewRunStep("detect", "nc -z localhost ${GAME_PORT}", false, "10s", true),
+					},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(m)
+	if len(errs) == 0 {
+		t.Fatal("expected GAME_PORT to be rejected in a preinstalled step, got no errors")
+	}
+}
+
+// TestVariableRefsRule_Preinstalled_VariableWithoutDefaultRejected: stricter
+// than every other lifecycle on purpose. preinstalledVars only adds a
+// manifest variable to the probe's variable map when it has a Default —
+// exactly like VarWorkdir, a no-default variable referenced here would
+// silently expand to empty rather than fail validation.
+func TestVariableRefsRule_Preinstalled_VariableWithoutDefaultRejected(t *testing.T) {
+	rule := VariableRefsRule{}
+	m := &domain.Arrow{
+		Variables: []domain.Variable{
+			{Name: "NO_DEFAULT"},
+		},
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64: {
+				Lifecycle: domain.TargetLifecycle{
+					Preinstalled: step.StepList{
+						step.NewRunStep("detect", "test -d ${NO_DEFAULT}", false, "10s", true),
+					},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(m)
+	if len(errs) == 0 {
+		t.Fatal("expected a no-default manifest variable to be rejected in a preinstalled step, got no errors")
+	}
+}
+
+// TestVariableRefsRule_Preinstalled_BuiltinsAndDefaultedVarAccepted proves the
+// fix is not overly strict: everything preinstalledVars actually supplies at
+// probe time is still legal.
+func TestVariableRefsRule_Preinstalled_BuiltinsAndDefaultedVarAccepted(t *testing.T) {
+	rule := VariableRefsRule{}
+	m := &domain.Arrow{
+		Variables: []domain.Variable{
+			{Name: "WITH_DEFAULT", Default: "yes"},
+		},
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64: {
+				Lifecycle: domain.TargetLifecycle{
+					Preinstalled: step.StepList{
+						step.NewRunStep(
+							"detect",
+							"echo ${ARROW_NAMESPACE} ${PLATFORM} ${REF} ${WITH_DEFAULT}",
+							false, "10s", true,
+						),
+					},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(m)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors for the variables a preinstalled probe actually receives, got: %v", errs)
+	}
+}
+
+// TestVariableRefsRule_Preinstalled_UncheckedBeforeThisFix is a regression
+// guard on the fix itself, not just the gap: a preinstalled block used to be
+// skipped by checkCompiledTargetVariableRefs entirely (Preinstalled was
+// absent from its allSteps list), so WORKDIR sailing through unrejected was
+// only one symptom of "not checked at all" — confirm ordinary lifecycles are
+// unaffected by the same manifest that now gets checked.
+func TestVariableRefsRule_Preinstalled_SiblingLifecyclesStillUseFullKnownSet(t *testing.T) {
+	rule := VariableRefsRule{}
+	m := &domain.Arrow{
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64: {
+				Lifecycle: domain.TargetLifecycle{
+					Install: step.StepList{
+						step.NewRunStep("install", "mkdir -p ${WORKDIR}/bin", false, "10s", true),
+					},
+					Preinstalled: step.StepList{
+						step.NewRunStep("detect", "echo ${ARROW_NAMESPACE}", false, "10s", true),
+					},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(m)
+	if len(errs) != 0 {
+		t.Fatalf("expected WORKDIR to remain legal in Install even with a Preinstalled block present, got: %v", errs)
+	}
+}
+
 func TestVariableRefsRule_OSArchVariantKnownVar(t *testing.T) {
 	rule := VariableRefsRule{}
 	manifest := &domain.Arrow{
@@ -308,5 +529,52 @@ func TestVariableRefsRule_OSArchVariantKnownVar(t *testing.T) {
 	errs := rule.Validate(manifest)
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors for known variable in OSArch variant, got: %v", errs)
+	}
+}
+
+func TestVariableRefsRule_Validate_FromToSteps(t *testing.T) {
+	testCases := []struct {
+		name string
+		from step.Overrideable[string]
+		to   step.Overrideable[string]
+	}{
+		{
+			name: "from",
+			from: step.Overrideable[string]{Default: "${UNKNOWN_ARCHIVE}/file"},
+			to:   step.Overrideable[string]{Default: "./"},
+		},
+		{
+			name: "to",
+			from: step.Overrideable[string]{Default: "./file"},
+			to:   step.Overrideable[string]{Default: "${UNKNOWN_DEST}/"},
+		},
+		{
+			name: "from os variant",
+			from: step.Overrideable[string]{
+				Default: "./file",
+				OSArch:  map[string]string{"linux/amd64": "./${UNKNOWN_FROM_VAR}"},
+			},
+			to: step.Overrideable[string]{Default: "./"},
+		},
+	}
+
+	for _, kind := range fromToKinds() {
+		for _, tc := range testCases {
+			t.Run(kind+" "+tc.name, func(t *testing.T) {
+				built := fromToStep(kind, tc.from, tc.to, step.Overrideable[string]{Default: "30s"})
+				m := &domain.Arrow{
+					Targets: map[domain.OS]domain.Target{
+						domain.OSLinuxAMD64: {
+							Lifecycle: domain.TargetLifecycle{Install: step.StepList{built}},
+						},
+					},
+				}
+
+				errs := VariableRefsRule{}.Validate(m)
+
+				require.NotEmpty(t, errs)
+				assert.Equal(t, "unresolved_variable", errs[0].Rule)
+			})
+		}
 	}
 }

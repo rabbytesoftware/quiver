@@ -3,6 +3,9 @@
 # ? as defaults when either not present or empty.
 
 config:
+  # ? enabled controls router port forwarding (UPnP/NAT-PMP) only. Turning it
+  # ? off still allocates ports for arrows that serve; it just stops Quiver
+  # ? from asking the router to open them, and skips discovery at startup.
   netbridge:
     enabled: true
     ephemeral_port_start: 49152
@@ -17,12 +20,90 @@ config:
 
   manifold:
     fetch_timeout: 30s
+    # ? fletcher synthesizes a manifest from a repository's release assets
+    # ? when it publishes no ARROW.md.
+    fletcher:
+      enabled: false
 
   vault:
     sweep_interval: 5m
     ttl: 24h
+    index_ttl: 720h
 
   arrows:
     auto_retry:
       enabled: true
       retries: 3
+    # ? version_check_ttl throttles the passive version-drift check GetDetail
+    # ? triggers for a catalogued arrow: at most one remote check per arrow per
+    # ? this interval, regardless of how many times it is viewed.
+    version_check_ttl: 1h
+    # ? version_check_interval runs that same check for every installed arrow
+    # ? on its own, soon after the daemon starts and then this often (each run
+    # ? pushed back by up to a tenth of it), so an arrow shows it is outdated
+    # ? without anyone opening it. An arrow checked within version_check_ttl is
+    # ? skipped. 0s turns it off.
+    version_check_interval: 6h
+    # ? self_update_channel is the release channel quiver.core registers its
+    # ? own catalog row as tracking (quiver.core@<channel>), and always wins
+    # ? when set. Empty means no explicit preference: the channel the build
+    # ? was published under (stable, beta, hotfix, nightly-latest) is used, and
+    # ? a build that declares none is pinned to its own version.
+    self_update_channel: ""
+    # ? extract_max_bytes caps the total uncompressed size a single extract
+    # ? step may write, so a hostile or corrupt archive cannot fill the disk.
+    extract_max_bytes: 8589934592
+
+  # ? Pairing codes authenticate quiver.desktop when the daemon is reachable
+  # ? over tcp://. Unix socket connections are already trusted and never use
+  # ? this. redeem_rate_limit/window throttle the redeem endpoint globally,
+  # ? since a wrong guess never touches a real pairing code's own record and
+  # ? so cannot be rate-limited per-code.
+  auth:
+    pairing_code_ttl: 5m
+    redeem_rate_limit: 5
+    redeem_rate_window: 1m
+
+  # ? Discovery is anonymous. Quiver authenticates to no git host and asks for
+  # ? no credentials, so these are the only knobs: how many candidates to take
+  # ? per provider, how many manifests to verify at once, when to give up, and
+  # ? how to search untagged repositories.
+  search:
+    per_provider_limit: 25
+    fetch_concurrency: 8
+    provider_timeout: 10s
+    # ? unmarked adds a second search pass over repositories that carry no
+    # ? discovery topic. min_stars is its star floor and probe_limit caps how
+    # ? many of its candidates get resolved per search.
+    unmarked:
+      min_stars: 50
+      probe_limit: 10
+
+  # ? recommendation fills the home screen without a query. A refresh searches
+  # ? each shelf's sources, resolves at most candidate_budget repositories the
+  # ? vault has not seen (it stops early once a shelf's limit is met), and swaps the shelf in whole. A shelf that comes back
+  # ? with fewer than min_entries is padded from its previous snapshot. Reading
+  # ? home never calls a git host.
+  recommendation:
+    enabled: true
+    refresh_interval: 24h
+    candidate_budget: 30
+    min_entries: 6
+    shelves:
+      - id: popular
+        title: Popular
+        limit: 12
+        sources:
+          - host: github
+            sort: stars
+            min_stars: 500
+            max_stars: 20000
+            pushed_within: 90d
+      - id: fresh
+        title: Recently updated
+        limit: 6
+        sources:
+          - host: github
+            sort: updated
+            min_stars: 100
+            pushed_within: 30d

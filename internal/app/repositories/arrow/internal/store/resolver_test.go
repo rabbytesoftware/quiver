@@ -3,17 +3,53 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	adapterSQLite "github.com/rabbytesoftware/quiver.core/internal/adapter/store/sqlite"
+	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
 	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/arrow/internal/store"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold"
+	manifoldresolver "github.com/rabbytesoftware/quiver.core/internal/engine/manifold/resolver"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
 	"github.com/rabbytesoftware/quiver.core/internal/mocks"
 )
+
+// signalVault reports every PutArrow, so a test can wait for the background
+// refresh of an expired copy without polling.
+type signalVault struct {
+	vault.Vault
+	put chan struct{}
+}
+
+func newSignalVault(v vault.Vault) *signalVault {
+	return &signalVault{Vault: v, put: make(chan struct{}, 4)}
+}
+
+func (s *signalVault) PutArrow(
+	ctx context.Context,
+	ns domain.Namespace,
+	file vault.ManifestFile,
+) error {
+	err := s.Vault.PutArrow(ctx, ns, file)
+	s.put <- struct{}{}
+	return err
+}
+
+func (s *signalVault) awaitPut(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.put:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the expired copy was never refreshed")
+	}
+}
 
 // resolveViaManifest wraps a store.Store.ResolveManifest call with a freshly-built store.
 func resolveViaManifest(
@@ -23,12 +59,12 @@ func resolveViaManifest(
 	ns domain.Namespace,
 ) (*domain.Arrow, error) {
 	t.Helper()
-	r, _ := newTestReaderWithVaultManifold(t, v, m)
+	r := newTestReaderWithVaultManifold(t, v, m)
 	return r.ResolveManifest(context.Background(), ns)
 }
 
 func TestResolver_NilVaultNilManifold_Error(t *testing.T) {
-	r, _ := newTestReader(t)
+	r := newTestReader(t)
 	_, err := r.ResolveManifest(context.Background(), domain.Namespace("github.com/user/pkg@v1"))
 	require.Error(t, err)
 }
@@ -46,22 +82,27 @@ func TestResolver_VaultHit_ParseSuccess(t *testing.T) {
 	assert.Equal(t, "Cached", got.Name)
 }
 
-func TestResolver_VaultStale_ManifoldFetchSuccess(t *testing.T) {
+func TestResolver_VaultStale_ServesStaleThenRefreshes(t *testing.T) {
 	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
-	arrow := &domain.Arrow{Namespace: ns, ArrowMeta: domain.ArrowMeta{Name: "Fresh"}}
-	v := &mocks.Vault{
+	inner := &mocks.Vault{
 		GetArrowErr:  vault.ErrStale,
 		GetArrowFile: vault.ManifestFile{Content: []byte("stale")},
 	}
+	v := newSignalVault(inner)
 	m := &mocks.Manifold{
-		ResolveArrowResult:   arrow,
+		ParseArrowResult:     &domain.Arrow{Namespace: ns, ArrowMeta: domain.ArrowMeta{Name: "Stale"}},
+		ResolveArrowResult:   &domain.Arrow{Namespace: ns, ArrowMeta: domain.ArrowMeta{Name: "Fresh"}},
 		ResolveArrowRaw:      []byte("fresh"),
 		ResolveArrowFilename: "ARROW.md",
 	}
 
 	got, err := resolveViaManifest(t, v, m, ns)
 	require.NoError(t, err)
-	assert.Equal(t, "Fresh", got.Name)
+	assert.Equal(t, "Stale", got.Name, "the expired copy answers without waiting on the host")
+
+	v.awaitPut(t)
+	assert.Equal(t, []byte("fresh"), inner.PutArrowFiles[0].Content)
+	assert.Zero(t, inner.DeleteArrowCalls, "the copy is replaced, never deleted first")
 }
 
 func TestResolver_VaultStale_ManifoldFetchFails_FallbackToStale(t *testing.T) {
@@ -118,7 +159,7 @@ func TestResolver_NoVault_ManifoldOnly(t *testing.T) {
 		ResolveArrowFilename: "ARROW.md",
 	}
 
-	r, _ := newTestReaderWithVaultManifold(t, nil, m)
+	r := newTestReaderWithVaultManifold(t, nil, m)
 	got, err := r.ResolveManifest(context.Background(), ns)
 	require.NoError(t, err)
 	assert.Equal(t, "ManifoldOnly", got.Name)
@@ -130,7 +171,7 @@ func TestResolver_NilVault_ManifoldFetchError(t *testing.T) {
 		ResolveArrowErr: errors.New("manifold error"),
 	}
 
-	r, _ := newTestReaderWithVaultManifold(t, nil, m)
+	r := newTestReaderWithVaultManifold(t, nil, m)
 	_, err := r.ResolveManifest(context.Background(), ns)
 	require.Error(t, err)
 }
@@ -144,30 +185,49 @@ func TestResolver_VaultStale_NilManifold_Error(t *testing.T) {
 	// nil manifold interface + ErrStale → resolver returns error
 	db, err := adapterSQLite.OpenDB(":memory:")
 	require.NoError(t, err)
-	axArrow := newTestAsynxArrow(t)
-	r, err := store.New(db, axArrow, v, nil, nil) // nil manifold.Manifold interface
+	r, err := store.New(db, v, nil) // nil manifold.Manifold interface
 	require.NoError(t, err)
 	_, err = r.ResolveManifest(context.Background(), ns)
 	require.Error(t, err)
 }
 
-func TestResolver_VaultStale_PutArrowError(t *testing.T) {
+func TestResolver_VaultStale_PutArrowError_StillServesTheStaleCopy(t *testing.T) {
 	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
-	arrow := &domain.Arrow{Namespace: ns, ArrowMeta: domain.ArrowMeta{Name: "Fresh"}}
-	v := &mocks.Vault{
+	v := newSignalVault(&mocks.Vault{
 		GetArrowErr:  vault.ErrStale,
 		GetArrowFile: vault.ManifestFile{Content: []byte("stale")},
 		PutArrowErr:  errors.New("storage full"),
-	}
+	})
 	m := &mocks.Manifold{
-		ResolveArrowResult:   arrow,
+		ParseArrowResult:     &domain.Arrow{Namespace: ns, ArrowMeta: domain.ArrowMeta{Name: "Stale"}},
+		ResolveArrowResult:   &domain.Arrow{Namespace: ns, ArrowMeta: domain.ArrowMeta{Name: "Fresh"}},
 		ResolveArrowRaw:      []byte("fresh"),
 		ResolveArrowFilename: "ARROW.md",
 	}
 
-	r, _ := newTestReaderWithVaultManifold(t, v, m)
-	_, err := r.ResolveManifest(context.Background(), ns)
-	require.Error(t, err)
+	got, err := resolveViaManifest(t, v, m, ns)
+	require.NoError(t, err)
+	assert.Equal(t, "Stale", got.Name)
+	v.awaitPut(t)
+}
+
+func TestResolver_VaultStale_UnparsableCopy_IsFetchedBeforeAnswering(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{
+		GetArrowErr:  vault.ErrStale,
+		GetArrowFile: vault.ManifestFile{Content: []byte("garbage")},
+	}
+	m := &mocks.Manifold{
+		ParseArrowErr:        errors.New("bad manifest"),
+		ResolveArrowResult:   &domain.Arrow{Namespace: ns, ArrowMeta: domain.ArrowMeta{Name: "Fresh"}},
+		ResolveArrowRaw:      []byte("fresh"),
+		ResolveArrowFilename: "ARROW.md",
+	}
+
+	got, err := resolveViaManifest(t, v, m, ns)
+	require.NoError(t, err)
+	assert.Equal(t, "Fresh", got.Name)
+	assert.Equal(t, 1, v.PutArrowCalls)
 }
 
 func TestResolver_VaultNotCached_NilManifold_Error(t *testing.T) {
@@ -177,8 +237,7 @@ func TestResolver_VaultNotCached_NilManifold_Error(t *testing.T) {
 	}
 	db, err := adapterSQLite.OpenDB(":memory:")
 	require.NoError(t, err)
-	axArrow := newTestAsynxArrow(t)
-	r, err := store.New(db, axArrow, v, nil, nil) // nil manifold.Manifold
+	r, err := store.New(db, v, nil) // nil manifold.Manifold
 	require.NoError(t, err)
 	_, err = r.ResolveManifest(context.Background(), ns)
 	require.Error(t, err)
@@ -193,7 +252,7 @@ func TestResolver_VaultNotCached_ManifoldFetchError(t *testing.T) {
 		ResolveArrowErr: errors.New("network error"),
 	}
 
-	r, _ := newTestReaderWithVaultManifold(t, v, m)
+	r := newTestReaderWithVaultManifold(t, v, m)
 	_, err := r.ResolveManifest(context.Background(), ns)
 	require.Error(t, err)
 }
@@ -211,7 +270,397 @@ func TestResolver_VaultNotCached_PutArrowError(t *testing.T) {
 		ResolveArrowFilename: "ARROW.md",
 	}
 
-	r, _ := newTestReaderWithVaultManifold(t, v, m)
+	r := newTestReaderWithVaultManifold(t, v, m)
 	_, err := r.ResolveManifest(context.Background(), ns)
 	require.Error(t, err)
+}
+
+func TestResolver_VaultNotCached_IndexesResolvedManifest(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	arrow := &domain.Arrow{
+		Namespace: ns,
+		ArrowMeta: domain.ArrowMeta{
+			Name:        "Chromium",
+			Description: "A fast web browser",
+			Tags:        []string{"browser"},
+		},
+		Targets: map[domain.OS]domain.Target{
+			domain.OSLinuxAMD64:  {},
+			domain.OSDarwinARM64: {},
+		},
+	}
+	dir := t.TempDir()
+	v, err := vault.New(filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), time.Hour)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+	m := &mocks.Manifold{
+		ResolveArrowResult:   arrow,
+		ResolveArrowRaw:      []byte("raw"),
+		ResolveArrowFilename: "ARROW.md",
+	}
+
+	got, err := resolveViaManifest(t, v, m, ns)
+	require.NoError(t, err)
+	require.Equal(t, "Chromium", got.Name)
+
+	rows, err := v.SearchArrows(context.Background(), vault.IndexQuery{Text: "chrom", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "Chromium", rows[0].Meta.Arrow.Name)
+	assert.Equal(t, []string{"browser"}, rows[0].Meta.Arrow.Tags)
+	assert.ElementsMatch(t, []domain.OS{domain.OSLinuxAMD64, domain.OSDarwinARM64}, rows[0].Meta.OS)
+}
+
+func TestResolver_VaultStale_IndexesRefreshedManifest(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	arrow := &domain.Arrow{
+		Namespace: ns,
+		ArrowMeta: domain.ArrowMeta{Name: "Chromium"},
+		Targets:   map[domain.OS]domain.Target{domain.OSLinuxAMD64: {}},
+	}
+	dir := t.TempDir()
+	base := time.Now()
+	v, err := vault.NewWithClock(
+		filepath.Join(dir, "vault"),
+		filepath.Join(dir, "ns"),
+		time.Hour,
+		func() time.Time { return base },
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+	served := *arrow
+	m := &mocks.Manifold{
+		ParseArrowResult:     &served,
+		ResolveArrowResult:   arrow,
+		ResolveArrowRaw:      []byte("raw"),
+		ResolveArrowFilename: "ARROW.md",
+	}
+
+	// Seed an unindexed entry, then age it past the TTL so the next resolve
+	// takes the stale-refresh path.
+	require.NoError(t, v.PutArrow(context.Background(), ns, vault.ManifestFile{
+		Content: []byte("old"), Filename: "ARROW.md",
+	}))
+
+	staleVault, err := vault.NewWithClock(
+		filepath.Join(dir, "vault"),
+		filepath.Join(dir, "ns"),
+		time.Hour,
+		func() time.Time { return base.Add(2 * time.Hour) },
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = staleVault.Close() })
+
+	signalled := newSignalVault(staleVault)
+	_, err = resolveViaManifest(t, signalled, m, ns)
+	require.NoError(t, err)
+	signalled.awaitPut(t)
+
+	rows, err := staleVault.SearchArrows(context.Background(), vault.IndexQuery{Text: "chrom", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+}
+
+func TestFetchAndCache_ManifoldNotFound_TranslatesToAppNotFound(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifoldresolver.ErrNotFound)}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrNotFound))
+}
+
+func TestFetchAndCache_ManifoldFetchFailed_TranslatesToAppFetchFailed(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifoldresolver.ErrFetchFailed)}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrFetchFailed))
+}
+
+func TestFetchAndCache_ManifoldInvalidManifest_TranslatesToAppInvalidManifest(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifold.ErrInvalidManifest)}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrInvalidManifest))
+}
+
+func TestFetchAndCache_ManifoldArrowNotInCollection_TranslatesToAppNotFound(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg/tool@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifold.ErrArrowNotInCollection)}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrNotFound))
+}
+
+func TestParseManifest_VaultHit_InvalidManifest_TranslatesToAppInvalidManifest(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowFile: vault.ManifestFile{Content: []byte("raw")}}
+	m := &mocks.Manifold{ParseArrowErr: fmt.Errorf("wrapped: %w", manifold.ErrInvalidManifest)}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrInvalidManifest))
+}
+
+// A network error unrelated to manifest content must stay a generic failure,
+// not be misclassified as an invalid manifest just because it isn't
+// ErrNotFound or ErrFetchFailed either.
+func TestFetchAndCache_UnrelatedManifoldError_NotClassifiedAsInvalidManifest(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+	m := &mocks.Manifold{ResolveArrowErr: errors.New("network error")}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, apperrors.ErrInvalidManifest))
+}
+
+// TestFetchAndCache_ManifoldNotFound_CachesConfirmedAbsent proves the
+// negative-caching fix at the mock-vault call-tracking level: a genuine
+// ErrNotFound from the manifold triggers exactly one PutArrowNotFound call
+// for the namespace that failed.
+func TestFetchAndCache_ManifoldNotFound_CachesConfirmedAbsent(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifoldresolver.ErrNotFound)}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+
+	require.Error(t, err)
+	require.Equal(t, 1, v.PutArrowNotFoundCalls)
+	require.Len(t, v.PutArrowNotFoundNamespaces, 1)
+	assert.Equal(t, ns, v.PutArrowNotFoundNamespaces[0])
+}
+
+// TestFetchAndCache_ManifoldFetchFailed_NeverCachedAsAbsent is the scope
+// guard for the whole feature: a transient failure (network-style, not
+// "not found") must never be recorded as confirmed absent — doing so would
+// silently convert a temporary outage into a false not-found for a full
+// TTL.
+func TestFetchAndCache_ManifoldFetchFailed_NeverCachedAsAbsent(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifoldresolver.ErrFetchFailed)}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+
+	require.Error(t, err)
+	assert.Zero(t, v.PutArrowNotFoundCalls)
+}
+
+// TestFetchAndCache_UnrelatedManifoldError_NeverCachedAsAbsent covers the
+// same scope guard for a plain, unclassified error (no sentinel at all).
+func TestFetchAndCache_UnrelatedManifoldError_NeverCachedAsAbsent(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+	m := &mocks.Manifold{ResolveArrowErr: errors.New("network error")}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+
+	require.Error(t, err)
+	assert.Zero(t, v.PutArrowNotFoundCalls)
+}
+
+// TestFetchAndCache_PutArrowNotFoundError_StillReturnsTheNotFoundError
+// proves a failure to write the negative-cache marker never masks the
+// definitive not-found answer the manifold already gave.
+func TestFetchAndCache_PutArrowNotFoundError_StillReturnsTheNotFoundError(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{
+		GetArrowErr:         vault.ErrNotCached,
+		PutArrowNotFoundErr: errors.New("disk full"),
+	}
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifoldresolver.ErrNotFound)}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrNotFound))
+}
+
+// TestResolveManifest_ConfirmedAbsent_SkipsManifoldEntirely is the actual
+// regression guard for the reported bug: once a namespace is cached as
+// confirmed absent, a second ResolveManifest call must not touch the
+// manifold at all — no second clone, no second fetch attempt.
+func TestResolveManifest_ConfirmedAbsent_SkipsManifoldEntirely(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	v := &mocks.Vault{GetArrowErr: vault.ErrConfirmedAbsent}
+	m := &mocks.Manifold{
+		ResolveArrowErr: errors.New("must not be called: confirmed-absent cache hit should short-circuit"),
+	}
+
+	_, err := resolveViaManifest(t, v, m, ns)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrNotFound))
+	assert.Zero(t, m.ResolveArrowCalls, "manifold.ResolveArrow must not be called on a confirmed-absent cache hit")
+}
+
+// TestResolveManifest_RealVault_ConfirmedAbsent_EndToEnd exercises the fix
+// through a real vault.Vault instance (not the mock) end to end: the first
+// resolution genuinely fetches (and fails) via the manifold; the second,
+// immediately after, must be answered entirely from the vault's negative
+// cache, without invoking the manifold again.
+func TestResolveManifest_RealVault_ConfirmedAbsent_EndToEnd(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	dir := t.TempDir()
+	v, err := vault.New(filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), time.Hour)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifoldresolver.ErrNotFound)}
+
+	_, err = resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrNotFound))
+	firstCallCount := m.ResolveArrowCalls
+
+	_, err = resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrNotFound))
+	assert.Equal(t, firstCallCount, m.ResolveArrowCalls,
+		"second resolution must be answered from the negative cache, not a second manifold call")
+}
+
+// TestResolveManifest_RealVault_ConfirmedAbsent_ExpiresAndRetries proves the
+// TTL side of the fix: once the confirmed-absent marker's TTL has passed,
+// resolution is attempted again — this matters for a mutable ref (a branch)
+// that might gain a manifest later, even though it makes no difference for
+// an immutable tag.
+func TestResolveManifest_RealVault_ConfirmedAbsent_ExpiresAndRetries(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	dir := t.TempDir()
+	base := time.Now()
+	v, err := vault.NewWithClock(
+		filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), time.Hour,
+		func() time.Time { return base },
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifoldresolver.ErrNotFound)}
+
+	_, err = resolveViaManifest(t, v, m, ns)
+	require.Error(t, err)
+	require.Equal(t, 1, m.ResolveArrowCalls)
+
+	vAfterTTL, err := vault.NewWithClock(
+		filepath.Join(dir, "vault"), filepath.Join(dir, "ns"), time.Hour,
+		func() time.Time { return base.Add(2 * time.Hour) },
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = vAfterTTL.Close() })
+
+	_, err = resolveViaManifest(t, vAfterTTL, m, ns)
+	require.Error(t, err)
+	assert.Equal(t, 2, m.ResolveArrowCalls,
+		"a confirmed-absent marker past its TTL must be retried live, not trusted forever")
+}
+
+func TestResolveManifest_NoVault_FetchFromManifold_TranslatesNotFound(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	m := &mocks.Manifold{ResolveArrowErr: fmt.Errorf("wrapped: %w", manifoldresolver.ErrNotFound)}
+
+	r := newTestReaderWithVaultManifold(t, nil, m)
+	_, err := r.ResolveManifest(context.Background(), ns)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrNotFound))
+}
+
+// A branch of a repository with no manifest publishes no release: a draft of
+// another release is not what the branch holds, and reads as no manifest.
+func TestResolver_DraftOfAnotherRelease_IsNoManifestAtTheRef(t *testing.T) {
+	inferred := domain.ArrowMeta{Name: "tool", Generator: &domain.ArrowGenerator{Name: "fletcher/1", Confidence: "high"}}
+	testCases := []struct {
+		name    string
+		arrow   domain.Arrow
+		wantErr error
+	}{
+		{
+			name:    "drafted from a release tag",
+			arrow:   domain.Arrow{Namespace: "github.com/user/pkg@v1.2.0", ArrowMeta: inferred},
+			wantErr: apperrors.ErrNotFound,
+		},
+		{name: "drafted at the branch itself", arrow: domain.Arrow{Namespace: "github.com/user/pkg@main", ArrowMeta: inferred}},
+		{name: "a declared manifest", arrow: domain.Arrow{Namespace: "github.com/user/pkg@v1.2.0"}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ns := domain.Namespace("github.com/user/pkg@main")
+			v := &mocks.Vault{GetArrowErr: vault.ErrNotCached}
+			arrow := tc.arrow
+			m := &mocks.Manifold{ResolveArrowResult: &arrow, ResolveArrowRaw: []byte("raw"), ResolveArrowFilename: "ARROW.md"}
+
+			_, err := resolveViaManifest(t, v, m, ns)
+
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, []domain.Namespace{ns}, v.PutArrowNotFoundNamespaces)
+		})
+	}
+}
+
+func TestResolver_VaultStale_Refreshed_ReportsTheFreshArrow(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	refreshed := make(chan domain.Arrow, 1)
+	db, err := adapterSQLite.OpenDB(":memory:")
+	require.NoError(t, err)
+	r, err := store.New(db, &mocks.Vault{
+		GetArrowErr:  vault.ErrStale,
+		GetArrowFile: vault.ManifestFile{Content: []byte("stale")},
+	}, &mocks.Manifold{
+		ParseArrowResult:     &domain.Arrow{ArrowMeta: domain.ArrowMeta{Name: "Stale"}},
+		ResolveArrowResult:   &domain.Arrow{ArrowMeta: domain.ArrowMeta{Name: "Fresh"}},
+		ResolveArrowRaw:      []byte("fresh"),
+		ResolveArrowFilename: "ARROW.md",
+	}, store.WithRefreshed(func(arrow domain.Arrow) { refreshed <- arrow }))
+	require.NoError(t, err)
+
+	_, err = r.ResolveManifest(context.Background(), ns)
+	require.NoError(t, err)
+
+	select {
+	case arrow := <-refreshed:
+		assert.Equal(t, ns, arrow.Namespace)
+		assert.Equal(t, "Fresh", arrow.Name)
+		assert.False(t, arrow.UserInstalled, "a refreshed preview is not a library row")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the refresh was never reported")
+	}
+}
+
+func TestResolver_VaultStale_RefreshFails_ReportsNothing(t *testing.T) {
+	ns := domain.Namespace("github.com/user/pkg@v1.0.0")
+	reported := make(chan struct{}, 1)
+	fetched := make(chan struct{}, 1)
+	db, err := adapterSQLite.OpenDB(":memory:")
+	require.NoError(t, err)
+	r, err := store.New(db, &mocks.Vault{
+		GetArrowErr:  vault.ErrStale,
+		GetArrowFile: vault.ManifestFile{Content: []byte("stale")},
+	}, &mocks.Manifold{
+		ParseArrowResult: &domain.Arrow{ArrowMeta: domain.ArrowMeta{Name: "Stale"}},
+		ResolveArrowFunc: func(context.Context, domain.Namespace) (*domain.Arrow, []byte, string, error) {
+			fetched <- struct{}{}
+			return nil, nil, "", errors.New("github is down")
+		},
+	}, store.WithRefreshed(func(domain.Arrow) { reported <- struct{}{} }))
+	require.NoError(t, err)
+
+	got, err := r.ResolveManifest(context.Background(), ns)
+	require.NoError(t, err)
+	assert.Equal(t, "Stale", got.Name)
+
+	<-fetched
+	assert.Empty(t, reported)
 }

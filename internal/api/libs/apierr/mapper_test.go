@@ -10,6 +10,7 @@ import (
 
 	"github.com/rabbytesoftware/quiver.core/internal/api/libs/apierr"
 	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/deptree"
 )
 
 func TestStatusAndMessage(t *testing.T) {
@@ -28,6 +29,8 @@ func TestStatusAndMessage(t *testing.T) {
 		{apperrors.ErrPlatformNotSupported, http.StatusUnprocessableEntity, "no target for the current platform"},
 		{apperrors.ErrMissingVariable, http.StatusUnprocessableEntity, "required variable not provided"},
 		{apperrors.ErrInvalidManifest, http.StatusUnprocessableEntity, "invalid manifest"},
+		{apperrors.ErrChannelNotFound, http.StatusBadRequest, "channel not found"},
+		{deptree.ErrCyclicDependency, http.StatusConflict, "cyclic dependency"},
 		{errors.New("unexpected"), http.StatusInternalServerError, "internal error"},
 	}
 
@@ -40,9 +43,53 @@ func TestStatusAndMessage(t *testing.T) {
 	}
 }
 
+func TestStatusAndMessage_StateViolationSurfacesContext(t *testing.T) {
+	status, msg := apierr.StatusAndMessage(apperrors.NewStateViolation("uninstall", "absent"))
+	assert.Equal(t, http.StatusUnprocessableEntity, status)
+	assert.Equal(t, "cannot uninstall: arrow is not installed", msg)
+
+	// Wrapped in outer context, the StateViolationError message still surfaces.
+	wrapped := fmt.Errorf("uninstall: %w", apperrors.NewStateViolation("stop", "ready"))
+	status, msg = apierr.StatusAndMessage(wrapped)
+	assert.Equal(t, http.StatusUnprocessableEntity, status)
+	assert.Equal(t, "cannot stop: arrow is ready", msg)
+}
+
 func TestStatusAndMessage_WrappedErrors(t *testing.T) {
 	wrapped := fmt.Errorf("catalog: %w", apperrors.ErrNotFound)
 	status, msg := apierr.StatusAndMessage(wrapped)
 	assert.Equal(t, http.StatusNotFound, status)
 	assert.Equal(t, "not found", msg)
+}
+
+// The offending name only exists in the wrapped text, so this mapping forwards
+// the message rather than replacing it with a constant.
+func TestStatusAndMessage_ReservedVariable_NamesTheVariable(t *testing.T) {
+	err := fmt.Errorf("install: %w: %q", apperrors.ErrReservedVariable, "WORKDIR")
+
+	status, msg := apierr.StatusAndMessage(err)
+
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Contains(t, msg, "WORKDIR")
+	assert.Contains(t, msg, "reserved")
+}
+
+// The offending channel or ref name only exists in the wrapped text, so this
+// mapping forwards the full wrapped message rather than the bare sentinel.
+func TestStatusAndMessage_ChannelNotFound_SurfacesContext(t *testing.T) {
+	err := fmt.Errorf("switch channel: channel foo: %w", apperrors.ErrChannelNotFound)
+
+	status, msg := apierr.StatusAndMessage(err)
+
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, "switch channel: channel foo: channel not found", msg)
+}
+
+func TestStatusAndMessage_InvalidConfig_NamesTheField(t *testing.T) {
+	err := fmt.Errorf("patch config: %w: %s", apperrors.ErrInvalidConfig, "logger.level")
+
+	status, message := apierr.StatusAndMessage(err)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, status)
+	assert.Contains(t, message, "logger.level")
 }

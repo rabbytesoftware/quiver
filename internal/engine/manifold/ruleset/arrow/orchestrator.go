@@ -33,6 +33,9 @@ func AllCompiled() []CompiledRule {
 		TimeoutFormatRule{},
 		MethodStatesRule{},
 		NoDependenciesStepRule{},
+		RunUIRule{},
+		ExposeEntriesRule{},
+		PortableNameRule{},
 	}
 }
 

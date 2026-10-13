@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	sqlite "github.com/rabbytesoftware/quiver.core/internal/adapter/eventstore/sqlite"
+	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
 	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/runtime/internal/commands"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	domainRuntime "github.com/rabbytesoftware/quiver.core/internal/domain/runtime"
@@ -21,8 +22,11 @@ func buildAsynx(t *testing.T) asynx.Asynx[domainRuntime.ArrowRuntime] {
 	t.Helper()
 	es, err := sqlite.NewEventStore(":memory:")
 	require.NoError(t, err)
+	ss, err := sqlite.NewSnapshotStore(":memory:")
+	require.NoError(t, err)
 	ax, err := asynx.New[domainRuntime.ArrowRuntime]().
 		WithEventStore(es).
+		WithSnapshotStore(ss).
 		WithShardingOpts(asynx.ShardingOpts{Shards: 4, QueueDepth: 100}).
 		Build()
 	require.NoError(t, err)
@@ -124,6 +128,119 @@ func TestBeginExecution_AlreadyRunning_Fails(t *testing.T) {
 		Namespace:   ns,
 		Method:      domain.MethodExecute,
 		AvailableIn: []domain.ArrowState{domain.ArrowStateRunning},
+	})
+	require.Error(t, err)
+	assert.True(t, isValidationErr(err))
+}
+
+// seedVersionDriftOutdated leaves ns where a passive version check leaves it:
+// Outdated with no PendingDepSync, because a newer release exists upstream and
+// nothing about the arrow's own dependency graph has changed.
+func seedVersionDriftOutdated(
+	t *testing.T,
+	ax asynx.Asynx[domainRuntime.ArrowRuntime],
+	ns domain.Namespace,
+) {
+	t.Helper()
+	seedReadyRuntime(t, ax, ns)
+	_, err := ax.Send(context.Background(), commands.MarkVersionOutdated{Namespace: ns})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	require.Equal(t, domain.ArrowStateOutdated, got.State)
+	require.Nil(t, got.PendingDepSync, "version drift must not invent a dependency sync")
+}
+
+// TestBeginExecution_VersionDriftOutdated_Starts is the regression this whole
+// state ever needed and never had: an installed, idle arrow that a version
+// check moved to Outdated must still start. The standard _execute method
+// declares no available_in, and until this fix that branch demanded exactly
+// Ready — so every arrow in the system became unstartable the moment anyone
+// opened its detail page after upstream published a newer release, with no
+// path back except an update the user never asked for.
+func TestBeginExecution_VersionDriftOutdated_Starts(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/exec-drift@v1")
+	seedVersionDriftOutdated(t, ax, ns)
+
+	_, err := ax.Send(context.Background(), commands.BeginExecution{
+		Namespace: ns,
+		Method:    domain.MethodExecute,
+	})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, domain.ArrowStateRunning, got.State)
+}
+
+// TestBeginExecution_VersionDriftOutdated_SatisfiesDeclaredReady covers the
+// other half of the same gap. A custom method can only ever declare ready or
+// running (MethodStatesRule rejects anything else), so ready is the only way
+// an author can spell "installed and idle" — and an arrow that drifted out of
+// date is still exactly that.
+func TestBeginExecution_VersionDriftOutdated_SatisfiesDeclaredReady(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/exec-drift-custom@v1")
+	seedVersionDriftOutdated(t, ax, ns)
+
+	_, err := ax.Send(context.Background(), commands.BeginExecution{
+		Namespace:   ns,
+		Method:      "restart",
+		AvailableIn: []domain.ArrowState{domain.ArrowStateReady},
+	})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, domain.ArrowStateRunning, got.State)
+}
+
+// TestBeginExecution_VersionDriftOutdated_DoesNotSatisfyOtherStates keeps the
+// admission narrow: Outdated stands in for Ready and for nothing else, so a
+// method gated on running alone is still refused from Outdated.
+func TestBeginExecution_VersionDriftOutdated_DoesNotSatisfyOtherStates(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/exec-drift-running-only@v1")
+	seedVersionDriftOutdated(t, ax, ns)
+
+	_, err := ax.Send(context.Background(), commands.BeginExecution{
+		Namespace:   ns,
+		Method:      "reload",
+		AvailableIn: []domain.ArrowState{domain.ArrowStateRunning},
+	})
+	require.Error(t, err)
+	assert.True(t, isValidationErr(err))
+}
+
+// TestBeginExecution_DepSyncOutdated_StillRefused draws the line the two
+// outdated reasons have always been kept apart by. MarkOutdated's Outdated
+// says the arrow's dependency graph changed and has not been re-synced;
+// running it would run against the wrong dependencies, and runtimeUsecase's
+// syncDeps — the only thing that consumes PendingDepSync — demands the
+// aggregate still be Outdated when it runs. Admitting this one would both run
+// an arrow that is not ready to run and orphan the pending sync at Ready,
+// where nothing can ever pick it up again.
+func TestBeginExecution_DepSyncOutdated_StillRefused(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/exec-depsync@v1")
+	seedReadyRuntime(t, ax, ns)
+
+	_, err := ax.Send(context.Background(), commands.MarkOutdated{
+		Namespace: ns,
+		AddedDeps: []domain.Namespace{domain.Namespace("github.com/user/dep@v1")},
+	})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	require.Equal(t, domain.ArrowStateOutdated, got.State)
+	require.NotNil(t, got.PendingDepSync)
+
+	_, err = ax.Send(context.Background(), commands.BeginExecution{
+		Namespace: ns,
+		Method:    domain.MethodExecute,
 	})
 	require.Error(t, err)
 	assert.True(t, isValidationErr(err))
@@ -274,6 +391,27 @@ func TestEndExecution_AfterUninstall_Success_SetsAbsent(t *testing.T) {
 	got, err := ax.Get(context.Background(), ns.String())
 	require.NoError(t, err)
 	assert.Equal(t, domain.ArrowStateAbsent, got.State)
+}
+
+// A return names the execution it ended, so a client can tell this run's
+// return from the previous one of the same method.
+func TestEndExecution_ReturnNamesTheExecutionItEnded(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := testNs()
+	_, err := ax.Send(context.Background(), commands.BeginInstall{Namespace: ns, ExecutionID: "exec-1"})
+	require.NoError(t, err)
+
+	_, err = ax.Send(context.Background(), commands.EndExecution{
+		Namespace:   ns,
+		ExecutionID: "exec-1",
+		Outcome:     domainRuntime.ExecutionOutcomeSuccess,
+	})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	require.NotNil(t, got.LastReturn)
+	assert.Equal(t, "exec-1", got.LastReturn.ExecutionID)
 }
 
 func TestEndExecution_WithoutExecution_Fails(t *testing.T) {
@@ -487,6 +625,28 @@ func TestAdvanceStep_WithError_SetsErrorField(t *testing.T) {
 	assert.Equal(t, errStr, *got.Execution.Steps[0].Error)
 }
 
+func TestAdvanceStep_WithNote_SetsNoteField(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := testNs()
+
+	seedRuntime(t, ax, ns, domainStep.StepList{domainStep.NewRunStep("step 0", "true", false, "", true)})
+
+	note := "nothing exposed: no executable found"
+	_, err := ax.Send(context.Background(), commands.AdvanceStep{
+		Namespace: ns,
+		StepIndex: 0,
+		ToStatus:  domainRuntime.StepStatusCompleted,
+		Note:      &note,
+	})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	require.NotNil(t, got.Execution.Steps[0].Note)
+	assert.Equal(t, note, *got.Execution.Steps[0].Note)
+	assert.Nil(t, got.Execution.Steps[0].Error)
+}
+
 func TestAdvanceStep_PreservesWorkDir(t *testing.T) {
 	ax := buildAsynx(t)
 	ns := testNs()
@@ -522,6 +682,39 @@ func TestAdvanceStep_NoExecution_Fails(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.True(t, isValidationErr(err))
+}
+
+func TestAdvanceStep_WritesSnapshot(t *testing.T) {
+	es, err := sqlite.NewEventStore(":memory:")
+	require.NoError(t, err)
+	ss, err := sqlite.NewSnapshotStore(":memory:")
+	require.NoError(t, err)
+	ax, err := asynx.New[domainRuntime.ArrowRuntime]().
+		WithEventStore(es).
+		WithSnapshotStore(ss).
+		WithShardingOpts(asynx.ShardingOpts{Shards: 4, QueueDepth: 100}).
+		Build()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ax.Shutdown(context.Background()) })
+
+	ns := testNs()
+	step0 := domainStep.NewRunStep("step 0", "echo hi", false, "", true)
+	seedRuntime(t, ax, ns, domainStep.StepList{step0})
+
+	// BeginInstall already snapshots; clear it so a found snapshot below can
+	// only have come from AdvanceStep itself.
+	require.NoError(t, ss.Delete(context.Background(), ns.String()))
+
+	_, err = ax.Send(context.Background(), commands.AdvanceStep{
+		Namespace: ns,
+		StepIndex: 0,
+		ToStatus:  domainRuntime.StepStatusRunning,
+	})
+	require.NoError(t, err)
+
+	_, found, err := ss.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.True(t, found, "advance step must persist a snapshot; without one every read cold-replays the runtime's full history forever")
 }
 
 // ─── RecordDetached ──────────────────────────────────────────────────────────
@@ -796,6 +989,35 @@ func TestMarkOutdated_NonReady_Fails(t *testing.T) {
 	assert.True(t, isValidationErr(err))
 }
 
+// A version-drift Outdated (PendingDepSync nil) must still accept a
+// dependency-graph change: the two "outdated" reasons are independent, and a
+// dep sync discovered while an arrow already shows a version-drift badge must
+// not be silently dropped.
+func TestMarkOutdated_FromVersionOutdated_SetsPendingDepSync(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := testNs()
+	seedReadyRuntime(t, ax, ns)
+	_, err := ax.Send(context.Background(), commands.MarkVersionOutdated{Namespace: ns})
+	require.NoError(t, err)
+	pre, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	require.Equal(t, domain.ArrowStateOutdated, pre.State)
+	require.Nil(t, pre.PendingDepSync)
+
+	added := []domain.Namespace{"github.com/user/new-dep@v1"}
+	_, err = ax.Send(context.Background(), commands.MarkOutdated{
+		Namespace: ns,
+		AddedDeps: added,
+	})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, domain.ArrowStateOutdated, got.State)
+	require.NotNil(t, got.PendingDepSync)
+	assert.Equal(t, added, got.PendingDepSync.AddedDeps)
+}
+
 // ─── BeginUninstall ──────────────────────────────────────────────────────────
 
 func TestBeginUninstall_FromReady_SetsUninstalling(t *testing.T) {
@@ -820,6 +1042,28 @@ func TestBeginUninstall_NotFromReady_Fails(t *testing.T) {
 	_, err := ax.Send(context.Background(), commands.BeginUninstall{Namespace: ns})
 	require.Error(t, err)
 	assert.True(t, isValidationErr(err))
+}
+
+// An installed, idle arrow is uninstallable whether the reason it sits in
+// Outdated is a version drift or a pending dependency sync — uninstalling it
+// doesn't care which. Orphaned-dependency cleanup relies on this to actually
+// take effect, not silently fail validation, for the Outdated half of its
+// switch.
+func TestBeginUninstall_FromOutdated_SetsUninstalling(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/uninstall-outdated@v1")
+	seedReadyRuntime(t, ax, ns)
+	_, err := ax.Send(context.Background(), commands.MarkVersionOutdated{Namespace: ns})
+	require.NoError(t, err)
+
+	_, err = ax.Send(context.Background(), commands.BeginUninstall{Namespace: ns})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, domain.ArrowStateUninstalling, got.State)
+	require.NotNil(t, got.Execution)
+	assert.Equal(t, domain.MethodUninstall, got.Execution.Method)
 }
 
 func TestBeginUninstall_AlreadyExecuting_Fails(t *testing.T) {
@@ -1065,4 +1309,358 @@ func TestBeginUpdate_PreservesLastReturn(t *testing.T) {
 	got, err := ax.Get(context.Background(), ns.String())
 	require.NoError(t, err)
 	assert.NotNil(t, got.LastReturn, "LastReturn must survive BeginUpdate")
+}
+
+// ─── Execution identity ──────────────────────────────────────────────────────
+
+// seedRunningWithID seeds an arrow running executionID with a single step.
+func seedRunningWithID(
+	t *testing.T,
+	ax asynx.Asynx[domainRuntime.ArrowRuntime],
+	ns domain.Namespace,
+	executionID string,
+) {
+	t.Helper()
+	_, err := ax.Send(context.Background(), commands.BeginInstall{
+		Namespace:   ns,
+		ExecutionID: executionID,
+		Steps:       domainStep.StepList{domainStep.NewRunStep("step 0", "echo hi", false, "", true)},
+	})
+	require.NoError(t, err)
+}
+
+func TestAdvanceStep_ForeignExecution_IsSuperseded(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/advance-foreign@v1")
+	seedRunningWithID(t, ax, ns, "current")
+
+	errStr := "killed"
+	_, err := ax.Send(context.Background(), commands.AdvanceStep{
+		Namespace:   ns,
+		ExecutionID: "gone",
+		StepIndex:   0,
+		ToStatus:    domainRuntime.StepStatusFailed,
+		Error:       &errStr,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperrors.ErrExecutionSuperseded)
+	assert.True(t, isValidationErr(err))
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, domainRuntime.StepStatusPending, got.Execution.Steps[0].Status)
+	assert.Nil(t, got.Execution.Steps[0].Error)
+}
+
+func TestAdvanceStep_CurrentExecution_KeepsTheID(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/advance-keeps-id@v1")
+	seedRunningWithID(t, ax, ns, "current")
+
+	_, err := ax.Send(context.Background(), commands.AdvanceStep{
+		Namespace:   ns,
+		ExecutionID: "current",
+		StepIndex:   0,
+		ToStatus:    domainRuntime.StepStatusRunning,
+	})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, "current", got.Execution.ID, "the execution id must survive AdvanceStep")
+}
+
+func TestAdvanceStep_IndexOutsideTheExecution_Fails(t *testing.T) {
+	testCases := []struct {
+		name  string
+		index int
+	}{
+		{name: "past the last step", index: 1},
+		{name: "negative", index: -1},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ax := buildAsynx(t)
+			ns := domain.Namespace("github.com/user/advance-bounds@v1")
+			seedRunningWithID(t, ax, ns, "current")
+
+			_, err := ax.Send(context.Background(), commands.AdvanceStep{
+				Namespace:   ns,
+				ExecutionID: "current",
+				StepIndex:   tc.index,
+				ToStatus:    domainRuntime.StepStatusRunning,
+			})
+			require.Error(t, err)
+			assert.True(t, isValidationErr(err))
+		})
+	}
+}
+
+func TestRecordPID_ForeignExecution_IsSuperseded(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/pid-foreign@v1")
+	seedRunningWithID(t, ax, ns, "current")
+
+	_, err := ax.Send(context.Background(), commands.RecordPID{
+		Namespace:   ns,
+		ExecutionID: "gone",
+		PID:         4242,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperrors.ErrExecutionSuperseded)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, 0, got.Execution.PID)
+}
+
+func TestEndExecution_ForeignExecution_IsSuperseded(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/end-foreign@v1")
+	seedRunningWithID(t, ax, ns, "current")
+
+	_, err := ax.Send(context.Background(), commands.EndExecution{
+		Namespace:   ns,
+		ExecutionID: "gone",
+		Outcome:     domainRuntime.ExecutionOutcomeSuccess,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperrors.ErrExecutionSuperseded)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	require.NotNil(t, got.Execution, "a foreign end must not clear the current execution")
+	assert.Equal(t, domain.ArrowStateInstalling, got.State)
+}
+
+func TestEndExecution_NoRuntime_IsNotSuperseded(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/end-missing@v1")
+
+	_, err := ax.Send(context.Background(), commands.EndExecution{
+		Namespace:   ns,
+		ExecutionID: "current",
+		Outcome:     domainRuntime.ExecutionOutcomeSuccess,
+	})
+	require.Error(t, err)
+	assert.True(t, isValidationErr(err))
+	assert.NotErrorIs(t, err, apperrors.ErrExecutionSuperseded)
+}
+
+func TestBeginCommands_CarryTheExecutionID(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/begin-ids@v1")
+
+	_, err := ax.Send(context.Background(), commands.BeginInstall{Namespace: ns, ExecutionID: "install"})
+	require.NoError(t, err)
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, "install", got.Execution.ID)
+
+	_, err = ax.Send(context.Background(), commands.EndExecution{
+		Namespace:   ns,
+		ExecutionID: "install",
+		Outcome:     domainRuntime.ExecutionOutcomeSuccess,
+	})
+	require.NoError(t, err)
+
+	_, err = ax.Send(context.Background(), commands.BeginExecution{
+		Namespace:   ns,
+		ExecutionID: "run",
+		Method:      domain.MethodExecute,
+	})
+	require.NoError(t, err)
+	got, err = ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, "run", got.Execution.ID)
+
+	_, err = ax.Send(context.Background(), commands.BeginStop{Namespace: ns, ExecutionID: "stop"})
+	require.NoError(t, err)
+	got, err = ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	assert.Equal(t, "stop", got.Execution.ID)
+}
+
+func TestBeginUninstallAndUpdate_CarryTheExecutionID(t *testing.T) {
+	ax := buildAsynx(t)
+	nsUninstall := domain.Namespace("github.com/user/begin-uninstall-id@v1")
+	seedReadyRuntime(t, ax, nsUninstall)
+
+	_, err := ax.Send(context.Background(), commands.BeginUninstall{
+		Namespace:   nsUninstall,
+		ExecutionID: "uninstall",
+	})
+	require.NoError(t, err)
+	got, err := ax.Get(context.Background(), nsUninstall.String())
+	require.NoError(t, err)
+	assert.Equal(t, "uninstall", got.Execution.ID)
+
+	nsUpdate := domain.Namespace("github.com/user/begin-update-id@v1")
+	seedReadyRuntime(t, ax, nsUpdate)
+
+	_, err = ax.Send(context.Background(), commands.BeginUpdate{
+		Namespace:   nsUpdate,
+		ExecutionID: "update",
+	})
+	require.NoError(t, err)
+	got, err = ax.Get(context.Background(), nsUpdate.String())
+	require.NoError(t, err)
+	assert.Equal(t, "update", got.Execution.ID)
+}
+
+// ─── Begin* guards ───────────────────────────────────────────────────────────
+
+func TestBeginExecution_NoRuntime_Fails(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/exec-missing@v1")
+
+	_, err := ax.Send(context.Background(), commands.BeginExecution{
+		Namespace: ns,
+		Method:    domain.MethodExecute,
+	})
+	require.Error(t, err)
+	assert.True(t, isValidationErr(err))
+}
+
+func TestBeginExecution_NoAvailableIn_RequiresReady(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/exec-not-ready@v1")
+	seedRuntime(t, ax, ns, nil)
+	_, err := ax.Send(context.Background(), commands.EndExecution{
+		Namespace: ns,
+		Outcome:   domainRuntime.ExecutionOutcomeFailed,
+	})
+	require.NoError(t, err)
+
+	_, err = ax.Send(context.Background(), commands.BeginExecution{
+		Namespace: ns,
+		Method:    domain.MethodExecute,
+	})
+	require.Error(t, err)
+	assert.True(t, isValidationErr(err))
+}
+
+func TestBeginExecution_FirstEverExecution_HasNoLastReturn(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/exec-first@v1")
+
+	// A brand-new aggregate: BeginExecution is rejected, so drive EmitEvent
+	// through the only command that accepts a nil current — BeginInstall — and
+	// then execute, proving preserveLastReturn survives an empty history.
+	_, err := ax.Send(context.Background(), commands.BeginInstall{Namespace: ns})
+	require.NoError(t, err)
+	_, err = ax.Send(context.Background(), commands.EndExecution{
+		Namespace: ns,
+		Outcome:   domainRuntime.ExecutionOutcomeSuccess,
+	})
+	require.NoError(t, err)
+
+	got, err := ax.Get(context.Background(), ns.String())
+	require.NoError(t, err)
+	require.NotNil(t, got.LastReturn)
+}
+
+func TestBeginInstall_WhileExecuting_Fails(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/install-busy@v1")
+	seedRuntime(t, ax, ns, nil)
+
+	_, err := ax.Send(context.Background(), commands.BeginInstall{Namespace: ns})
+	require.Error(t, err)
+	assert.True(t, isValidationErr(err))
+}
+
+func TestBeginStop_NoRuntime_Fails(t *testing.T) {
+	ax := buildAsynx(t)
+	ns := domain.Namespace("github.com/user/stop-missing@v1")
+
+	_, err := ax.Send(context.Background(), commands.BeginStop{Namespace: ns})
+	require.Error(t, err)
+	assert.True(t, isValidationErr(err))
+}
+
+func TestBeginExecution_NilCurrent_EmitsWithoutLastReturn(t *testing.T) {
+	got := commands.BeginExecution{
+		Namespace: testNs(),
+		Method:    domain.MethodExecute,
+	}.EmitEvent(nil)
+
+	assert.Nil(t, got.LastReturn)
+	assert.Equal(t, domain.ArrowStateRunning, got.State)
+}
+
+func TestBeginUninstall_ReadyWithExecution_Fails(t *testing.T) {
+	err := commands.BeginUninstall{Namespace: testNs()}.Validate(&domainRuntime.ArrowRuntime{
+		Ref:       testNs(),
+		State:     domain.ArrowStateReady,
+		Execution: &domainRuntime.Execution{ID: "busy", Method: domain.MethodExecute},
+	})
+	require.Error(t, err)
+	assert.True(t, isValidationErr(err))
+}
+
+// AdvanceStep, RecordPID and EndExecution each rebuild ArrowRuntime field by
+// field rather than copying it, so any field they forget is silently dropped on
+// the next event. PendingDepSync is only ever set while an arrow is outdated,
+// which today is a state with no live execution — so nothing reaches these
+// commands with one set, and a regression here would stay invisible until some
+// future command made that combination reachable. Pin it now instead.
+func TestCommands_EmitEvent_PreservePendingDepSync(t *testing.T) {
+	const ns = domain.Namespace("github.com/org/app@v1")
+
+	pending := &domainRuntime.DepSyncInfo{
+		AddedDeps:   []domain.Namespace{"github.com/org/added@v1"},
+		RemovedDeps: []domain.Namespace{"github.com/org/removed@v1"},
+	}
+
+	newCurrent := func() *domainRuntime.ArrowRuntime {
+		return &domainRuntime.ArrowRuntime{
+			Ref:   ns,
+			State: domain.ArrowStateInstalling,
+			Execution: &domainRuntime.Execution{
+				ID:     "exec-1",
+				Method: domain.MethodInstall,
+				Steps:  []domainRuntime.StepProgress{{Status: domainRuntime.StepStatusRunning}},
+			},
+			PendingDepSync: pending,
+		}
+	}
+
+	testCases := []struct {
+		name string
+		cmd  interface {
+			EmitEvent(*domainRuntime.ArrowRuntime) domainRuntime.ArrowRuntime
+		}
+	}{
+		{
+			name: "AdvanceStep",
+			cmd: commands.AdvanceStep{
+				Namespace:   ns,
+				ExecutionID: "exec-1",
+				StepIndex:   0,
+				ToStatus:    domainRuntime.StepStatusCompleted,
+			},
+		},
+		{
+			name: "RecordPID",
+			cmd:  commands.RecordPID{Namespace: ns, ExecutionID: "exec-1", PID: 4242},
+		},
+		{
+			name: "EndExecution",
+			cmd: commands.EndExecution{
+				Namespace:   ns,
+				ExecutionID: "exec-1",
+				Outcome:     domainRuntime.ExecutionOutcomeSuccess,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.cmd.EmitEvent(newCurrent())
+			assert.Equal(t, pending, got.PendingDepSync,
+				"%s must carry PendingDepSync through rather than dropping it", tc.name)
+		})
+	}
 }

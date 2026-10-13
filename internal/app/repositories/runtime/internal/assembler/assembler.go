@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/char2cs/asynx"
 	asynxModels "github.com/char2cs/asynx/models"
@@ -21,6 +20,9 @@ import (
 // GetArrowFn is re-exported so runtime.go can use the type without importing assemblerinternal.
 type GetArrowFn = assemblerinternal.GetArrowFn
 
+// SocketProvider is re-exported for the same reason as GetArrowFn.
+type SocketProvider = assemblerinternal.SocketProvider
+
 // ResolvedExecution carries everything needed to begin an execution.
 type ResolvedExecution struct {
 	Steps       []domainStep.Step
@@ -36,30 +38,51 @@ type Assembler interface {
 		ns domain.Namespace,
 		method string,
 		userVars map[string]string,
+		opts ...AssembleOption,
 	) (ResolvedExecution, error)
 }
 
+// AssembleOption adjusts a single Assemble call.
+type AssembleOption func(*assembleOptions)
+
+type assembleOptions struct {
+	targetRef string
+}
+
+// WithTargetRef sets ${REF} to the ref an update is moving to, overriding the installed one.
+func WithTargetRef(ref string) AssembleOption {
+	return func(o *assembleOptions) {
+		o.targetRef = ref
+	}
+}
+
 type assemblerService struct {
-	getArrow  GetArrowFn
-	axRuntime asynx.Asynx[domainRuntime.ArrowRuntime]
-	vault     vault.Vault
-	netbridge netbridge.Netbridge
-	os        domain.OS
+	getArrow    GetArrowFn
+	getDepArrow GetArrowFn
+	axRuntime   asynx.Asynx[domainRuntime.ArrowRuntime]
+	vault       vault.Vault
+	netbridge   netbridge.Netbridge
+	surfaces    assemblerinternal.SocketProvider
+	os          domain.OS
 }
 
 func New(
 	getArrow GetArrowFn,
+	getDepArrow GetArrowFn,
 	axRuntime asynx.Asynx[domainRuntime.ArrowRuntime],
 	v vault.Vault,
 	nb netbridge.Netbridge,
+	surfaces assemblerinternal.SocketProvider,
 	os domain.OS,
 ) Assembler {
 	return &assemblerService{
-		getArrow:  getArrow,
-		axRuntime: axRuntime,
-		vault:     v,
-		netbridge: nb,
-		os:        os,
+		getArrow:    getArrow,
+		getDepArrow: getDepArrow,
+		axRuntime:   axRuntime,
+		vault:       v,
+		netbridge:   nb,
+		surfaces:    surfaces,
+		os:          os,
 	}
 }
 
@@ -68,7 +91,13 @@ func (a *assemblerService) Assemble(
 	ns domain.Namespace,
 	method string,
 	userVars map[string]string,
+	opts ...AssembleOption,
 ) (ResolvedExecution, error) {
+	var o assembleOptions
+	for _, apply := range opts {
+		apply(&o)
+	}
+
 	arrow, err := a.getArrow(ctx, ns)
 	if err != nil {
 		if errors.Is(err, asynxModels.ErrNotFound) {
@@ -99,22 +128,28 @@ func (a *assemblerService) Assemble(
 		arrow,
 		target,
 		a.os,
-		a.getArrow,
+		a.getDepArrow,
 		a.axRuntime,
 		a.vault,
 		a.netbridge,
+		a.surfaces,
 		userVars,
+		// The steps this method is about to run: only the variables THEY
+		// expand are required of the caller.
+		steps,
 	)
 	if err != nil {
 		return ResolvedExecution{}, err
+	}
+	if o.targetRef != "" {
+		vars[domain.VarRef] = o.targetRef
 	}
 
 	var workDir string
 	if a.vault != nil {
 		workDir, err = a.vault.WorkDir(ctx, ns)
 		if err != nil {
-			slog.WarnContext(ctx, "assembler: workdir unavailable", "ns", ns, "err", err)
-			// non-fatal: execution proceeds without a WorkDir
+			return ResolvedExecution{}, assemblerinternal.WorkDirError(ns, err)
 		}
 	}
 

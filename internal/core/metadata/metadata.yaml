@@ -29,21 +29,57 @@ metadata:
 paths:
   home:
     default: "~/.quiver"
-    windows: 'C:\Users\{{USER}}\Documents\.quiver'
+    windows: '{{PROFILE}}\Documents\.quiver'
   events: "{{home}}/state/events"
   store: "{{home}}/state/store"
   namespaces: "{{home}}/namespaces"
   config: "{{home}}/config.yaml"
   logs: "{{home}}/logs"
   vault: "{{home}}/vault"
+  self: "{{home}}/self"
+  bin: "{{home}}/bin"
+  run: "{{home}}/run"
 
+# ? namespaces are quiver.core's own self-arrow identities: the module paths
+# ? it registers itself and its companion quiver.desktop GUI under in the
+# ? arrow catalog, resolved through the same namespace machinery as any other
+# ? arrow.
+namespaces:
+  core: "github.com/rabbytesoftware/quiver.core"
+  desktop: "github.com/rabbytesoftware/quiver.desktop"
+
+# ? discovery.topics are the repository markers that make a repo an arrow
+# ? candidate. It is a list so new markers can be added without a schema change.
+discovery:
+  topics:
+    - quiver-arrow
+
+# ? Every platform is a provider: kind names the host whose answers Quiver knows
+# ? how to read, and the rest of the entry is where to send it.
+# ? search_url is optional — a platform without one still serves manifests, it
+# ? just answers no query and is skipped by discovery.
 platforms:
   github.com:
+    kind: github
     raw_url: "https://raw.githubusercontent.com/{user}/{repo}/{branch}/{file}"
-    default_branch: main
+    blob_url: "https://github.com/{user}/{repo}/blob/{branch}/{file}"
+    default_branches: [main, master]
+    search_url: "https://api.github.com/search/repositories?q={query}"
+    expanded_assets_url: "https://github.com/{user}/{repo}/releases/expanded_assets/{tag}"
+    repo_page_url: "https://github.com/{user}/{repo}"
+    repo_api_url: "https://api.github.com/repos/{user}/{repo}"
+    owner_avatar_url: "https://github.com/{user}.png"
   gitlab.com:
+    kind: gitlab
     raw_url: "https://gitlab.com/{user}/{repo}/-/raw/{branch}/{file}"
-    default_branch: main
+    default_branches: [main, master]
+    search_url: "https://gitlab.com/api/v4/projects?search={query}&topic={topic}"
+    blob_url: "https://gitlab.com/{user}/{repo}/-/blob/{branch}/{file}"
+    repo_page_url: "https://gitlab.com/{user}/{repo}"
+    release_api_url: "https://gitlab.com/api/v4/projects/{user}%2F{repo}/releases/{tag}"
+    packages_api_url: "https://gitlab.com/api/v4/projects/{project}/packages"
   bitbucket.org:
+    kind: bitbucket
     raw_url: "https://bitbucket.org/{user}/{repo}/raw/{branch}/{file}"
-    default_branch: main
+    blob_url: "https://bitbucket.org/{user}/{repo}/src/{branch}/{file}"
+    default_branches: [main, master]

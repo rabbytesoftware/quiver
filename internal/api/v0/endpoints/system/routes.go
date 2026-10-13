@@ -1,1 +1,22 @@
 package system
+
+import (
+	"github.com/gin-gonic/gin"
+
+	systemhandlers "github.com/rabbytesoftware/quiver.core/internal/api/v0/endpoints/system/handlers"
+	"github.com/rabbytesoftware/quiver.core/internal/app/usecases"
+)
+
+func Register(
+	rg *gin.RouterGroup,
+	svc usecases.ConfigUsecase,
+	pathSvc usecases.PathUsecase,
+	systemSvc usecases.SystemUsecase,
+) {
+	h := systemhandlers.New(svc, pathSvc, systemSvc)
+	rg.GET("/config", h.Config)
+	rg.PATCH("/config", h.PatchConfig)
+	rg.GET("/system/path", h.PathStatus)
+	rg.POST("/system/path", h.SetupPath)
+	rg.POST("/system/shutdown", h.Shutdown)
+}

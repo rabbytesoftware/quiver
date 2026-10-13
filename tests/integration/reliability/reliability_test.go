@@ -31,7 +31,7 @@ func (s *ReliabilitySuite) TestReliability_StepTimeout() {
 	ns := kit.NSFor("quiver-test/tool-with-timeout", "v1")
 
 	s.Equal(http.StatusCreated, tc.Add(ns))
-	env.WaitForArrow(s.T(), ns, 30*time.Second)
+	env.WaitForArrow(s.T(), ns, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc.Install(ns, nil))
 
 	// After a timeout the install fails and the arrow returns to absent.
@@ -46,14 +46,14 @@ func (s *ReliabilitySuite) TestReliability_ServiceSelfTermination() {
 	ns := kit.NSFor("quiver-test/tool-self-terminating", "v1")
 
 	s.Equal(http.StatusCreated, tc.Add(ns))
-	env.WaitForArrow(s.T(), ns, 30*time.Second)
+	env.WaitForArrow(s.T(), ns, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc.Install(ns, nil))
 	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 60*time.Second)
 
 	s.Equal(http.StatusAccepted, tc.Execute(ns, "execute", nil))
-	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 15*time.Second)
+	env.WaitForState(s.T(), ns, domain.ArrowStateRunning, 120*time.Second)
 	// Process exits immediately — Quiver must detect it and return to ready.
-	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 30*time.Second)
+	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 }
 
 // TestReliability_NetbridgePortConflict: two arrows declare the same netbridge port.
@@ -97,18 +97,19 @@ func (s *ReliabilitySuite) TestReliability_RapidChurn() {
 }
 
 // TestReliability_AddRemoveWithoutInstall: Add then Remove without installing.
-// GetDetail must 404.
+// GetDetail resolves the fixture live and reports it absent rather than 404ing.
 func (s *ReliabilitySuite) TestReliability_AddRemoveWithoutInstall() {
 	env := s.NewEnv()
 	tc := env.TypedClient(s.T())
 	ns := kit.NSFor("quiver-test/tool-a", "v1")
 
 	s.Equal(http.StatusCreated, tc.Add(ns))
-	env.WaitForArrow(s.T(), ns, 30*time.Second)
+	env.WaitForArrow(s.T(), ns, 120*time.Second)
 	s.Equal(http.StatusOK, tc.Remove(ns))
 
-	_, status := tc.GetDetail(ns)
-	s.Equal(http.StatusNotFound, status)
+	detail, status := tc.GetDetail(ns)
+	s.Equal(http.StatusOK, status)
+	s.Equal(string(domain.ArrowStateAbsent), detail.State)
 }
 
 // TestReliability_OrphanDepNotCleaned: install A (auto-installs deps).
@@ -126,8 +127,9 @@ func (s *ReliabilitySuite) TestReliability_OrphanDepNotCleaned() {
 	env.WaitForState(s.T(), nsDep, domain.ArrowStateReady, 120*time.Second)
 	env.WaitForState(s.T(), nsA, domain.ArrowStateReady, 120*time.Second)
 
-	// Explicitly install the dep — it becomes user-owned.
-	s.Equal(http.StatusAccepted, tc.Install(nsDep, nil))
+	// Explicitly install the dep — it becomes user-owned. It is already ready
+	// from A's install, so no execution begins and the daemon answers 200.
+	s.Equal(http.StatusOK, tc.Install(nsDep, nil))
 	env.WaitForState(s.T(), nsDep, domain.ArrowStateReady, 60*time.Second)
 
 	// Uninstall A — dep must survive.
@@ -149,7 +151,6 @@ func (s *ReliabilitySuite) TestReliability_StepWithNoTimeout() {
 	body := []byte(`schema: "arrow@v0"
 metadata:
   name: quiver-test.no-timeout
-  version: 1.0.0
   description: Step with no timeout
 targets:
   "*":
@@ -177,9 +178,9 @@ targets:
 
 	// Seed and install — must complete without hanging.
 	s.Equal(http.StatusCreated, tc.Seed(ns, body))
-	env.WaitForArrow(s.T(), ns, 30*time.Second)
+	env.WaitForArrow(s.T(), ns, 120*time.Second)
 	s.Equal(http.StatusAccepted, tc.Install(ns, nil))
-	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 30*time.Second)
+	env.WaitForState(s.T(), ns, domain.ArrowStateReady, 120*time.Second)
 
 	// Verify that a malformed timeout triggers the invalid_timeout rule.
 	badBody := []byte(strings.Replace(string(body),

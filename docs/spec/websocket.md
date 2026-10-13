@@ -49,6 +49,8 @@ The `{namespace}` placeholder in all endpoint definitions below refers to the **
 | `ws://host/v0/runtime/{namespace}` | `ArrowRuntimeDTO` | Single arrow (or glob) — runtime/execution events |
 | `ws://host/v0/collection` | `collectionEventDTO` | All collections — follow/unfollow events |
 | `ws://host/v0/collection/{namespace}` | `collectionEventDTO` | Single collection (or glob) — follow/unfollow events |
+| `ws://host/v0/search/discover/{job}` | `SearchResultDTO` | One discovery job — verified search results |
+| `ws://host/v0/console/logs` | log frames | The daemon's own log records — see [console.md](console.md) |
 
 Every arrow and collection message carries an `event` field (`"upserted"` or `"removed"`) so clients can act without re-fetching. Runtime messages carry no `event` field — the `state` field already communicates what happened.
 
@@ -58,18 +60,25 @@ The Arrow channel additionally honours a `user_installed` query filter (see § 4
 
 ### 3.1 Arrow Channel — `/v0/arrow` and `/v0/arrow/{namespace}`
 
-Pushes an `ArrowDTO` whenever the catalog mutates: an arrow is added, updated, upgraded, marked installed, or forgotten. Routes are registered in `internal/api/v0/endpoints/arrows/routes.go` via the `dispatch` helper, which forwards to the WS broadcaster when the request carries `Upgrade: websocket`.
+Pushes an `ArrowDTO` whenever the catalog mutates: an arrow is added, advanced to a new version, has its manifest refreshed, is marked installed or uninstalled, has a version check recorded, is promoted to user-installed, is used, or is forgotten. Routes are registered in `internal/api/v0/endpoints/arrows/routes.go` via the `dispatch` helper, which forwards to the WS broadcaster when the request carries `Upgrade: websocket`.
 
-**Triggers:** `arrow.added.*`, `arrow.upgraded.*`, `arrow.updated.*`, `arrow.installed.*`, plus the asynx `OnForget` hook when an arrow is deleted.
+**Triggers:** `arrow.added.*`, `arrow.advanced.*`, `arrow.manifest_refreshed.*`, `arrow.installed.*`, `arrow.uninstalled.*`, `arrow.available_checked.*`, `arrow.user_installed.*`, `arrow.last_used.*`, plus the asynx `OnForget` hook when an arrow is deleted.
+
+It also pushes an `upserted` frame with `user_installed: false` when a cached manifest that had expired is served and then refreshed from its host in the background, or when a view of a refless namespace answered from the vault is re-checked behind the answer and the namespace now stands at another commit, for an arrow that has no catalog row. The frame is the signal to re-read `GET /v0/arrow/{ns}` and any collection that lists it.
+
+The payload carries no version or row state: a client that needs `resolved_ref` or `available` re-reads `GET /v0/arrow/{ns}`.
 
 ```json
-// upserted (add, update, upgrade, or install)
-{ "event": "upserted", "namespace": "github.com/char2cs/gaming.collection/cs2",
-  "name": "CS2 Server", "version": "0.0.1", "description": "...", "tags": ["fps"], "user_installed": true }
+// upserted (add, advance, refresh, install, version check, ...)
+{ "event": "upserted", "namespace": "github.com/char2cs/gaming.collection/cs2@v1.0.0",
+  "name": "CS2 Server", "description": "...", "tags": ["fps"],
+  "media": { "icon": "", "banner": "" }, "user_installed": true,
+  "last_used_at": "2026-08-01T09:30:00Z" }
 
 // removed (OnForget)
-{ "event": "removed", "namespace": "github.com/char2cs/gaming.collection/cs2",
-  "name": "", "version": "", "description": "", "tags": null, "user_installed": false }
+{ "event": "removed", "namespace": "github.com/char2cs/gaming.collection/cs2@v1.0.0",
+  "name": "", "description": "", "tags": null,
+  "media": { "icon": "", "banner": "" }, "user_installed": false }
 ```
 
 #### `user_installed` filter
@@ -126,6 +135,24 @@ The DTO is intentionally minimal in v0 — `media`, `arrows`, `maintainers`, and
 
 ---
 
+### 3.4 Discovery Channel — `/v0/search/discover/{job}`
+
+Streams the verified results of one discovery pass (`POST /v0/search/discover` returns the job id). The same path without an `Upgrade` header is the job summary (counts, per-provider failures). The stream carries exactly one payload type, `SearchResultDTO`, the same shape `GET /v0/search` returns.
+
+**Identity.** A client merges streamed frames and `GET /v0/search` rows by `namespace` alone, which is always the bare namespace (no `@ref`). Everything else on a frame — `installed`, `provenance`, `versions`, `stars` — describes what that source knew and may differ between the two; the re-query is the authoritative row.
+
+**Replay.** The job buffers every result it emits. A subscriber that connects after the pass began, or reconnects, first receives the buffered results in emission order, then live ones, with no duplicate and no gap. A job stays replayable until it is evicted (30 seconds after it finishes); a subscriber to an evicted or unknown job receives nothing and is closed immediately.
+
+**Terminal signal.** When the pass finishes, the server flushes every queued frame and closes the socket with close code `1000` and reason `completed`. That close frame is the end-of-stream marker, so no second payload type is needed. Any other close (or none) means the stream was interrupted: reconnect to be replayed. The job summary is readable once the socket has closed.
+
+**Filters.** `os` (e.g. `?os=linux/amd64`) keeps only results whose compiled targets include that platform. This is the same rule `GET /v0/search?os=` applies to the vault lane, and it applies to replayed frames too. Pass the same value to both so the stream and the re-query cover the same set. An unknown platform value selects nothing here (the REST endpoint answers 400).
+
+**Backpressure.** Each subscriber has a 64-frame send buffer. Results are delivered once and cannot be recovered from the wire, so a subscriber that lets the buffer fill is disconnected with close code `1013` (`slow consumer`) instead of silently losing frames; reconnecting replays what it missed. (Replay itself waits for buffer space, so a backlog longer than the buffer is delivered whole.)
+
+**Lifetime.** The pass keeps running while at least one subscriber is attached. After the last subscriber disconnects it is cancelled following a 5-second grace, which lets a dropped client reconnect and resume. A pass that never had a subscriber runs to completion.
+
+---
+
 ## 4. DTO Definitions
 
 DTOs are produced by the `From()` mappers in `internal/api/v0/dto/`. The same DTOs are reused by REST list/detail endpoints where applicable — but the WS variants are the bare aggregate views and do not include the cross-aggregate fields some REST detail responses synthesise.
@@ -139,14 +166,14 @@ Every arrow channel message is an `arrowEventDTO` — a single struct that wraps
 | Event | `event` | `string` | `"upserted"` or `"removed"`. |
 | Namespace | `namespace` | `string` | Decoded namespace (e.g. `github.com/user/repo`). Always populated. |
 | Name | `name` | `string` | From `ArrowMeta.Name`. Empty on `"removed"`. |
-| Version | `version` | `string` | From `ArrowMeta.Version`. Empty on `"removed"`. |
 | Description | `description` | `string` | From `ArrowMeta.Description`. Empty on `"removed"`. |
 | Tags | `tags` | `string[]` | From `ArrowMeta.Tags`. Null on `"removed"`. |
 | UserInstalled | `user_installed` | `bool` | True for user-intent arrows; false for deps or on `"removed"`. |
+| LastUsedAt | `last_used_at` | `string` | RFC3339 timestamp, omitted while the arrow has never completed an `_execute` run. Empty on `"removed"`. |
 
 Clients should branch on `event` first. For `"upserted"`, upsert the payload into the local store. For `"removed"`, remove the entry by `namespace`. The non-namespace fields on a `"removed"` message carry no meaning.
 
-`license`, `url`, `maintainers`, `credits`, `requirements`, `dependencies`, `variables`, `netbridge`, `targets`, `installed_at`, etc. are **not** projected onto the WS DTO. Clients needing those fields call REST.
+`license`, `url`, `maintainers`, `credits`, `requirements`, `dependencies`, `variables`, `netbridge`, `targets`, `installed_at`, etc. are **not** projected onto the WS DTO. `last_used_at` is the one timestamp exception, so desktop clients can show recency without a REST round trip. Clients needing the rest of those fields call REST.
 
 ### 4.2 `ArrowRuntimeDTO`
 
@@ -157,6 +184,8 @@ Clients should branch on `event` first. For `"upserted"`, upsert the payload int
 | ActiveRun | `active_run` | `RunRecordDTO \| null` | `omitempty` — `null` when no execution is in progress. |
 | LastReturn | `last_return` | `ReturnDTO \| null` | `omitempty` — `null` when no execution has completed yet. |
 
+`settling` (an update that has not committed yet) is a REST-only field of `GET /v0/runtime[/{ns}]`: WebSocket events do not carry it, so idle decisions must use the REST runtime read ([http-api.md](http-api.md)).
+
 **`RunRecordDTO`** (active execution):
 
 | Field | JSON | Type | Notes |
@@ -165,11 +194,13 @@ Clients should branch on `event` first. For `"upserted"`, upsert the payload int
 | PID | `pid` | `int` | `omitempty` — set after `runtime.pid_recorded`. |
 | Variables | `variables` | `map[string]string` | `omitempty` — resolved variables for this run. |
 | Steps | `steps` | `StepProgressDTO[]` | `omitempty` — current step progress. |
+| Surface | `surface` | `SurfaceDTO \| null` | `omitempty`, `{mode, path, ready}` of the interface the run opened; the served directory is never exposed. See [surface.md](surface.md). |
 
 **`ReturnDTO`** (last completed execution):
 
 | Field | JSON | Type | Notes |
 |---|---|---|---|
+| ExecutionID | `execution_id` | `string` | `omitempty` — the run this return ended. Two returns of one method are the same run exactly when their IDs match; empty for a return recorded before returns carried one. A client waiting for the run it just started compares against the return it read before starting it. |
 | Method | `method` | `string` | Method that completed. |
 | Outcome | `outcome` | `string` | `success`, `failed`, `cancelled`. |
 | Variables | `variables` | `map[string]string` | `omitempty`. |
@@ -204,19 +235,20 @@ The underlying Go type wrapping the WS payload is named `collectionEventDTO` (em
 
 ## 5. Event-to-Push Mapping
 
-The mapping is implemented in two places: arrow catalog projections in `internal/app/repositories/arrow/internal/store/internal/projections/projections.go`, and runtime + collection projections in `internal/app/repositories/container.go`'s `RegisterHubProjections`.
+The mapping is implemented in two places: the arrow repository's own subscribers (`registerProjections` in `internal/app/repositories/arrow/arrow.go`), and runtime + collection projections in `internal/app/repositories/container.go`'s `RegisterHubProjections`.
 
 ### Arrow catalog feed — `Asynx[Arrow]`
 
 | Event topic | Where wired | Push | `event` field |
 |---|---|---|---|
 | `arrow.added.*` | catalog projection | `arrowEventDTO` | `"upserted"` |
-| `arrow.upgraded.*` | catalog projection | `arrowEventDTO` | `"upserted"` |
-| `arrow.updated.*` | catalog projection | `arrowEventDTO` | `"upserted"` |
-| `arrow.installed.*` | catalog projection | `arrowEventDTO` | `"upserted"` |
+| `arrow.advanced.*` | catalog projection | `arrowEventDTO` | `"upserted"` |
+| `arrow.manifest_refreshed.*` | catalog projection | `arrowEventDTO` | `"upserted"` |
+| `arrow.installed.*`, `arrow.uninstalled.*` | catalog projection | `arrowEventDTO` | `"upserted"` |
+| `arrow.available_checked.*`, `arrow.user_installed.*`, `arrow.last_used.*` | catalog projection | `arrowEventDTO` | `"upserted"` |
 | `OnForget(Arrow)` | catalog projection | `arrowEventDTO` | `"removed"` |
 
-The broadcast is gated on storage projection success — if `aggregateAndSave` fails, no broadcast fires.
+The broadcast is gated on the read-model write — if it fails, no broadcast fires.
 
 ### Runtime feed — `Asynx[ArrowRuntime]`
 
@@ -353,14 +385,16 @@ The Arrow broadcaster is `Broadcaster[apphub.ArrowEvent]` and the Collection bro
 
 ### 7.3 Slow-consumer policy
 
-Each client has a `send chan []byte` of capacity 64. `Push` performs a non-blocking send:
+Each client has a `send chan []byte` of capacity 64. `Push` performs a non-blocking send, and what a full buffer does is set per stream by `StreamDef.Overflow`:
 
-| Channel state | Outcome |
-|---|---|
-| Buffer space available | Frame queued for `writePump`. |
-| Buffer full | `default` branch fires — frame **dropped silently**. |
+| Channel state | `OverflowDrop` (arrow, runtime, collection) | `OverflowDisconnect` (discovery) |
+|---|---|---|
+| Buffer space available | Frame queued for `writePump`. | Frame queued for `writePump`. |
+| Buffer full | Frame dropped and logged at warn level. | Client closed with `1013`; reconnect replays. |
 
-This means a slow client that fills its 64-frame buffer simply misses subsequent pushes until `writePump` drains the channel. The broadcaster never blocks on a slow client. Clients that need authoritative state must reconcile via REST after detecting gaps.
+The broadcaster never blocks on a slow client. Drop suits streams whose next event supersedes the lost one and whose clients reconcile via REST. Disconnect suits streams that carry each item once and can replay.
+
+`StreamDef` also carries three optional hooks for such streams: `Replay(key)` (what the key already emitted), `Seq(event)` (per-key ordering, used to stitch replay to live frames) and `Done(key)` (a channel that, once closed, flushes the subscriber and closes with `1000`).
 
 ### 7.4 Mid-connection lifecycle
 

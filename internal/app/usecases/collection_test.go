@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
 	ucmocks "github.com/rabbytesoftware/quiver.core/internal/app/usecases/mocks"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/ruleset"
@@ -29,6 +33,7 @@ type mockQuiverRepo struct {
 	getErr             error
 	isFollowedResult   bool
 	isFollowedErr      error
+	shutdownErr        error
 }
 
 func (m *mockQuiverRepo) Follow(_ context.Context, _ domain.Namespace, _ *domain.Collection, failedArrows []domain.Namespace) error {
@@ -53,6 +58,10 @@ func (m *mockQuiverRepo) IsFollowed(_ context.Context, _ domain.Namespace) (bool
 	return m.isFollowedResult, m.isFollowedErr
 }
 
+func (m *mockQuiverRepo) Shutdown(_ context.Context) error {
+	return m.shutdownErr
+}
+
 func (m *mockQuiverRepo) OnCollectionFollowed(_ func(context.Context, domain.Collection)) error {
 	return nil
 }
@@ -64,19 +73,15 @@ func (m *mockQuiverRepo) OnCollectionUnfollowed(_ func(context.Context, domain.N
 // --- arrow cache mock ---
 
 type mockArrowCache struct {
-	seedErr       error
-	seedCalls     int
+	mu            sync.Mutex
 	resolveErr    error
 	resolveCalls  int
 	resolveResult *domain.Arrow
 }
 
-func (m *mockArrowCache) Seed(_ context.Context, _ domain.Namespace, _ []byte) error {
-	m.seedCalls++
-	return m.seedErr
-}
-
 func (m *mockArrowCache) ResolveManifest(_ context.Context, _ domain.Namespace) (*domain.Arrow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.resolveCalls++
 	return m.resolveResult, m.resolveErr
 }
@@ -194,14 +199,13 @@ func TestFollow_AutoRetry_RetriesBeforeFailure(t *testing.T) {
 // --- Get ---
 
 func TestGet_EnrichesArrows_WithArrowManifests(t *testing.T) {
-	ns1 := domain.Namespace("github.com/user/arrow1")
-	ns2 := domain.Namespace("github.com/user/arrow2")
+	ns1 := domain.Namespace("github.com/user/arrow1@v1.2.3")
+	ns2 := domain.Namespace("github.com/user/arrow2@v0.1.0")
 
 	repo := &mockQuiverRepo{
 		getResult: &domain.Collection{
 			Meta: domain.CollectionMeta{
-				Name:    "My Quiver",
-				Version: "1.0.0",
+				Name: "My Quiver",
 			},
 			Arrows: []domain.CollectionArrow{
 				{Namespace: ns1, IsLocal: false},
@@ -214,8 +218,8 @@ func TestGet_EnrichesArrows_WithArrowManifests(t *testing.T) {
 		resolveResult: &domain.Arrow{
 			ArrowMeta: domain.ArrowMeta{
 				Name:        "test-arrow",
-				Version:     "1.2.3",
 				Description: "A test arrow",
+				Media:       domain.ArrowMedia{Icon: "https://example.com/icon.svg", Banner: "https://example.com/banner.png"},
 			},
 		},
 	}
@@ -230,8 +234,12 @@ func TestGet_EnrichesArrows_WithArrowManifests(t *testing.T) {
 	assert.Len(t, dto.Arrows, 2)
 	assert.True(t, dto.Arrows[0].Resolved)
 	assert.Equal(t, "test-arrow", dto.Arrows[0].Name)
-	assert.Equal(t, "1.2.3", dto.Arrows[0].Version)
+	assert.Equal(t, "https://example.com/icon.svg", dto.Arrows[0].Media.Icon)
+	assert.Equal(t, "https://example.com/banner.png", dto.Arrows[0].Media.Banner)
+	assert.Equal(t, ns1, dto.Arrows[0].Namespace, "the ref a collection pins a member at reaches the client on the member's namespace, not beside it")
+	assert.Equal(t, "v1.2.3", dto.Arrows[0].Namespace.Ref())
 	assert.True(t, dto.Arrows[1].Resolved)
+	assert.Equal(t, ns2, dto.Arrows[1].Namespace)
 }
 
 func TestGet_EnrichmentFailure_ReturnsResolvedFalse(t *testing.T) {
@@ -368,6 +376,8 @@ func TestSeed_ParseError_ReturnsError(t *testing.T) {
 
 	err := uc.Seed(context.Background(), "github.com/user/q1", []byte("data"))
 	assert.Error(t, err)
+	// A manifest the parser rejects is a bad request, not a server fault.
+	assert.ErrorIs(t, err, apperrors.ErrInvalidManifest)
 	assert.Equal(t, 0, v.PutCollectionCalls)
 }
 
@@ -385,7 +395,7 @@ func TestSeed_PutCollectionError_ReturnsError(t *testing.T) {
 
 func TestGetManifest_ReturnsJSONEncodedManifest(t *testing.T) {
 	repo := &mockQuiverRepo{
-		getResult: &domain.Collection{Meta: domain.CollectionMeta{Name: "my-quiver", Version: "1.0.0"}},
+		getResult: &domain.Collection{Meta: domain.CollectionMeta{Name: "my-quiver"}},
 	}
 	uc := newTestUsecase(repo, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
 
@@ -521,44 +531,173 @@ func TestGet_Enrichment_UsesResolveManifest(t *testing.T) {
 	assert.True(t, dto.Arrows[0].Resolved)
 }
 
-func TestFollow_LocalArrow_CallsSeed(t *testing.T) {
+// A local member is warmed like any other: ResolveManifest previews through the
+// vault, and nothing adopts it into the catalog, so a follow cannot put the
+// collection's arrows in the user's library.
+func TestFollow_LocalArrow_IsResolvedNotAdopted(t *testing.T) {
 	localNS := domain.Namespace("owner/my-collection@v1/cs2")
-	rawBytes := []byte("schema: \"arrow@v0\"\n...")
 
-	var seededNS domain.Namespace
-	var seededBytes []byte
-	var resolveManifestCalled bool
-
+	var resolved []domain.Namespace
 	arrows := &ucmocks.MockArrow{
-		SeedFn: func(_ context.Context, ns domain.Namespace, data []byte) error {
-			seededNS = ns
-			seededBytes = data
+		AdoptFn: func(context.Context, domain.Namespace, domain.SelectorKind, domain.Resolved, []byte, string) error {
+			t.Error("a follow must not adopt a member into the catalog")
 			return nil
 		},
-		ResolveManifestFn: func(_ context.Context, _ domain.Namespace) (*domain.Arrow, error) {
-			resolveManifestCalled = true
-			return nil, nil
+		ResolveManifestFn: func(_ context.Context, ns domain.Namespace) (*domain.Arrow, error) {
+			resolved = append(resolved, ns)
+			return &domain.Arrow{}, nil
 		},
-	}
-	manifoldMock := &mocks.Manifold{
-		ResolveArrowResult:   &domain.Arrow{},
-		ResolveArrowRaw:      rawBytes,
-		ResolveArrowFilename: "arrow.yaml",
 	}
 	repo := &ucmocks.MockCollection{
 		GetFn: func(_ context.Context, _ domain.Namespace) (*domain.Collection, error) {
 			return &domain.Collection{
-				Arrows: []domain.CollectionArrow{
-					{Namespace: localNS, IsLocal: true},
-				},
+				Arrows: []domain.CollectionArrow{{Namespace: localNS, IsLocal: true, SourcePath: "servers/cs2"}},
 			}, nil
+		},
+		FollowFn: func(_ context.Context, _ domain.Namespace, _ *domain.Collection, failures []domain.Namespace) error {
+			assert.Empty(t, failures)
+			return nil
 		},
 	}
 
-	uc := NewCollectionUsecase(repo, arrows, manifoldMock, nil)
-	err := uc.Follow(context.Background(), "owner/my-collection@v1")
+	uc := NewCollectionUsecase(repo, arrows, &mocks.Manifold{}, nil)
+	require.NoError(t, uc.Follow(context.Background(), "owner/my-collection@v1"))
+	assert.Equal(t, []domain.Namespace{localNS}, resolved)
+}
+
+// A member that cannot be resolved joins FailedArrows and the follow still
+// completes, local or not.
+func TestFollow_LocalArrowResolveFails_RecordsFailure(t *testing.T) {
+	localNS := domain.Namespace("owner/my-collection@v1/cs2")
+	repo := &mockQuiverRepo{
+		getResult: &domain.Collection{
+			Arrows: []domain.CollectionArrow{{Namespace: localNS, IsLocal: true, SourcePath: "servers/cs2"}},
+		},
+	}
+	arrows := &mockArrowCache{resolveErr: errors.New("clone failed")}
+	uc := newTestUsecase(repo, arrows, &mocks.Manifold{}, &mocks.Vault{})
+
+	require.NoError(t, uc.Follow(context.Background(), "owner/my-collection@v1"))
+	assert.Equal(t, []domain.Namespace{localNS}, repo.followFailedArrows)
+}
+
+// --- not-found and dependency-failure paths ---
+
+func TestFollow_RepoGetFails_ReturnsError(t *testing.T) {
+	repo := &mockQuiverRepo{getErr: errors.New("vault error")}
+	uc := newTestUsecase(repo, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
+
+	err := uc.Follow(context.Background(), "github.com/user/quiver")
+	require.Error(t, err)
+	assert.Zero(t, repo.followCalls, "a collection that could not be read must not be followed")
+}
+
+func TestFollow_UnknownCollection_ReturnsNotFound(t *testing.T) {
+	repo := &mockQuiverRepo{}
+	uc := newTestUsecase(repo, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
+
+	err := uc.Follow(context.Background(), "github.com/user/quiver")
+	assert.ErrorIs(t, err, apperrors.ErrNotFound)
+	assert.Zero(t, repo.followCalls)
+}
+
+func TestUnfollow_DelegatesToRepo(t *testing.T) {
+	uc := newTestUsecase(&mockQuiverRepo{}, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
+	require.NoError(t, uc.Unfollow(context.Background(), "github.com/user/quiver"))
+
+	wantErr := errors.New("not followed")
+	failing := newTestUsecase(&mockQuiverRepo{unfollowErr: wantErr}, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
+	assert.ErrorIs(t, failing.Unfollow(context.Background(), "github.com/user/quiver"), wantErr)
+}
+
+func TestGet_RepoGetFails_ReturnsError(t *testing.T) {
+	repo := &mockQuiverRepo{getErr: errors.New("vault error")}
+	uc := newTestUsecase(repo, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
+
+	_, err := uc.Get(context.Background(), "github.com/user/quiver")
+	require.Error(t, err)
+}
+
+func TestGet_UnknownCollection_ReturnsNotFound(t *testing.T) {
+	uc := newTestUsecase(&mockQuiverRepo{}, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
+
+	_, err := uc.Get(context.Background(), "github.com/user/quiver")
+	assert.ErrorIs(t, err, apperrors.ErrNotFound)
+}
+
+func TestList_RepoListFails_ReturnsError(t *testing.T) {
+	repo := &mockQuiverRepo{listErr: errors.New("store error")}
+	uc := newTestUsecase(repo, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
+
+	_, err := uc.List(context.Background(), nil)
+	require.Error(t, err)
+}
+
+func TestList_UnfollowedOnly_VaultListFails_ReturnsError(t *testing.T) {
+	v := &mocks.Vault{ListCachedCollectionsErr: errors.New("walk failed")}
+	uc := newTestUsecase(&mockQuiverRepo{}, &mockArrowCache{}, &mocks.Manifold{}, v)
+
+	_, err := uc.List(context.Background(), boolPtr(false))
+	require.Error(t, err)
+}
+
+// A namespace can be cached and still unreadable — a truncated envelope, or one
+// evicted between the walk and the read. Those rows are skipped, not surfaced as
+// half-populated entries and not allowed to fail the whole listing.
+func TestList_UnfollowedOnly_UnreadableCachedEntry_IsSkipped(t *testing.T) {
+	v := &mocks.Vault{
+		ListCachedCollectionsResult: []domain.Namespace{"github.com/user/broken"},
+	}
+	uc := newTestUsecase(&mockQuiverRepo{getErr: errors.New("corrupt envelope")}, &mockArrowCache{}, &mocks.Manifold{}, v)
+
+	result, err := uc.List(context.Background(), boolPtr(false))
 	require.NoError(t, err)
-	assert.Equal(t, localNS, seededNS)
-	assert.Equal(t, rawBytes, seededBytes)
-	assert.False(t, resolveManifestCalled, "ResolveManifest must not be called for local arrows")
+	assert.Empty(t, result)
+}
+
+func TestGetManifest_UnknownCollection_ReturnsNotFound(t *testing.T) {
+	uc := newTestUsecase(&mockQuiverRepo{}, &mockArrowCache{}, &mocks.Manifold{}, &mocks.Vault{})
+
+	_, err := uc.GetManifest(context.Background(), "github.com/user/quiver")
+	assert.ErrorIs(t, err, apperrors.ErrNotFound)
+}
+
+// Members resolve side by side, bounded, and come back in the collection's
+// own order whatever order they finish in.
+func TestGet_Enrichment_ResolvesMembersConcurrentlyInOrder(t *testing.T) {
+	members := make([]domain.CollectionArrow, 20)
+	for i := range members {
+		members[i] = domain.CollectionArrow{Namespace: domain.Namespace(fmt.Sprintf("owner/repo@v1/arrow-%02d", i))}
+	}
+	var inFlight, peak atomic.Int32
+	arrows := &ucmocks.MockArrow{
+		ResolveManifestFn: func(_ context.Context, ns domain.Namespace) (*domain.Arrow, error) {
+			now := inFlight.Add(1)
+			defer inFlight.Add(-1)
+			for {
+				seen := peak.Load()
+				if now <= seen || peak.CompareAndSwap(seen, now) {
+					break
+				}
+			}
+			time.Sleep(5 * time.Millisecond)
+			return &domain.Arrow{ArrowMeta: domain.ArrowMeta{Name: string(ns)}}, nil
+		},
+	}
+	repo := &ucmocks.MockCollection{
+		GetFn: func(context.Context, domain.Namespace) (*domain.Collection, error) {
+			return &domain.Collection{Arrows: members}, nil
+		},
+	}
+
+	dto, err := NewCollectionUsecase(repo, arrows, nil, nil).Get(context.Background(), "owner/my-collection@v1")
+
+	require.NoError(t, err)
+	require.Len(t, dto.Arrows, len(members))
+	for i, member := range members {
+		assert.Equal(t, member.Namespace, dto.Arrows[i].Namespace)
+		assert.Equal(t, string(member.Namespace), dto.Arrows[i].Name)
+	}
+	assert.Greater(t, peak.Load(), int32(1), "members are not resolved one after another")
+	assert.LessOrEqual(t, peak.Load(), int32(memberResolveConcurrency))
 }

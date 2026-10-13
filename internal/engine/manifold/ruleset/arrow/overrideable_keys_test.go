@@ -1,7 +1,10 @@
 package arrow
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/domain/runtime/step"
@@ -180,5 +183,57 @@ func TestOverrideableKeysRule_EmptyMap(t *testing.T) {
 	errs := rule.Validate(&domain.Arrow{}, map[string]models.PrecompiledTarget{})
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors for empty map, got: %v", errs)
+	}
+}
+
+// TestOverrideableKeysRule_Preinstalled_BareKeyRejected sweeps the sixth
+// lifecycle key into this rule too. Its phase list had the same five-key
+// omission its sibling overrideable_coverage.go did, so a malformed
+// Overrideable key in a preinstalled step was never checked at all.
+func TestOverrideableKeysRule_Preinstalled_BareKeyRejected(t *testing.T) {
+	rule := OverrideableKeysRule{}
+	run := step.RunStep{
+		Command: step.Overrideable[string]{OSArch: map[string]string{"linux": "detect"}},
+	}
+	precompiled := map[string]models.PrecompiledTarget{
+		"t": {
+			Lifecycle: domain.TargetLifecycle{
+				Preinstalled: step.StepList{run},
+			},
+		},
+	}
+	errs := rule.Validate(&domain.Arrow{}, precompiled)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error for a bare preinstalled command key, got: %v", errs)
+	}
+	if errs[0].Rule != "invalid_overrideable_key" {
+		t.Errorf("expected rule invalid_overrideable_key, got %q", errs[0].Rule)
+	}
+	if !strings.Contains(errs[0].Field, "lifecycle.preinstalled[0].command") {
+		t.Errorf("expected the field to name the preinstalled command, got %q", errs[0].Field)
+	}
+}
+
+func TestOverrideableKeysRule_Validate_FromToStepBareKey(t *testing.T) {
+	for _, kind := range fromToKinds() {
+		t.Run(kind, func(t *testing.T) {
+			built := fromToStep(
+				kind,
+				step.Overrideable[string]{OSArch: map[string]string{"darwin": "./archive"}},
+				step.Overrideable[string]{},
+				step.Overrideable[string]{},
+			)
+			precompiled := map[string]models.PrecompiledTarget{
+				"t": {
+					Lifecycle: domain.TargetLifecycle{
+						Install: step.StepList{built},
+					},
+				},
+			}
+
+			errs := OverrideableKeysRule{}.Validate(&domain.Arrow{}, precompiled)
+
+			assert.Len(t, errs, 1)
+		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/app/models/mappers"
 	arrowrepo "github.com/rabbytesoftware/quiver.core/internal/app/repositories/arrow"
 	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/graph"
+	"github.com/rabbytesoftware/quiver.core/internal/app/repositories/lifecycle"
 	runtimerepo "github.com/rabbytesoftware/quiver.core/internal/app/repositories/runtime"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 )
@@ -25,10 +26,21 @@ type ArrowUsecase interface {
 		ns domain.Namespace,
 	) error
 
+	// AdoptInstalled registers ns's identity, named as for Add, as already
+	// installed at resolvedRef, a ref its selector could resolve to. The
+	// runtime is left alone.
+	AdoptInstalled(
+		ctx context.Context,
+		ns domain.Namespace,
+		resolvedRef string,
+	) error
+
+	// Update re-resolves what is ahead of ns. A row that is not installed is
+	// advanced to it in the catalog; an installed one is left where it is,
+	// since only POST /runtime/:ns/update runs the update steps that move it.
 	Update(
 		ctx context.Context,
 		ns domain.Namespace,
-		opts models.UpdateOptions,
 	) (models.UpdateResult, error)
 
 	List(
@@ -51,11 +63,26 @@ type ArrowUsecase interface {
 		ns domain.Namespace,
 	) (*models.ArrowManifestDTO, error)
 
+	GetReadme(
+		ctx context.Context,
+		ns domain.Namespace,
+	) (string, error)
+
 	HasDependents(
 		ctx context.Context,
 		ns domain.Namespace,
 		excludeNs domain.Namespace,
 	) (bool, error)
+
+	GetDependents(
+		ctx context.Context,
+		ns domain.Namespace,
+	) ([]domain.Namespace, error)
+
+	GetDependencies(
+		ctx context.Context,
+		ns domain.Namespace,
+	) (models.Plan, error)
 
 	Seed(
 		ctx context.Context,
@@ -67,24 +94,33 @@ type ArrowUsecase interface {
 		ctx context.Context,
 		data []byte,
 	) (*models.ValidationResult, error)
+
+	ListChannels(
+		ctx context.Context,
+		ns domain.Namespace,
+	) ([]models.ChannelInfo, error)
 }
 
 type arrowUsecase struct {
-	arrow   arrowrepo.Arrow
-	graph   graph.Graph
-	runtime runtimerepo.Runtime
+	arrow     arrowrepo.Arrow
+	graph     graph.Graph
+	runtime   runtimerepo.Runtime
+	lifecycle lifecycle.Lifecycle
 }
 
-// NewArrowUsecase wires arrow, graph, and runtime repositories into an ArrowUsecase.
+// NewArrowUsecase wires arrow, graph, and runtime repositories and the
+// lifecycle into an ArrowUsecase.
 func NewArrowUsecase(
 	arrow arrowrepo.Arrow,
 	graph graph.Graph,
 	runtime runtimerepo.Runtime,
+	lc lifecycle.Lifecycle,
 ) ArrowUsecase {
 	return &arrowUsecase{
-		arrow:   arrow,
-		graph:   graph,
-		runtime: runtime,
+		arrow:     arrow,
+		graph:     graph,
+		runtime:   runtime,
+		lifecycle: lc,
 	}
 }
 
@@ -95,10 +131,23 @@ func (u *arrowUsecase) Add(
 	return u.arrow.Add(ctx, ns)
 }
 
+func (u *arrowUsecase) AdoptInstalled(
+	ctx context.Context,
+	ns domain.Namespace,
+	resolvedRef string,
+) error {
+	return u.arrow.AdoptInstalled(ctx, ns, resolvedRef)
+}
+
 func (u *arrowUsecase) Remove(
 	ctx context.Context,
 	ns domain.Namespace,
 ) error {
+	ns, err := u.arrow.ResolveCatalogued(ctx, ns)
+	if err != nil {
+		return fmt.Errorf("remove: %w", err)
+	}
+
 	state, err := u.runtime.GetState(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("remove: get state: %w", err)
@@ -122,91 +171,8 @@ func (u *arrowUsecase) Remove(
 func (u *arrowUsecase) Update(
 	ctx context.Context,
 	ns domain.Namespace,
-	opts models.UpdateOptions,
 ) (models.UpdateResult, error) {
-	if state, stateErr := u.runtime.GetState(ctx, ns); stateErr == nil && state == domain.ArrowStateRunning {
-		return models.UpdateResult{}, fmt.Errorf("update: %w", apperrors.ErrStateViolation)
-	}
-
-	current, err := u.arrow.Get(ctx, ns)
-	if err != nil {
-		return models.UpdateResult{}, fmt.Errorf("update: get current: %w", err)
-	}
-
-	if opts.UpgradeRef && current.InstalledConstraint != "" {
-		return u.upgradeRef(ctx, ns, current)
-	}
-
-	newArrow, err := u.arrow.ResolveManifest(ctx, ns)
-	if err != nil {
-		return models.UpdateResult{}, fmt.Errorf("update: fetch manifest: %w", err)
-	}
-
-	diff := u.graph.DiffDeps(current, newArrow)
-
-	if err := u.arrow.UpdateManifest(ctx, ns, newArrow); err != nil {
-		return models.UpdateResult{}, fmt.Errorf("update: apply manifest: %w", err)
-	}
-
-	hasDrift := len(diff.Added) > 0 || len(diff.Removed) > 0
-	if hasDrift {
-		state, stateErr := u.runtime.GetState(ctx, ns)
-		if stateErr == nil && state == domain.ArrowStateReady {
-			addedNs := edgesToNs(diff.Added)
-			removedNs := edgesToNs(diff.Removed)
-			_ = u.runtime.MarkOutdated(ctx, ns, addedNs, removedNs)
-		}
-	}
-
-	return models.UpdateResult{
-		AddedDeps:           edgesToNs(diff.Added),
-		RemovedFromManifest: edgesToNs(diff.Removed),
-		ConstrainedDeps:     diff.Constrained,
-	}, nil
-}
-
-func (u *arrowUsecase) upgradeRef(
-	ctx context.Context,
-	ns domain.Namespace,
-	current *domain.Arrow,
-) (models.UpdateResult, error) {
-	constraint := current.InstalledConstraint
-
-	latestRef, err := u.arrow.ResolveConstraint(ctx, ns, constraint)
-	if err != nil {
-		return models.UpdateResult{}, fmt.Errorf("upgrade ref: resolve constraint: %w", err)
-	}
-
-	newNs := ns.WithRef(latestRef)
-	if newNs.String() == ns.String() { //nolint:nestif
-		newArrow, resolveErr := u.arrow.ResolveManifest(ctx, ns)
-		if resolveErr != nil {
-			return models.UpdateResult{}, fmt.Errorf("upgrade ref: fetch manifest: %w", resolveErr)
-		}
-		diff := u.graph.DiffDeps(current, newArrow)
-		if err := u.arrow.UpdateManifest(ctx, ns, newArrow); err != nil {
-			return models.UpdateResult{}, fmt.Errorf("upgrade ref: apply manifest: %w", err)
-		}
-		return models.UpdateResult{
-			AddedDeps:           edgesToNs(diff.Added),
-			RemovedFromManifest: edgesToNs(diff.Removed),
-			ConstrainedDeps:     diff.Constrained,
-		}, nil
-	}
-
-	runtimeExists, _ := u.runtime.RuntimeExists(ctx, newNs)
-
-	newArrow, err := u.arrow.UpgradeVersion(ctx, ns, newNs, constraint, runtimeExists)
-	if err != nil {
-		return models.UpdateResult{}, fmt.Errorf("upgrade ref: upgrade version: %w", err)
-	}
-
-	diff := u.graph.DiffDeps(current, newArrow)
-	return models.UpdateResult{
-		AddedDeps:           edgesToNs(diff.Added),
-		RemovedFromManifest: edgesToNs(diff.Removed),
-		ConstrainedDeps:     diff.Constrained,
-	}, nil
+	return u.lifecycle.Recheck(ctx, ns)
 }
 
 func (u *arrowUsecase) List(
@@ -242,7 +208,13 @@ func (u *arrowUsecase) GetDetail(
 	if err != nil {
 		return nil, err
 	}
-	rt, _ := u.runtime.GetRuntime(ctx, ns)
+	// view.Metadata.Namespace, not the caller's own ns: a bare namespace (no
+	// @ref) is resolved to the tracked ref by u.arrow.GetDetail above, but
+	// the runtime repository's aggregates are keyed by the exact ref-
+	// qualified namespace string -- passing the caller's still-bare ns
+	// through looks up an aggregate that was never written, silently
+	// reading back Absent for an arrow that is genuinely installed.
+	rt, _ := u.runtime.GetRuntime(ctx, view.Metadata.Namespace)
 	if rt != nil {
 		view.State = rt.State
 		view.ActiveRun = rt.Execution
@@ -255,15 +227,25 @@ func (u *arrowUsecase) GetManifest(
 	ctx context.Context,
 	ns domain.Namespace,
 ) (*models.ArrowManifestDTO, error) {
-	if ns.Ref() != "" {
-		return nil, fmt.Errorf("get manifest: %w", apperrors.ErrInvalidNamespace)
-	}
-
 	arrow, err := u.arrow.ResolveManifest(ctx, ns)
 	if err != nil {
 		return nil, fmt.Errorf("get manifest: %w", err)
 	}
 	return mappers.ArrowManifestDTOFrom(arrow), nil
+}
+
+func (u *arrowUsecase) GetReadme(
+	ctx context.Context,
+	ns domain.Namespace,
+) (string, error) {
+	arrow, err := u.arrow.ResolveManifest(ctx, ns)
+	if err != nil {
+		return "", fmt.Errorf("get readme: %w", err)
+	}
+	if arrow.Readme == "" {
+		return "", fmt.Errorf("get readme: %w", apperrors.ErrNotFound)
+	}
+	return arrow.Readme, nil
 }
 
 func (u *arrowUsecase) HasDependents(
@@ -274,20 +256,30 @@ func (u *arrowUsecase) HasDependents(
 	return u.graph.HasDependents(ctx, ns, excludeNs)
 }
 
+func (u *arrowUsecase) GetDependents(
+	ctx context.Context,
+	ns domain.Namespace,
+) ([]domain.Namespace, error) {
+	return u.graph.GetDependents(ctx, ns)
+}
+
+func (u *arrowUsecase) GetDependencies(
+	ctx context.Context,
+	ns domain.Namespace,
+) (models.Plan, error) {
+	return u.graph.Resolve(ctx, ns)
+}
+
+// seededFilename is what a manifest posted to the seed endpoint is cached as.
+const seededFilename = "ARROW.md"
+
+// Seed registers posted manifest bytes as a pin of ns's own ref.
 func (u *arrowUsecase) Seed(
 	ctx context.Context,
 	ns domain.Namespace,
 	data []byte,
 ) error {
-	return u.arrow.Seed(ctx, ns, data)
-}
-
-func edgesToNs(edges []domain.DependencyEdge) []domain.Namespace {
-	ns := make([]domain.Namespace, 0, len(edges))
-	for _, e := range edges {
-		ns = append(ns, e.Namespace)
-	}
-	return ns
+	return u.arrow.Adopt(ctx, ns, domain.SelectorPin, domain.Resolved{Ref: ns.Ref()}, data, seededFilename)
 }
 
 func (u *arrowUsecase) ValidateManifest(
@@ -295,4 +287,11 @@ func (u *arrowUsecase) ValidateManifest(
 	data []byte,
 ) (*models.ValidationResult, error) {
 	return u.arrow.ValidateManifest(ctx, data)
+}
+
+func (u *arrowUsecase) ListChannels(
+	ctx context.Context,
+	ns domain.Namespace,
+) ([]models.ChannelInfo, error) {
+	return u.arrow.ListChannels(ctx, ns)
 }

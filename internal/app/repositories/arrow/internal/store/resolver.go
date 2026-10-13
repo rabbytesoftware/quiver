@@ -4,21 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
+	"time"
 
+	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold"
+	manifoldresolver "github.com/rabbytesoftware/quiver.core/internal/engine/manifold/resolver"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
 )
+
+const refreshTimeout = 30 * time.Second
 
 func newResolver(
 	v vault.Vault,
 	m manifold.Manifold,
+	onRefreshed func(domain.Arrow),
 ) ResolveFunc {
 	return func(
 		ctx context.Context,
 		ns domain.Namespace,
 	) (*domain.Arrow, error) {
-		return resolve(ctx, ns, v, m)
+		return resolve(ctx, ns, v, m, onRefreshed)
 	}
 }
 
@@ -27,6 +35,7 @@ func resolve(
 	ns domain.Namespace,
 	v vault.Vault,
 	m manifold.Manifold,
+	onRefreshed func(domain.Arrow),
 ) (*domain.Arrow, error) {
 	if v == nil && m == nil {
 		return nil, fmt.Errorf("resolver: no vault or manifold configured")
@@ -34,7 +43,7 @@ func resolve(
 	if v == nil {
 		return fetchFromManifold(ctx, ns, m)
 	}
-	return resolveWithVault(ctx, ns, v, m)
+	return resolveWithVault(ctx, ns, v, m, onRefreshed)
 }
 
 func resolveWithVault(
@@ -42,13 +51,17 @@ func resolveWithVault(
 	ns domain.Namespace,
 	v vault.Vault,
 	m manifold.Manifold,
+	onRefreshed func(domain.Arrow),
 ) (*domain.Arrow, error) {
 	file, err := v.GetArrow(ctx, ns)
 	if err == nil {
 		return parseManifest(m, file.Content, "cached")
 	}
+	if errors.Is(err, vault.ErrConfirmedAbsent) {
+		return nil, wrapManifoldErr("fetch from manifold (cached not-found)", manifoldresolver.ErrNotFound)
+	}
 	if errors.Is(err, vault.ErrStale) {
-		return resolveStale(ctx, ns, v, m, file.Content)
+		return resolveStale(ctx, ns, v, m, onRefreshed, file.Content)
 	}
 	if errors.Is(err, vault.ErrNotCached) {
 		return fetchAndCache(ctx, ns, v, m)
@@ -61,21 +74,46 @@ func resolveStale(
 	ns domain.Namespace,
 	v vault.Vault,
 	m manifold.Manifold,
+	onRefreshed func(domain.Arrow),
 	staleContent []byte,
 ) (*domain.Arrow, error) {
 	if m == nil {
 		return nil, fmt.Errorf("resolver: stale and no manifold configured")
 	}
 
-	fresh, rawBytes, filename, err := m.ResolveArrow(ctx, ns)
+	stale, err := parseManifest(m, staleContent, "stale")
 	if err != nil {
-		return parseManifest(m, staleContent, "stale")
+		return fetchAndCache(ctx, ns, v, m)
 	}
 
-	if putErr := v.PutArrow(ctx, ns, vault.ManifestFile{Content: rawBytes, Filename: filename}); putErr != nil {
-		return nil, fmt.Errorf("resolver: store refreshed manifest: %w", putErr)
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
+	go func() {
+		defer cancel()
+		refreshArrow(refreshCtx, ns, v, m, onRefreshed)
+	}()
+	return stale, nil
+}
+
+func refreshArrow(
+	ctx context.Context,
+	ns domain.Namespace,
+	v vault.Vault,
+	m manifold.Manifold,
+	onRefreshed func(domain.Arrow),
+) {
+	fresh, rawBytes, filename, err := resolveAt(ctx, m, ns)
+	if err != nil {
+		slog.WarnContext(ctx, "resolver: refresh cached manifest", "ns", ns, "err", err)
+		return
 	}
-	return fresh, nil
+	if err := v.PutArrow(ctx, ns, Cacheable(fresh, rawBytes, filename)); err != nil {
+		slog.WarnContext(ctx, "resolver: store refreshed manifest", "ns", ns, "err", err)
+		return
+	}
+	if onRefreshed != nil {
+		fresh.Namespace = ns
+		onRefreshed(*fresh)
+	}
 }
 
 func fetchAndCache(
@@ -88,15 +126,69 @@ func fetchAndCache(
 		return nil, fmt.Errorf("resolver: not cached and no manifold configured")
 	}
 
-	fresh, rawBytes, filename, err := m.ResolveArrow(ctx, ns)
+	fresh, rawBytes, filename, err := resolveAt(ctx, m, ns)
 	if err != nil {
-		return nil, fmt.Errorf("resolver: fetch from manifold: %w", err)
+		cacheConfirmedAbsent(ctx, ns, v, err)
+		return nil, wrapManifoldErr("fetch from manifold", err)
 	}
 
-	if putErr := v.PutArrow(ctx, ns, vault.ManifestFile{Content: rawBytes, Filename: filename}); putErr != nil {
-		return nil, fmt.Errorf("resolver: store manifest: %w", putErr)
+	if putErr := v.PutArrow(ctx, ns, Cacheable(fresh, rawBytes, filename)); putErr != nil {
+		return nil, fmt.Errorf("resolver: store manifest: %w", CacheError(putErr))
 	}
 	return fresh, nil
+}
+
+// cacheConfirmedAbsent records a negative result in the vault so a
+// namespace with no manifest at all — an old tag cut before the manifest
+// convention existed, say — is not re-cloned and re-fetched on every
+// single request. Scoped deliberately narrow: only a genuine
+// manifoldresolver.ErrNotFound (the fetch reached the repository and
+// inspected its tree) counts as confirmed absent. Any other failure
+// (network blip, auth failure, timeout) must never be cached this way —
+// doing so would silently convert a transient outage into a false
+// "not found" for a full TTL. A failure to write the marker itself only
+// costs the next request the same live re-check, so it is logged rather
+// than propagated: it must never turn a definitive not-found answer into a
+// different kind of error.
+func cacheConfirmedAbsent(
+	ctx context.Context,
+	ns domain.Namespace,
+	v vault.Vault,
+	fetchErr error,
+) {
+	if !errors.Is(fetchErr, manifoldresolver.ErrNotFound) {
+		return
+	}
+	if err := v.PutArrowNotFound(ctx, ns, ""); err != nil {
+		slog.WarnContext(ctx, "resolver: cache confirmed-absent result", "ns", ns, "err", err)
+	}
+}
+
+// Cacheable pairs the raw manifest with the searchable metadata the vault
+// cannot derive itself. Stars, Source and Branch stay zero — those belong to
+// discovery, not to manifest resolution.
+//
+// Every path that caches a manifest goes through it, because a manifest cached
+// without this metadata is invisible to the vault lane of search.
+func Cacheable(
+	arrow *domain.Arrow,
+	rawBytes []byte,
+	filename string,
+) vault.ManifestFile {
+	oses := make([]domain.OS, 0, len(arrow.Targets))
+	for os := range arrow.Targets {
+		oses = append(oses, os)
+	}
+	slices.Sort(oses)
+
+	return vault.ManifestFile{
+		Content:  rawBytes,
+		Filename: filename,
+		Meta: &vault.IndexMeta{
+			Arrow: arrow.ArrowMeta,
+			OS:    oses,
+		},
+	}
 }
 
 func fetchFromManifold(
@@ -104,11 +196,29 @@ func fetchFromManifold(
 	ns domain.Namespace,
 	m manifold.Manifold,
 ) (*domain.Arrow, error) {
-	fresh, _, _, err := m.ResolveArrow(ctx, ns)
+	fresh, _, _, err := resolveAt(ctx, m, ns)
 	if err != nil {
-		return nil, fmt.Errorf("resolver: fetch from manifold: %w", err)
+		return nil, wrapManifoldErr("fetch from manifold", err)
 	}
 	return fresh, nil
+}
+
+// resolveAt resolves ns's manifest at its own ref. A draft Fletcher built from
+// another release — what it does for a branch of a repository with no
+// manifest — is not what that ref holds, so it answers as no manifest.
+func resolveAt(
+	ctx context.Context,
+	m manifold.Manifold,
+	ns domain.Namespace,
+) (*domain.Arrow, []byte, string, error) {
+	arrow, raw, filename, err := m.ResolveArrow(ctx, ns)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if manifold.DraftedElsewhere(arrow, ns.Ref()) {
+		return nil, nil, "", fmt.Errorf("%s: %w", ns, manifold.NotARelease(arrow))
+	}
+	return arrow, raw, filename, nil
 }
 
 func parseManifest(
@@ -118,7 +228,26 @@ func parseManifest(
 ) (*domain.Arrow, error) {
 	parsed, err := m.ParseArrow(content)
 	if err != nil {
-		return nil, fmt.Errorf("resolver: parse %s arrow: %w", label, err)
+		return nil, wrapManifoldErr(fmt.Sprintf("parse %s arrow", label), err)
 	}
 	return parsed, nil
+}
+
+// wrapManifoldErr promotes a resolver/manifold-layer sentinel to its
+// app-layer equivalent so apierr.StatusAndMessage maps a real remote failure
+// or invalid manifest to 404/502/422 instead of falling through to a generic
+// 500. The original error stays wrapped underneath for logging.
+func wrapManifoldErr(op string, err error) error {
+	switch {
+	case errors.Is(err, manifoldresolver.ErrNotFound):
+		return fmt.Errorf("resolver: %s: %w: %w", op, apperrors.ErrNotFound, err)
+	case errors.Is(err, manifoldresolver.ErrFetchFailed):
+		return fmt.Errorf("resolver: %s: %w: %w", op, apperrors.ErrFetchFailed, err)
+	case errors.Is(err, manifold.ErrInvalidManifest):
+		return fmt.Errorf("resolver: %s: %w: %w", op, apperrors.ErrInvalidManifest, err)
+	case errors.Is(err, manifold.ErrArrowNotInCollection):
+		return fmt.Errorf("resolver: %s: %w: %w", op, apperrors.ErrNotFound, err)
+	default:
+		return fmt.Errorf("resolver: %s: %w", op, err)
+	}
 }

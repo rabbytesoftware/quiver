@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -11,6 +12,7 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/api/mocks"
 	"github.com/rabbytesoftware/quiver.core/internal/app/models"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
+	"github.com/rabbytesoftware/quiver.core/internal/domain/auth"
 	domainRuntime "github.com/rabbytesoftware/quiver.core/internal/domain/runtime"
 )
 
@@ -25,9 +27,15 @@ func TestArrowService_Add(t *testing.T) {
 	assert.Equal(t, errTest, m.Add(ctx, testNS))
 }
 
+func TestArrowService_AdoptInstalled(t *testing.T) {
+	m := &mocks.ArrowService{AdoptInstalledErr: errTest}
+	assert.Equal(t, errTest, m.AdoptInstalled(ctx, testNS, "v1.2.0"))
+	assert.Equal(t, []mocks.AdoptInstalledCall{{Namespace: testNS, ResolvedRef: "v1.2.0"}}, m.AdoptInstalledCalls)
+}
+
 func TestArrowService_Update(t *testing.T) {
 	m := &mocks.ArrowService{UpdateErr: errTest}
-	_, err := m.Update(ctx, testNS, models.UpdateOptions{})
+	_, err := m.Update(ctx, testNS)
 	assert.Equal(t, errTest, err)
 }
 
@@ -68,8 +76,10 @@ func TestArrowService_HasDependents(t *testing.T) {
 }
 
 func TestRuntimeService_Install(t *testing.T) {
-	m := &mocks.RuntimeService{InstallErr: errTest}
-	assert.Equal(t, errTest, m.Install(ctx, testNS, nil))
+	m := &mocks.RuntimeService{InstallStarted: true, InstallErr: errTest}
+	started, err := m.Install(ctx, testNS, nil)
+	assert.True(t, started)
+	assert.Equal(t, errTest, err)
 }
 
 func TestRuntimeService_Uninstall(t *testing.T) {
@@ -85,6 +95,13 @@ func TestRuntimeService_Execute(t *testing.T) {
 func TestRuntimeService_Stop(t *testing.T) {
 	m := &mocks.RuntimeService{StopErr: errTest}
 	assert.Equal(t, errTest, m.Stop(ctx, testNS))
+}
+
+func TestRuntimeService_SettlingAndDrain(t *testing.T) {
+	m := &mocks.RuntimeService{SettlingNamespaces: map[domain.Namespace]bool{testNS: true}, DrainErr: errTest}
+	assert.True(t, m.Settling(testNS))
+	assert.False(t, m.Settling(domain.Namespace("github.com/u/other")))
+	assert.Equal(t, errTest, m.Drain(ctx))
 }
 
 func TestHub_BroadcastArrow(t *testing.T) {
@@ -120,4 +137,70 @@ func TestCollectionService_Get(t *testing.T) {
 	got, err := m.Get(ctx, testNS)
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
+}
+
+func TestSearchService_Search(t *testing.T) {
+	want := []models.SearchResult{{Namespace: testNS}}
+	m := &mocks.SearchService{SearchResult: want}
+
+	got, err := m.Search(ctx, models.SearchQuery{Text: "repo"})
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	assert.Equal(t, models.SearchQuery{Text: "repo"}, m.SearchQuery)
+	assert.Equal(t, 1, m.SearchCalls)
+}
+
+func TestSearchService_SearchError(t *testing.T) {
+	m := &mocks.SearchService{SearchErr: errTest}
+
+	_, err := m.Search(ctx, models.SearchQuery{Text: "repo"})
+	assert.Equal(t, errTest, err)
+}
+
+func TestAuthService_GeneratePairingCode(t *testing.T) {
+	expiresAt := time.Now().Add(5 * time.Minute)
+	m := &mocks.AuthService{GenerateCode: "482913", GenerateExpiresAt: expiresAt, GenerateErr: errTest}
+
+	code, got, err := m.GeneratePairingCode(ctx)
+	assert.Equal(t, "482913", code)
+	assert.Equal(t, expiresAt, got)
+	assert.Equal(t, errTest, err)
+}
+
+func TestAuthService_Redeem(t *testing.T) {
+	m := &mocks.AuthService{RedeemToken: "tok", RedeemErr: errTest}
+
+	token, err := m.Redeem(ctx, "482913", "dev-1", "laptop")
+	assert.Equal(t, "tok", token)
+	assert.Equal(t, errTest, err)
+	assert.Equal(t, "482913", m.RedeemArgs.Code)
+	assert.Equal(t, "dev-1", m.RedeemArgs.DeviceID)
+	assert.Equal(t, "laptop", m.RedeemArgs.Label)
+}
+
+func TestAuthService_Authenticate(t *testing.T) {
+	want := auth.Device{ID: "dev-1"}
+	m := &mocks.AuthService{AuthenticateResult: want, AuthenticateErr: errTest}
+
+	got, err := m.Authenticate(ctx, "raw-token")
+	assert.Equal(t, want, got)
+	assert.Equal(t, errTest, err)
+	assert.Equal(t, "raw-token", m.AuthenticateToken)
+}
+
+func TestAuthService_ListDevices(t *testing.T) {
+	want := []auth.Device{{ID: "dev-1"}}
+	m := &mocks.AuthService{ListDevicesResult: want, ListDevicesErr: errTest}
+
+	got, err := m.ListDevices(ctx)
+	assert.Equal(t, want, got)
+	assert.Equal(t, errTest, err)
+}
+
+func TestAuthService_RevokeDevice(t *testing.T) {
+	m := &mocks.AuthService{RevokeDeviceErr: errTest}
+
+	err := m.RevokeDevice(ctx, "dev-1")
+	assert.Equal(t, errTest, err)
+	assert.Equal(t, "dev-1", m.RevokeDeviceID)
 }

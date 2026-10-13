@@ -11,21 +11,46 @@ import (
 	"strings"
 
 	"github.com/char2cs/asynx"
-	asynxModels "github.com/char2cs/asynx/models"
 
 	apperrors "github.com/rabbytesoftware/quiver.core/internal/app/errors"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	domainRuntime "github.com/rabbytesoftware/quiver.core/internal/domain/runtime"
+	domainStep "github.com/rabbytesoftware/quiver.core/internal/domain/runtime/step"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/surface"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
 )
 
 // GetArrowFn fetches the current state of an arrow aggregate by namespace.
 type GetArrowFn func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error)
 
-// ResolveVariables builds the variable map for an execution using 6 priority layers:
-// built-ins -> dep built-ins + named exports -> version defaults -> netbridge ports -> stored vars -> user vars.
-func ResolveVariables( //nolint:gocyclo,funlen
+// SocketProvider hands out the unix socket address an arrow serves its
+// interface on.
+type SocketProvider interface {
+	Prepare(
+		ns domain.Namespace,
+	) (string, error)
+}
+
+// provisionSocket asks surfaces for the interface socket address. A path that
+// is too long is the user's own home being too deep, so it is reported as a
+// configuration problem naming the path, not as an internal error.
+func provisionSocket(ns domain.Namespace, surfaces SocketProvider) (string, error) {
+	socket, err := surfaces.Prepare(ns)
+	if errors.Is(err, surface.ErrPathTooLong) {
+		return "", fmt.Errorf("%w: provision interface socket: %w", apperrors.ErrInvalidConfig, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("provision interface socket: %w", err)
+	}
+	return socket, nil
+}
+
+// ResolveVariables builds the variable map for an execution using 6 priority
+// layers: built-ins -> dep built-ins + named exports -> version defaults ->
+// netbridge ports -> stored vars -> user vars. steps decides which declared
+// variables are required, by name, for this execution; see requireReferenced.
+func ResolveVariables( //nolint:gocyclo
 	ctx context.Context,
 	ns domain.Namespace,
 	arrow *domain.Arrow,
@@ -35,19 +60,22 @@ func ResolveVariables( //nolint:gocyclo,funlen
 	axRuntime asynx.Asynx[domainRuntime.ArrowRuntime],
 	v vault.Vault,
 	nb netbridge.Netbridge,
+	surfaces SocketProvider,
 	userVars map[string]string,
+	steps []domainStep.Step,
 ) (map[string]string, error) {
-	vars := make(map[string]string)
-
 	// Layer 1: built-ins
-	if v != nil {
-		if workdir, err := v.WorkDir(ctx, ns); err == nil {
-			vars["INSTALL_PATH"] = workdir
-			vars["WORKDIR"] = workdir
-		}
+	vars, err := builtIns(ctx, ns, arrow, os, v)
+	if err != nil {
+		return nil, err
 	}
-	vars["ARROW_NAMESPACE"] = ns.String()
-	vars["PLATFORM"] = os.String()
+	if surfaces != nil && hasListenUI(steps) {
+		socket, err := provisionSocket(ns, surfaces)
+		if err != nil {
+			return nil, err
+		}
+		vars[domain.VarArrowUIListen] = socket
+	}
 
 	// Layer 2: dep built-ins and named exports
 	for _, edge := range append(target.Tools, target.Services...) {
@@ -55,7 +83,7 @@ func ResolveVariables( //nolint:gocyclo,funlen
 
 		depArrow, err := getArrow(ctx, edge.Namespace)
 		if err != nil {
-			if !errors.Is(err, asynxModels.ErrNotFound) {
+			if !errors.Is(err, apperrors.ErrNotFound) {
 				slog.WarnContext(
 					ctx,
 					"resolveVariables: unexpected error fetching dep",
@@ -75,7 +103,7 @@ func ResolveVariables( //nolint:gocyclo,funlen
 
 		// INSTALL_PATH from vault
 		if v != nil {
-			if workdir, err := v.WorkDir(ctx, edge.Namespace); err == nil {
+			if workdir, err := v.WorkDir(ctx, depArrow.Namespace); err == nil {
 				vars[depNs.String()+".INSTALL_PATH"] = workdir
 			}
 		}
@@ -121,20 +149,144 @@ func ResolveVariables( //nolint:gocyclo,funlen
 	// Layer 5: stored vars from last return
 	runtime, err := axRuntime.Get(ctx, ns.String())
 	if err == nil && runtime.LastReturn != nil {
-		maps.Copy(vars, runtime.LastReturn.Variables)
+		maps.Copy(vars, carryForward(arrow, runtime.LastReturn.Variables))
 	}
 
-	// Layer 6: user vars (highest priority)
-	maps.Copy(vars, userVars)
+	// Layer 6: user vars (highest priority, built-ins excepted)
+	applyUserVars(vars, userVars)
 
-	// Validate: variables with no default must be resolved by now.
-	for _, v := range arrow.Variables {
-		if v.Default == "" {
-			if _, ok := vars[v.Name]; !ok {
-				return nil, fmt.Errorf("%w: %q", apperrors.ErrMissingVariable, v.Name)
-			}
-		}
+	if err := requireReferenced(arrow, steps, vars); err != nil {
+		return nil, err
 	}
 
 	return vars, nil
+}
+
+// builtIns computes the variables every run gets: its workdir, identity,
+// platform and ${REF}.
+func builtIns(
+	ctx context.Context,
+	ns domain.Namespace,
+	arrow *domain.Arrow,
+	os domain.OS,
+	v vault.Vault,
+) (map[string]string, error) {
+	vars := make(map[string]string)
+	if v != nil {
+		workdir, err := v.WorkDir(ctx, ns)
+		if err != nil {
+			return nil, WorkDirError(ns, err)
+		}
+		vars[domain.VarInstallPath] = workdir
+		vars[domain.VarWorkdir] = workdir
+	}
+	vars[domain.VarArrowNamespace] = ns.String()
+	vars[domain.VarPlatform] = os.String()
+	vars[domain.VarRef] = arrow.Resolved.RefOr(ns.Ref())
+	return vars, nil
+}
+
+func hasListenUI(
+	steps []domainStep.Step,
+) bool {
+	for _, s := range steps {
+		if run, ok := s.(domainStep.RunStep); ok && run.UI != nil && run.UI.Listens() {
+			return true
+		}
+	}
+	return false
+}
+
+// carryForward filters a previous execution's variables down to the ones
+// this execution may inherit: answers, never facts. A built-in (${REF},
+// ${WORKDIR}, ...) or a dependency's value (<namespace>.<name>) is computed
+// for this run: a row advanced since, or a failed update's target left in the
+// previous run, must never lend its ${REF} to another release's steps. A
+// variable declared without a default is never inherited either, since a
+// remembered answer would silently satisfy the per-execution requirement
+// requireReferenced enforces without anyone being asked -- e.g. a second
+// update naming neither ${QUIVER_RELEASE_ASSET_URL} nor
+// ${QUIVER_RELEASE_CHECKSUM} would re-install the previous, possibly wrong,
+// build instead of failing loudly.
+func carryForward(
+	arrow *domain.Arrow,
+	stored map[string]string,
+) map[string]string {
+	required := make(map[string]struct{}, len(arrow.Variables))
+	for _, declared := range arrow.Variables {
+		if declared.Default == "" {
+			required[declared.Name] = struct{}{}
+		}
+	}
+
+	carried := make(map[string]string, len(stored))
+	for name, value := range stored {
+		if _, isRequired := required[name]; isRequired || isComputed(name) {
+			continue
+		}
+		carried[name] = value
+	}
+	return carried
+}
+
+// isComputed reports whether name is a value Quiver derives for each run: a
+// built-in, or a dependency's value, scoped by the dependency's namespace.
+func isComputed(
+	name string,
+) bool {
+	return domain.IsReservedVariable(name) || strings.Contains(name, "/")
+}
+
+// requireReferenced refuses an execution missing a variable its own steps
+// are about to expand. The scope is the method being run, not the arrow:
+// demanding every declared no-default variable on every execution once made
+// quiver.desktop's uninstall and update buttons unreachable, since neither
+// sends the release asset URL the arrow declares but that method never reads.
+func requireReferenced(
+	arrow *domain.Arrow,
+	steps []domainStep.Step,
+	vars map[string]string,
+) error {
+	referenced := ReferencedVariables(steps)
+	for _, declared := range arrow.Variables {
+		if declared.Default != "" {
+			continue
+		}
+		if _, used := referenced[declared.Name]; !used {
+			continue
+		}
+		if value, resolved := vars[declared.Name]; !resolved || value == "" {
+			return fmt.Errorf("%w: %q", apperrors.ErrMissingVariable, declared.Name)
+		}
+	}
+	return nil
+}
+
+// applyUserVars copies the caller's variables over the resolved ones, skipping
+// the built-ins. Requests carrying a built-in are already rejected upstream;
+// this keeps the computed value authoritative for every other caller too.
+func applyUserVars(
+	vars map[string]string,
+	userVars map[string]string,
+) {
+	for name, value := range userVars {
+		if domain.IsReservedVariable(name) {
+			continue
+		}
+		vars[name] = value
+	}
+}
+
+// WorkDirError reports a workdir the vault could not give ns. It is fatal:
+// steps would otherwise run in the daemon's own working directory. A workdir
+// another identity owns (a case-folded directory from an earlier layout) is a
+// conflict the user resolves by removing that identity.
+func WorkDirError(
+	ns domain.Namespace,
+	err error,
+) error {
+	if errors.Is(err, vault.ErrWorkDirCollision) {
+		return fmt.Errorf("workdir %s: another identity's workdir occupies its path, remove that identity first: %w: %w", ns, apperrors.ErrAlreadyExists, err)
+	}
+	return fmt.Errorf("workdir %s: %w", ns, err)
 }

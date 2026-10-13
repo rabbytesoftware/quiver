@@ -1,6 +1,7 @@
 package dto_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 func TestArrowListItemDTOFrom(t *testing.T) {
 	installedAt := time.Date(2026, 4, 11, 15, 33, 0, 0, time.UTC)
+	lastUsedAt := time.Date(2026, 8, 1, 9, 30, 0, 0, time.UTC)
 	a := models.ArrowListDTO{
 		Namespace:   domain.Namespace("github.com/user/repo"),
 		Name:        "My Arrow",
@@ -22,10 +24,9 @@ func TestArrowListItemDTOFrom(t *testing.T) {
 		Versions: []models.InstalledVersionDTO{
 			{
 				Ref:         "v1.0.0",
-				Version:     "1.0.0",
 				State:       domain.ArrowStateReady,
 				InstalledAt: installedAt,
-				Constraint:  "^1.0.0",
+				LastUsedAt:  lastUsedAt,
 			},
 		},
 	}
@@ -36,9 +37,27 @@ func TestArrowListItemDTOFrom(t *testing.T) {
 	assert.Equal(t, []string{"tag1"}, d.Tags)
 	require.Len(t, d.Versions, 1)
 	assert.Equal(t, "v1.0.0", d.Versions[0].Ref)
-	assert.Equal(t, "1.0.0", d.Versions[0].Version)
 	assert.Equal(t, "ready", d.Versions[0].State)
-	assert.Equal(t, "^1.0.0", d.Versions[0].Constraint)
+	assert.Equal(t, "2026-04-11T15:33:00Z", d.Versions[0].InstalledAt)
+	assert.Equal(t, "2026-08-01T09:30:00Z", d.Versions[0].LastUsedAt)
+}
+
+func TestArrowListItemDTOFrom_NeverUsed_LastUsedAtOmitted(t *testing.T) {
+	a := models.ArrowListDTO{
+		Namespace: domain.Namespace("github.com/user/repo"),
+		Versions: []models.InstalledVersionDTO{
+			{Ref: "v1.0.0", State: domain.ArrowStateReady},
+		},
+	}
+	d := dto.ArrowListItemDTOFrom(a)
+	require.Len(t, d.Versions, 1)
+	assert.Empty(t, d.Versions[0].LastUsedAt)
+
+	blob, err := json.Marshal(d.Versions[0])
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(blob, &decoded))
+	assert.NotContains(t, decoded, "last_used_at")
 }
 
 func TestArrowListItemDTOFrom_MediaMapped(t *testing.T) {
@@ -50,4 +69,116 @@ func TestArrowListItemDTOFrom_MediaMapped(t *testing.T) {
 	d := dto.ArrowListItemDTOFrom(a)
 	assert.Equal(t, "https://example.com/icon.png", d.Media.Icon)
 	assert.Equal(t, "https://example.com/banner.png", d.Media.Banner)
+}
+
+// A version row's ref reaches the client under one name. `version` was a second
+// wire name for the same fact and is gone; the row's own ref answers both, so a
+// client reading either key must find `ref` and nothing beside it.
+func TestInstalledVersionItemDTO_WireShape(t *testing.T) {
+	d := dto.ArrowListItemDTOFrom(models.ArrowListDTO{
+		Namespace: domain.Namespace("github.com/user/repo"),
+		Versions: []models.InstalledVersionDTO{
+			{
+				Ref:         "v1.0.0",
+				State:       domain.ArrowStateReady,
+				InstalledAt: time.Date(2026, 4, 11, 15, 33, 0, 0, time.UTC),
+			},
+		},
+	})
+	require.Len(t, d.Versions, 1)
+
+	blob, err := json.Marshal(d.Versions[0])
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(blob, &decoded))
+
+	assert.NotContains(t, decoded, "version")
+	assert.Equal(t, "v1.0.0", decoded["ref"])
+	assert.Equal(t, "ready", decoded["state"])
+	assert.Equal(t, "2026-04-11T15:33:00Z", decoded["installed_at"])
+}
+
+func TestArrowListItemDTO_WireShape_Version(t *testing.T) {
+	d := dto.ArrowListItemDTOFrom(models.ArrowListDTO{
+		Namespace: domain.Namespace("github.com/user/repo"),
+		Versions: []models.InstalledVersionDTO{{
+			Ref:         "stable",
+			ResolvedRef: "v1.4.0",
+			State:       domain.ArrowStateReady,
+			InstalledAt: time.Date(2026, 4, 11, 15, 33, 0, 0, time.UTC),
+			LastUsedAt:  time.Date(2026, 8, 1, 9, 30, 0, 0, time.UTC),
+		}},
+	})
+
+	blob, err := json.Marshal(d.Versions[0])
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(blob, &got))
+
+	assert.Equal(t, map[string]any{
+		"ref":          "stable",
+		"resolved_ref": "v1.4.0",
+		"state":        "ready",
+		"installed_at": "2026-04-11T15:33:00Z",
+		"last_used_at": "2026-08-01T09:30:00Z",
+	}, got)
+}
+
+func TestArrowListItemDTO_WireShape_InstalledAt(t *testing.T) {
+	testCases := []struct {
+		name        string
+		installedAt time.Time
+		want        any
+	}{
+		{"never installed omits the stamp", time.Time{}, nil},
+		{"installed emits RFC3339", time.Date(2026, 4, 11, 15, 33, 0, 0, time.UTC), "2026-04-11T15:33:00Z"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := dto.ArrowListItemDTOFrom(models.ArrowListDTO{
+				Namespace: domain.Namespace("github.com/user/repo"),
+				Versions: []models.InstalledVersionDTO{{
+					Ref: "v1.0.0", State: domain.ArrowStateAbsent, InstalledAt: tc.installedAt,
+				}},
+			})
+
+			blob, err := json.Marshal(d.Versions[0])
+			require.NoError(t, err)
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(blob, &got))
+
+			assert.Equal(t, tc.want, got["installed_at"])
+			assert.NotContains(t, string(blob), "0001-01-01")
+		})
+	}
+}
+
+func TestArrowListItemDTOFrom_OriginAndConfidence(t *testing.T) {
+	testCases := []struct {
+		name           string
+		in             models.ArrowListDTO
+		wantOrigin     string
+		wantConfidence string
+		wantKey        bool
+	}{
+		{name: "declared omits confidence", in: models.ArrowListDTO{Origin: "declared"}, wantOrigin: "declared"},
+		{name: "inferred carries confidence", in: models.ArrowListDTO{Origin: "inferred", Confidence: "high"}, wantOrigin: "inferred", wantConfidence: "high", wantKey: true},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := dto.ArrowListItemDTOFrom(tc.in)
+
+			assert.Equal(t, tc.wantOrigin, d.Origin)
+			assert.Equal(t, tc.wantConfidence, d.Confidence)
+			blob, err := json.Marshal(d)
+			require.NoError(t, err)
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal(blob, &decoded))
+			assert.Equal(t, tc.wantOrigin, decoded["origin"])
+			_, hasKey := decoded["confidence"]
+			assert.Equal(t, tc.wantKey, hasKey)
+		})
+	}
 }

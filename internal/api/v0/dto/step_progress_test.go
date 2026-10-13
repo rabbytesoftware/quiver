@@ -37,6 +37,15 @@ func TestStepProgressDTOFrom_FetchStep(t *testing.T) {
 	assert.Equal(t, "fetch", d.Type)
 }
 
+func TestStepProgressDTOFrom_CarriesNote(t *testing.T) {
+	note := "nothing exposed: no executable found"
+	d := dto.StepProgressDTOFrom(domainRuntime.StepProgress{Status: domainRuntime.StepStatusCompleted, Note: &note})
+
+	require.NotNil(t, d.Note)
+	assert.Equal(t, note, *d.Note)
+	assert.Nil(t, d.Error)
+}
+
 func TestRunRecordDTOFrom_IncludesSteps(t *testing.T) {
 	r := &domainRuntime.Execution{
 		Method:    "_install",
@@ -110,4 +119,10 @@ func TestReturnDTOFrom_IncludesSteps(t *testing.T) {
 	assert.Equal(t, "failed", d.Steps[1].Status)
 	require.NotNil(t, d.Steps[1].Error)
 	assert.Equal(t, errMsg, *d.Steps[1].Error)
+}
+
+func TestReturnDTOFrom_CarriesTheExecutionID(t *testing.T) {
+	d := dto.ReturnDTOFrom(&domainRuntime.Return{Method: "_update", ExecutionID: "exec-1"})
+	require.NotNil(t, d)
+	assert.Equal(t, "exec-1", d.ExecutionID)
 }

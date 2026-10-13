@@ -7,7 +7,6 @@ schema: "arrow@v0"
 metadata:
   name: docker-whoami
   description: Lightweight HTTP echo service running as a Docker container
-  version: 1.0.0
   license: MIT
   url: https://github.com/traefik/whoami
   maintainers:
@@ -46,7 +45,7 @@ targets:
       disk_gb: 1
 
     services:
-      - github.com/char2cs/quiver.experiments/docker@latest
+      - github.com/char2cs/quiver.experiments/docker
 
     lifecycle:
       install:

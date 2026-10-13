@@ -38,7 +38,12 @@ func setup(svc *mocks.ArrowService) (*arrows.Handlers, *gin.Engine) {
 	r.GET("/v0/arrow", h.List)
 	r.GET("/v0/arrow/:ns", h.GetDetail)
 	r.GET("/v0/arrow/:ns/manifest", h.GetManifest)
+	r.GET("/v0/arrow/:ns/readme", h.GetReadme)
+	r.GET("/v0/arrow/:ns/dependents", h.GetDependents)
+	r.GET("/v0/arrow/:ns/dependencies", h.GetDependencies)
+	r.GET("/v0/arrow/:ns/channels", h.ListChannels)
 	r.POST("/v0/arrow/:ns/manifest", h.Seed)
+	r.POST("/v0/arrow/:ns/adopt", h.AdoptInstalled)
 	r.POST("/v0/arrow/:ns/manifest/validate", h.Validate)
 	return h, r
 }
@@ -58,6 +63,30 @@ func TestAdd_ServiceError(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, encodedNS, nil))
 	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+// The selector lives in the namespace alone; a request body is not read.
+func TestAdd_SelectorComesFromThePath(t *testing.T) {
+	testCases := []struct {
+		name string
+		path string
+		want domain.Namespace
+	}{
+		{"refless stays refless", encodedNS, "github.com/user/repo"},
+		{"the path selector is the identity", encodedNS + "@stable", "github.com/user/repo@stable"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &mocks.ArrowService{}
+			_, r := setup(svc)
+			w := httptest.NewRecorder()
+			body := bytes.NewBufferString(`{"channel":"beta"}`)
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, tc.path, body))
+			assert.Equal(t, http.StatusCreated, w.Code)
+			assert.Equal(t, []domain.Namespace{tc.want}, svc.AddCalls)
+		})
+	}
 }
 
 func TestUpdate_OK(t *testing.T) {
@@ -84,12 +113,12 @@ func TestRemove_OK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestRemove_BareNamespace_ReturnsBadRequest(t *testing.T) {
+func TestRemove_BareNamespace_Allowed(t *testing.T) {
 	svc := &mocks.ArrowService{}
 	_, r := setup(svc)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, encodedNS, nil))
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestRemove_DependentsExist(t *testing.T) {
@@ -107,7 +136,7 @@ func TestList_OK(t *testing.T) {
 				Namespace: domain.Namespace("github.com/user/repo"),
 				Name:      "Test",
 				Versions: []models.InstalledVersionDTO{
-					{Ref: "v1.0.0", Version: "1.0.0", State: domain.ArrowStateReady},
+					{Ref: "v1.0.0", State: domain.ArrowStateReady},
 				},
 			},
 		},
@@ -202,7 +231,6 @@ func TestGetManifest_OK(t *testing.T) {
 		GetManifestResult: &models.ArrowManifestDTO{
 			Namespace:   domain.Namespace("github.com/user/repo"),
 			Name:        "Test",
-			Version:     "1.0.0",
 			Description: "A test arrow",
 		},
 	}
@@ -236,6 +264,152 @@ func TestGetManifest_InvalidNamespace(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/manifest", nil))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGetReadme_OK(t *testing.T) {
+	svc := &mocks.ArrowService{GetReadmeResult: "# Docs"}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/readme", nil))
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var env struct {
+		Data struct {
+			Namespace string `json:"namespace"`
+			Readme    string `json:"readme"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "github.com/user/repo", env.Data.Namespace)
+	assert.Equal(t, "# Docs", env.Data.Readme)
+}
+
+func TestGetReadme_NotFound(t *testing.T) {
+	svc := &mocks.ArrowService{GetReadmeErr: apperrors.ErrNotFound}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/readme", nil))
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestGetReadme_InvalidNamespace(t *testing.T) {
+	svc := &mocks.ArrowService{GetReadmeErr: apperrors.ErrInvalidNamespace}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/readme", nil))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGetDependents_OK(t *testing.T) {
+	svc := &mocks.ArrowService{
+		GetDependentsResult: []domain.Namespace{
+			"github.com/user/parent-a@v1.0.0",
+			"github.com/user/parent-b@v2.0.0",
+		},
+	}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/dependents", nil))
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var env struct {
+		Data struct {
+			Namespace  string   `json:"namespace"`
+			Dependents []string `json:"dependents"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "github.com/user/repo", env.Data.Namespace)
+	assert.Equal(t, []string{
+		"github.com/user/parent-a@v1.0.0",
+		"github.com/user/parent-b@v2.0.0",
+	}, env.Data.Dependents)
+}
+
+func TestGetDependents_NotFound(t *testing.T) {
+	svc := &mocks.ArrowService{GetDependentsErr: apperrors.ErrNotFound}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/dependents", nil))
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestGetDependencies_OK(t *testing.T) {
+	svc := &mocks.ArrowService{
+		GetDependenciesResult: models.Plan{
+			{Namespace: "github.com/user/tool-dep@v1.0.0", Type: domain.ToolDep},
+			{Namespace: "github.com/user/service-dep@v2.0.0", Type: domain.ServiceDep},
+		},
+	}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/dependencies", nil))
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var env struct {
+		Data struct {
+			Namespace    string `json:"namespace"`
+			Dependencies []struct {
+				Namespace string `json:"namespace"`
+				Type      string `json:"type"`
+			} `json:"dependencies"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "github.com/user/repo", env.Data.Namespace)
+	require.Len(t, env.Data.Dependencies, 2)
+	assert.Equal(t, "github.com/user/tool-dep@v1.0.0", env.Data.Dependencies[0].Namespace)
+	assert.Equal(t, "tool", env.Data.Dependencies[0].Type)
+	assert.Equal(t, "github.com/user/service-dep@v2.0.0", env.Data.Dependencies[1].Namespace)
+	assert.Equal(t, "service", env.Data.Dependencies[1].Type)
+}
+
+func TestGetDependencies_NotFound(t *testing.T) {
+	svc := &mocks.ArrowService{GetDependenciesErr: apperrors.ErrNotFound}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/dependencies", nil))
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestListChannels_OK(t *testing.T) {
+	svc := &mocks.ArrowService{
+		ListChannelsResult: []models.ChannelInfo{
+			{Name: "rc", Kind: "ordered", Latest: "v1.5.0-rc2", Count: 2, Members: []string{"v1.5.0-rc2", "v1.5.0-rc1"}},
+			{Name: "main", Kind: "pointer", Latest: "main"},
+		},
+	}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/channels", nil))
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var env struct {
+		Data struct {
+			Channels []struct {
+				Name    string   `json:"name"`
+				Kind    string   `json:"kind"`
+				Latest  string   `json:"latest"`
+				Count   int      `json:"count"`
+				Members []string `json:"members"`
+			} `json:"channels"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	require.Len(t, env.Data.Channels, 2)
+	assert.Equal(t, "rc", env.Data.Channels[0].Name)
+	assert.Equal(t, "ordered", env.Data.Channels[0].Kind)
+	assert.Equal(t, []string{"v1.5.0-rc2", "v1.5.0-rc1"}, env.Data.Channels[0].Members)
+	assert.Equal(t, "main", env.Data.Channels[1].Name)
+	assert.Equal(t, "pointer", env.Data.Channels[1].Kind)
+}
+
+func TestListChannels_NotFound(t *testing.T) {
+	svc := &mocks.ArrowService{ListChannelsErr: apperrors.ErrNotFound}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, encodedNS+"/channels", nil))
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestGetManifest_FetchFailed(t *testing.T) {
@@ -284,6 +458,16 @@ func TestSeed_ServiceError_InvalidManifest(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, encodedNS+"/manifest", bytes.NewBufferString("bad yaml"))
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+}
+
+// A namespace with no ref is the caller's mistake, not the server's.
+func TestSeed_ReflessNamespace_Returns400(t *testing.T) {
+	svc := &mocks.ArrowService{SeedErr: apperrors.ErrInvalidNamespace}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, encodedNS+"/manifest", bytes.NewBufferString("manifest: arrow@v0"))
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestSeed_ServiceRejectsEmptyBody(t *testing.T) {
@@ -393,4 +577,106 @@ func assertSuccess(t *testing.T, body []byte) {
 	}
 	require.NoError(t, json.Unmarshal(body, &env))
 	assert.True(t, env.Success)
+}
+
+// POST and PATCH take no body: the selector lives in the path and an update
+// always advances to what is available. Whatever a client sends is ignored.
+func TestAddAndUpdate_IgnoreAnyBody(t *testing.T) {
+	testCases := []struct {
+		name   string
+		method string
+		want   int
+		calls  func(*mocks.ArrowService) []domain.Namespace
+	}{
+		{"add", http.MethodPost, http.StatusCreated, func(s *mocks.ArrowService) []domain.Namespace { return s.AddCalls }},
+		{"update", http.MethodPatch, http.StatusOK, func(s *mocks.ArrowService) []domain.Namespace { return s.UpdateCalls }},
+	}
+	bodies := []string{"", `{"channel":"beta","ref":"v9","upgrade_ref":"v10"}`, `not json at all`}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var responses []string
+			for _, body := range bodies {
+				svc := &mocks.ArrowService{}
+				_, r := setup(svc)
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(tc.method, encodedNS+"@stable", bytes.NewBufferString(body))
+				req.Header.Set("Content-Type", "application/json")
+				r.ServeHTTP(w, req)
+
+				assert.Equal(t, tc.want, w.Code)
+				assert.Equal(t, []domain.Namespace{"github.com/user/repo@stable"}, tc.calls(svc))
+				responses = append(responses, w.Body.String())
+			}
+			for _, got := range responses[1:] {
+				assert.JSONEq(t, responses[0], got)
+			}
+		})
+	}
+}
+
+func TestAddAndUpdate_InvalidNamespace_Returns400(t *testing.T) {
+	badPaths := []struct {
+		name string
+		path string
+	}{
+		{"single segment", "/v0/arrow/notanamespace"},
+		{"two segments", "/v0/arrow/github.com%2Fuser"},
+		{"five segments", "/v0/arrow/github.com%2Fa%2Fb%2Fc%2Fd"},
+		{"empty segment", "/v0/arrow/github.com%2F%2Frepo"},
+		{"empty segment with ref", "/v0/arrow/github.com%2Fuser%2F@v1"},
+	}
+	methods := []string{http.MethodPost, http.MethodPatch}
+
+	for _, method := range methods {
+		for _, tc := range badPaths {
+			t.Run(method+" "+tc.name, func(t *testing.T) {
+				svc := &mocks.ArrowService{}
+				_, r := setup(svc)
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, httptest.NewRequest(method, tc.path, nil))
+
+				assert.Equal(t, http.StatusBadRequest, w.Code)
+				assert.Empty(t, svc.AddCalls)
+				assert.Empty(t, svc.UpdateCalls)
+
+				var env struct {
+					Success bool `json:"success"`
+				}
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+				assert.False(t, env.Success)
+			})
+		}
+	}
+}
+
+// The update reports what it found: an installed row keeps its version and
+// only names the available ref, which the runtime update then moves it to.
+func TestUpdate_ReturnsTheResult(t *testing.T) {
+	svc := &mocks.ArrowService{UpdateResult: models.UpdateResult{
+		Available: &domain.Available{Ref: "v1.1.0", Commit: "c2"},
+	}}
+	_, r := setup(svc)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPatch, encodedNS+"@stable", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var env struct {
+		Success   bool   `json:"success"`
+		Namespace string `json:"namespace"`
+		Data      struct {
+			AddedDeps []string `json:"added_deps"`
+			Available *struct {
+				Ref    string `json:"ref"`
+				Commit string `json:"commit"`
+			} `json:"available"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.True(t, env.Success)
+	assert.Equal(t, "github.com/user/repo@stable", env.Namespace)
+	assert.NotNil(t, env.Data.AddedDeps)
+	require.NotNil(t, env.Data.Available)
+	assert.Equal(t, "v1.1.0", env.Data.Available.Ref)
+	assert.Equal(t, "c2", env.Data.Available.Commit)
 }

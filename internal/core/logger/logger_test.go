@@ -12,6 +12,7 @@ import (
 
 	"github.com/rabbytesoftware/quiver.core/internal/core/config"
 	"github.com/rabbytesoftware/quiver.core/internal/core/logger"
+	"github.com/rabbytesoftware/quiver.core/internal/core/logring"
 	"github.com/rabbytesoftware/quiver.core/internal/core/paths"
 )
 
@@ -27,16 +28,16 @@ func TestInit_DisabledConfig_DoesNotPanic(t *testing.T) {
 
 func TestInit_EnabledConfig_CreatesLogFile(t *testing.T) {
 	prev := slog.Default()
+	home := t.TempDir()
 
-	logsPath, err := paths.Logs()
+	logsPath, err := paths.LogsAt(home)
 	require.NoError(t, err)
 	logFile := filepath.Join(logsPath, "Quiver.log")
 
-	shutdown := logger.Init(config.Logger{Enabled: true, Level: "debug"})
+	shutdown := logger.InitAt(home, config.Logger{Enabled: true, Level: "debug"})
 	t.Cleanup(func() {
 		_ = shutdown()        // 1 — close file handle first
 		slog.SetDefault(prev) // 2 — then restore default logger
-		os.Remove(logFile)    // 3 — then remove (handle is closed)
 	})
 
 	slog.Info("probe")
@@ -77,7 +78,7 @@ func TestParseLevel_Default_ReturnsInfo(t *testing.T) {
 
 func TestBuildHandler_LogsPathError_FallsBackToStderr(t *testing.T) {
 	cfg := config.Logger{Enabled: false, Level: "info"}
-	roller, handler := logger.BuildHandler(cfg)
+	roller, handler := logger.BuildHandler("", cfg)
 	assert.Nil(t, roller)
 	assert.NotNil(t, handler)
 }
@@ -91,7 +92,35 @@ func TestBuildHandler_PathsLogsError_FallsBackToStderr(t *testing.T) {
 	t.Setenv("HOME", "/dev/null/nonexistent")
 
 	cfg := config.Logger{Enabled: true, Level: "info"}
-	roller, handler := logger.BuildHandler(cfg)
+	roller, handler := logger.BuildHandler("", cfg)
 	assert.Nil(t, roller)
 	assert.NotNil(t, handler)
+}
+
+func TestBuildHandler_At_UsesProvidedHome(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Logger{Enabled: true, Level: "info"}
+	roller, handler := logger.BuildHandler(home, cfg)
+	require.NotNil(t, roller)
+	assert.NotNil(t, handler)
+	assert.Contains(t, roller.Filename, home)
+	_ = roller.Close()
+}
+
+func TestInit_Wrap_DecoratesTheDefaultHandler(
+	t *testing.T,
+) {
+	prev := slog.Default()
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+	})
+	ring := logring.New()
+
+	shutdown := logger.Init(config.Logger{Enabled: false, Level: "info"}, ring.Wrap)
+	slog.Info("captured")
+
+	stream := ring.Stream(0, slog.LevelInfo)
+	defer stream.Close()
+	require.NoError(t, shutdown())
+	assert.Equal(t, "captured", stream.Replay()[0].Msg)
 }

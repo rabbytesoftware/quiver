@@ -8,11 +8,12 @@ import (
 )
 
 type StepProgressDTO struct {
-	Index  int     `json:"index"`
-	Status string  `json:"status"`
-	Title  string  `json:"title"`
-	Type   string  `json:"type"`
-	Error  *string `json:"error,omitempty"`
+	Index  int     `json:"index" yaml:"index"`
+	Status string  `json:"status" yaml:"status"`
+	Title  string  `json:"title" yaml:"title"`
+	Type   string  `json:"type" yaml:"type"`
+	Error  *string `json:"error,omitempty" yaml:"error,omitempty"`
+	Note   *string `json:"note,omitempty" yaml:"note,omitempty"`
 }
 
 func StepProgressDTOFrom(sp domainRuntime.StepProgress) StepProgressDTO {
@@ -23,6 +24,7 @@ func StepProgressDTOFrom(sp domainRuntime.StepProgress) StepProgressDTO {
 		Title:  title,
 		Type:   stepType,
 		Error:  sp.Error,
+		Note:   sp.Note,
 	}
 }
 
@@ -36,7 +38,7 @@ func stepMeta(s domainStep.Step) (title, stepType string) {
 		return "", stepType
 	}
 	var wire struct {
-		Title string `json:"title"`
+		Title string `json:"title" yaml:"title"`
 	}
 	_ = json.Unmarshal(data, &wire)
 	return wire.Title, stepType

@@ -16,49 +16,119 @@ var (
 	//go:embed default.yaml
 	defaultConfigByte []byte
 	config            *Config
+	corrections       []FieldError
 	once              sync.Once
 )
 
 type Netbridge struct {
-	Enabled            bool `yaml:"enabled"`
-	EphemeralPortStart int  `yaml:"ephemeral_port_start"`
-	EphemeralPortEnd   int  `yaml:"ephemeral_port_end"`
+	Enabled            bool `yaml:"enabled"              json:"enabled"`
+	EphemeralPortStart int  `yaml:"ephemeral_port_start" json:"ephemeral_port_start" validate:"min=1,max=65535"`
+	EphemeralPortEnd   int  `yaml:"ephemeral_port_end"   json:"ephemeral_port_end"   validate:"min=1,max=65535"`
 }
 
 type API struct {
-	Host string `yaml:"host"`
+	Host string `yaml:"host" json:"host" validate:"quiverhost"`
 }
 
 type Logger struct {
-	Enabled bool   `yaml:"enabled"`
-	Level   string `yaml:"level"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Level   string `yaml:"level"   json:"level"   validate:"loglevel"`
+}
+
+type ManifoldFletcher struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
 type Manifold struct {
-	FetchTimeout string `yaml:"fetch_timeout"`
+	FetchTimeout string           `yaml:"fetch_timeout" json:"fetch_timeout" validate:"duration"`
+	Fletcher     ManifoldFletcher `yaml:"fletcher"      json:"fletcher"`
 }
 
 type Vault struct {
-	SweepInterval string `yaml:"sweep_interval"`
-	TTL           string `yaml:"ttl"`
+	SweepInterval string `yaml:"sweep_interval" json:"sweep_interval" validate:"duration"`
+	TTL           string `yaml:"ttl"            json:"ttl"            validate:"duration"`
+	IndexTTL      string `yaml:"index_ttl"      json:"index_ttl"      validate:"duration"`
+}
+
+// Search configures online discovery. Quiver authenticates to no git host:
+// discovery is anonymous, so it knows nothing about credentials and asks the
+// user for none.
+type Search struct {
+	PerProviderLimit int            `yaml:"per_provider_limit" json:"per_provider_limit" validate:"min=1"`
+	FetchConcurrency int            `yaml:"fetch_concurrency"  json:"fetch_concurrency"  validate:"min=1"`
+	ProviderTimeout  string         `yaml:"provider_timeout"   json:"provider_timeout"   validate:"duration"`
+	Unmarked         SearchUnmarked `yaml:"unmarked"           json:"unmarked"`
+}
+
+type SearchUnmarked struct {
+	MinStars   int `yaml:"min_stars"   json:"min_stars"   validate:"min=0"`
+	ProbeLimit int `yaml:"probe_limit" json:"probe_limit" validate:"min=1"`
+}
+
+// RecommendationSource is one query-less search a shelf is built from. Host
+// names a git host by its full name or its first label, and PushedWithin is a
+// duration that also accepts a day count such as 90d. Shelves are read from the
+// configuration file only: the settings API edits scalar fields and leaves the
+// list as written.
+type RecommendationSource struct {
+	Host         string `yaml:"host"          json:"host"`
+	Sort         string `yaml:"sort"          json:"sort"`
+	MinStars     int    `yaml:"min_stars"     json:"min_stars"`
+	MaxStars     int    `yaml:"max_stars"     json:"max_stars"`
+	PushedWithin string `yaml:"pushed_within" json:"pushed_within"`
+}
+
+type RecommendationShelf struct {
+	ID      string                 `yaml:"id"      json:"id"`
+	Title   string                 `yaml:"title"   json:"title"`
+	Limit   int                    `yaml:"limit"   json:"limit"`
+	Sources []RecommendationSource `yaml:"sources" json:"sources"`
+}
+
+// Recommendation configures the query-less listings the desktop home shows.
+// Hosts appear here and nowhere in the API.
+type Recommendation struct {
+	Enabled         bool                  `yaml:"enabled"          json:"enabled"`
+	RefreshInterval string                `yaml:"refresh_interval" json:"refresh_interval" validate:"duration"`
+	CandidateBudget int                   `yaml:"candidate_budget" json:"candidate_budget" validate:"min=1"`
+	MinEntries      int                   `yaml:"min_entries"      json:"min_entries"      validate:"min=0"`
+	Shelves         []RecommendationShelf `yaml:"shelves"          json:"shelves"`
 }
 
 type ArrowAutoRetry struct {
-	Enabled bool `yaml:"enabled"`
-	Retries int  `yaml:"retries"`
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	Retries int  `yaml:"retries" json:"retries" validate:"min=0"`
 }
 
 type Arrows struct {
-	AutoRetry ArrowAutoRetry `yaml:"auto_retry"`
+	AutoRetry            ArrowAutoRetry `yaml:"auto_retry"             json:"auto_retry"`
+	VersionCheckTTL      string         `yaml:"version_check_ttl"      json:"version_check_ttl"      validate:"duration"`
+	VersionCheckInterval string         `yaml:"version_check_interval" json:"version_check_interval" validate:"durationoroff"`
+	SelfUpdateChannel    string         `yaml:"self_update_channel"    json:"self_update_channel"`
+	ExtractMaxBytes      int64          `yaml:"extract_max_bytes"      json:"extract_max_bytes"      validate:"min=1"`
+}
+
+// Auth configures the device-pairing flow used to authenticate quiver.desktop
+// when the daemon is reachable over tcp://. It is never consulted when the
+// daemon is bound to unix:// or npipe://, since those connections are already
+// trusted by filesystem and pipe permissions.
+type Auth struct {
+	PairingCodeTTL   string `yaml:"pairing_code_ttl"   json:"pairing_code_ttl"   validate:"duration"`
+	RedeemRateLimit  int    `yaml:"redeem_rate_limit"  json:"redeem_rate_limit"  validate:"min=1"`
+	RedeemRateWindow string `yaml:"redeem_rate_window" json:"redeem_rate_window" validate:"duration"`
 }
 
 type ConfigData struct {
-	Netbridge Netbridge `yaml:"netbridge"`
-	API       API       `yaml:"api"`
-	Logger    Logger    `yaml:"logger"`
-	Manifold  Manifold  `yaml:"manifold"`
-	Vault     Vault     `yaml:"vault"`
-	Arrows    Arrows    `yaml:"arrows"`
+	Netbridge Netbridge `yaml:"netbridge" json:"netbridge"`
+	API       API       `yaml:"api"       json:"api"`
+	Logger    Logger    `yaml:"logger"    json:"logger"`
+	Manifold  Manifold  `yaml:"manifold"  json:"manifold"`
+	Vault     Vault     `yaml:"vault"     json:"vault"`
+	Arrows    Arrows    `yaml:"arrows"    json:"arrows"`
+	Search    Search    `yaml:"search"    json:"search"`
+	Auth      Auth      `yaml:"auth"      json:"auth"`
+
+	Recommendation Recommendation `yaml:"recommendation" json:"recommendation"`
 }
 
 type Config struct {
@@ -80,9 +150,44 @@ func Get() *Config {
 
 		if err := yaml.Unmarshal(configBytes, config); err != nil {
 			config = getDefaultConfig()
+			return
 		}
+
+		corrections = Sanitize(&config.Config)
 	})
 	return config
+}
+
+// GetAt resolves a config the same way Get does, but rooted at homeDir
+// instead of the process-level HOME, and without Get's process-wide cache —
+// a shared cache would freeze the first homeDir's result for every later
+// caller with a different homeDir. Every call re-reads and re-parses the
+// overlay file, which is fine here: it only ever runs once per process, at
+// construction time (see internal/core.NewAt), never on a hot path.
+func GetAt(homeDir string) (*Config, []FieldError) {
+	cfg := getDefaultConfig()
+
+	configPath := filepath.Clean(metadata.GetConfigPathAt(homeDir))
+	configBytes, err := fns.Read(context.Background(), configPath)
+	if err != nil {
+		return cfg, nil
+	}
+
+	if err := yaml.Unmarshal(configBytes, cfg); err != nil {
+		return getDefaultConfig(), nil
+	}
+
+	return cfg, Sanitize(&cfg.Config)
+}
+
+// Corrections reports the fields Get replaced with their defaults because the
+// user's file held a value the daemon cannot use. It is meaningful only after
+// Get has run, and it exists so the daemon can report them once the logger is
+// configured: the logger takes its own settings from Get, so anything logged
+// during the load would go to stderr and never reach the log file.
+func Corrections() []FieldError {
+	Get()
+	return corrections
 }
 
 func GetNetbridge() Netbridge {
@@ -109,6 +214,18 @@ func GetArrows() Arrows {
 	return Get().Config.Arrows
 }
 
+func GetSearch() Search {
+	return Get().Config.Search
+}
+
+func GetRecommendation() Recommendation {
+	return Get().Config.Recommendation
+}
+
+func GetAuth() Auth {
+	return Get().Config.Auth
+}
+
 func getDefaultConfig() *Config {
 	cfg := &Config{}
 	if err := yaml.Unmarshal(defaultConfigByte, cfg); err != nil {
@@ -121,5 +238,6 @@ func getDefaultConfig() *Config {
 
 func resetForTesting() {
 	config = nil
+	corrections = nil
 	once = sync.Once{}
 }

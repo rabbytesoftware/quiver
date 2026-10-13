@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	dto "github.com/rabbytesoftware/quiver.core/internal/api/v0/dto"
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/tests/kit"
 )
@@ -54,9 +55,11 @@ func (s *ConcurrencySuite) TestConcurrency_ConcurrentInstallsSharedDep() {
 	env.WaitForState(s.T(), kit.NSFor("quiver-test/service-b", "v1"), domain.ArrowStateRunning, 120*time.Second)
 	env.WaitForState(s.T(), kit.NSFor("quiver-test/composed-c", "v1"), domain.ArrowStateReady, 120*time.Second)
 
-	// A second install while already ready is idempotent — returns 202.
-	s.Equal(http.StatusAccepted, tc.Install(kit.NSFor("quiver-test/composed-c", "v1"), nil),
-		"second install of an already-ready arrow must be idempotent (202)")
+	// A second install while already ready is a no-op: nothing is executed, so
+	// the daemon answers 200 rather than 202. The distinction is what lets a
+	// client tell "work started, wait for it" from "nothing to wait for".
+	s.Equal(http.StatusOK, tc.Install(kit.NSFor("quiver-test/composed-c", "v1"), nil),
+		"second install of an already-ready arrow is a no-op (200)")
 }
 
 func (s *ConcurrencySuite) TestConcurrency_ConcurrentListUnderLoad() {
@@ -114,23 +117,17 @@ func (s *ConcurrencySuite) TestConcurrency_InstallAndUninstall() {
 
 	wg.Wait()
 
-	// Final state must be terminal: ready or absent, never stuck
-	deadline := time.Now().Add(20 * time.Second)
-	var finalState domain.ArrowState
-	for time.Now().Before(deadline) {
-		detail, status := tc.GetDetail(ns)
-		if status == http.StatusOK {
-			finalState = domain.ArrowState(detail.State)
-			if finalState == domain.ArrowStateReady || finalState == domain.ArrowStateAbsent {
-				break
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	s.True(
-		finalState == domain.ArrowStateReady || finalState == domain.ArrowStateAbsent,
-		"after concurrent install+uninstall, state must be terminal (ready or absent), got: %s",
-		finalState,
+	// Whichever of the two racing requests wins, the runtime must settle. The
+	// waiter carries that assertion: a state stuck in installing or uninstalling
+	// never satisfies it and fails the test.
+	kit.WaitForDetail(
+		s.T(), tc, ns,
+		"a terminal state (ready or absent) after concurrent install+uninstall",
+		60*time.Second,
+		func(detail dto.ArrowDetailDTO, status int) bool {
+			return status == http.StatusOK &&
+				(detail.State == string(domain.ArrowStateReady) ||
+					detail.State == string(domain.ArrowStateAbsent))
+		},
 	)
 }

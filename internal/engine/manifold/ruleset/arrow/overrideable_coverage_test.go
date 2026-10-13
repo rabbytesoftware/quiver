@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/domain/runtime/step"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold/models"
@@ -336,5 +338,188 @@ func TestOverrideableCoverageRule_GlobArchCoversFamily(t *testing.T) {
 	errs := rule.Validate(&domain.Arrow{}, precompiled)
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors when linux/* glob covers all linux variants, got: %v", errs)
+	}
+}
+
+// TestOverrideableCoverageRule_Preinstalled_EmptyCommand closes the same
+// "6th lifecycle key needs sweeping into N files" gap that
+// no_dependencies_step.go, timeout_format.go and variable_refs.go each hit
+// before it. A run step with no command at all is schema-valid — the step
+// schema requires only `type` — and this rule is the only thing that rejects
+// it, by way of a command with no default and no OS coverage. preinstalled
+// was missing from the phase list, so a probe compiled to an empty command
+// and the run handler executed it as `sh -c ""`, which exits 0: a detection
+// reported successful from a command that never ran.
+func TestOverrideableCoverageRule_Preinstalled_EmptyCommand(t *testing.T) {
+	rule := OverrideableCoverageRule{}
+	precompiled := map[string]models.PrecompiledTarget{
+		"linux/amd64": {
+			Lifecycle: domain.TargetLifecycle{
+				Preinstalled: step.StepList{
+					step.RunStep{Command: step.Overrideable[string]{}},
+				},
+			},
+		},
+	}
+	errs := rule.Validate(&domain.Arrow{}, precompiled)
+	if len(errs) == 0 {
+		t.Fatal("expected a coverage error for a preinstalled command with no default, got none")
+	}
+	if errs[0].Rule != "insufficient_coverage" {
+		t.Fatalf("expected rule insufficient_coverage, got %q", errs[0].Rule)
+	}
+	if !strings.Contains(errs[0].Field, "lifecycle.preinstalled[0].command") {
+		t.Fatalf("expected the field to name the preinstalled command, got %q", errs[0].Field)
+	}
+}
+
+// TestOverrideableCoverageRule_Preinstalled_CoveredCommandPasses keeps the fix
+// from being a blanket rejection: a preinstalled command that does declare a
+// default is as legal as any other lifecycle's.
+func TestOverrideableCoverageRule_Preinstalled_CoveredCommandPasses(t *testing.T) {
+	rule := OverrideableCoverageRule{}
+	precompiled := map[string]models.PrecompiledTarget{
+		"linux/amd64": {
+			Lifecycle: domain.TargetLifecycle{
+				Preinstalled: step.StepList{
+					step.NewRunStep("detect", "test -x /usr/bin/foo", false, "5s", true),
+				},
+			},
+		},
+	}
+	errs := rule.Validate(&domain.Arrow{}, precompiled)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors for a preinstalled command with a default, got: %v", errs)
+	}
+}
+
+// A target scoped to one OS family only ever runs on that family, so its
+// overrides must cover that family and nothing else. Demanding coverage for an
+// OS the target excludes rejects a correct manifest.
+func TestOverrideableCoverageRule_TargetKeyScopesRequiredCoverage(t *testing.T) {
+	rule := OverrideableCoverageRule{}
+	fetch := step.FetchStep{
+		URL: step.Overrideable[string]{OSArch: map[string]string{
+			"linux/amd64": "https://example.com/linux-amd64.tar.xz",
+			"linux/arm64": "https://example.com/linux-arm64.tar.xz",
+		}},
+		To: step.Overrideable[string]{Default: "./file"},
+	}
+	precompiled := map[string]models.PrecompiledTarget{
+		"linux/*": {
+			Lifecycle: domain.TargetLifecycle{Install: step.StepList{fetch}},
+		},
+	}
+
+	errs := rule.Validate(&domain.Arrow{}, precompiled)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors: a linux/* target covering both linux arches is complete, got: %v", errs)
+	}
+}
+
+// The scoping must not become a way to skip validation: a target that names one
+// OS exactly still has to cover it.
+func TestOverrideableCoverageRule_ExactTargetKeyStillRequiresItsOwnOS(t *testing.T) {
+	rule := OverrideableCoverageRule{}
+	precompiled := map[string]models.PrecompiledTarget{
+		"linux/arm64": {
+			Exports: map[string]step.Overrideable[string]{
+				"BIN": {OSArch: map[string]string{"linux/amd64": "/bin/foo"}},
+			},
+		},
+	}
+
+	errs := rule.Validate(&domain.Arrow{}, precompiled)
+	if len(errs) == 0 {
+		t.Fatal("expected a coverage error: the target is linux/arm64 and only linux/amd64 is provided")
+	}
+	if !strings.Contains(errs[0].Message, "linux/arm64") {
+		t.Errorf("expected the message to name the uncovered OS, got: %s", errs[0].Message)
+	}
+}
+
+// A key that names no OS is not an OS pattern, so there is no scope to narrow
+// to. Requiring every OS there keeps the rule from being silently skipped.
+func TestOverrideableCoverageRule_NonOSTargetKeyStillRequiresEveryOS(t *testing.T) {
+	rule := OverrideableCoverageRule{}
+	precompiled := map[string]models.PrecompiledTarget{
+		"t": {
+			Exports: map[string]step.Overrideable[string]{
+				"BIN": {OSArch: map[string]string{"linux/amd64": "/bin/foo"}},
+			},
+		},
+	}
+
+	errs := rule.Validate(&domain.Arrow{}, precompiled)
+	if len(errs) == 0 {
+		t.Fatal("expected coverage errors for a target key that matches no OS")
+	}
+}
+
+func fromToKinds() []string {
+	return []string{"extract", "portable"}
+}
+
+func fromToStep(
+	kind string,
+	from step.Overrideable[string],
+	to step.Overrideable[string],
+	timeout step.Overrideable[string],
+) step.Step {
+	if kind == "extract" {
+		return step.ExtractStep{From: from, To: to, Timeout: timeout}
+	}
+	return step.PortableStep{From: from, To: to, Timeout: timeout}
+}
+
+func TestOverrideableCoverageRule_Validate_FromToSteps(t *testing.T) {
+	dest := step.Overrideable[string]{Default: "./"}
+	timeout := step.Overrideable[string]{Default: "10s"}
+
+	testCases := []struct {
+		name    string
+		from    step.Overrideable[string]
+		timeout step.Overrideable[string]
+		wantErr bool
+	}{
+		{
+			name: "missing darwin coverage",
+			from: step.Overrideable[string]{OSArch: map[string]string{
+				"linux/amd64":   "./a",
+				"linux/arm64":   "./b",
+				"windows/amd64": "./c",
+				"windows/arm64": "./d",
+			}},
+			timeout: timeout,
+			wantErr: true,
+		},
+		{
+			name:    "omitted timeout is valid",
+			from:    step.Overrideable[string]{Default: "./archive"},
+			timeout: step.Overrideable[string]{},
+		},
+		{
+			name:    "missing from",
+			timeout: timeout,
+			wantErr: true,
+		},
+	}
+
+	for _, kind := range fromToKinds() {
+		for _, tc := range testCases {
+			t.Run(kind+" "+tc.name, func(t *testing.T) {
+				precompiled := map[string]models.PrecompiledTarget{
+					"t": {
+						Lifecycle: domain.TargetLifecycle{
+							Install: step.StepList{fromToStep(kind, tc.from, dest, tc.timeout)},
+						},
+					},
+				}
+
+				errs := OverrideableCoverageRule{}.Validate(&domain.Arrow{}, precompiled)
+
+				assert.Equal(t, tc.wantErr, len(errs) > 0)
+			})
+		}
 	}
 }

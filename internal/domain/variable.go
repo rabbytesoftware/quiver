@@ -9,6 +9,46 @@ const (
 	MaxVariableNameLength = 255
 )
 
+// Built-in variable names. Each one is a fact Quiver computes about an
+// execution — where it runs, what it runs as, which revision it came from — so
+// none of them is a preference a caller can supply.
+const (
+	VarWorkdir        = "WORKDIR"
+	VarInstallPath    = "INSTALL_PATH"
+	VarArrowNamespace = "ARROW_NAMESPACE"
+	VarPlatform       = "PLATFORM"
+	VarRef            = "REF"
+
+	// VarArrowUIListen is the unix socket address an arrow serves its
+	// interface on, provisioned only for methods with a run step whose ui listens.
+	VarArrowUIListen = "ARROW_UI_LISTEN"
+
+	// VarArrowApp is the executable that starts the app an install exposed as
+	// a desktop entry, resolved when a run step that names it starts.
+	VarArrowApp = "ARROW_APP"
+)
+
+// ReservedVariableNames returns the built-in names. The order is fixed so a
+// request setting several of them is always rejected on the same one.
+func ReservedVariableNames() []string {
+	return []string{
+		VarWorkdir,
+		VarInstallPath,
+		VarArrowNamespace,
+		VarPlatform,
+		VarRef,
+		VarArrowUIListen,
+		VarArrowApp,
+	}
+}
+
+// IsReservedVariable reports whether name is computed by Quiver.
+func IsReservedVariable(
+	name string,
+) bool {
+	return slices.Contains(ReservedVariableNames(), name)
+}
+
 type Variable struct {
 	Name        string       `yaml:"name"        json:"name"`
 	Description string       `yaml:"description" json:"description"`
