@@ -298,12 +298,12 @@ Netbridge has no concept of "arrow" or "execution"; it just sees `ownerKey` stri
 | Arrow lifecycle event | Netbridge interaction |
 |---|---|
 | Manifest validation | `manifold/ruleset/arrow/netbridge.go` runs `PortDef.Validate()` per entry and rejects duplicate names. No allocation yet. |
-| Variable assembly (any method execution) | For each `arrow.Netbridge` entry, `Allocate(ctx, namespace, port.Protocol, port.Default)` is called. Result `→ vars[port.Name] = strconv.Itoa(allocated)`. On error: abort if `Required`, skip otherwise. This is **layer 4** of the 6-layer variable resolution pipeline (between manifest defaults and stored vars from last execution). |
-| Method execution begins | Already allocated — no extra Netbridge work. |
-| Method execution ends | App layer calls `DeallocateByOwner(ctx, namespace)` to release everything for that namespace. See [usecases.md § Port deallocation](usecases.md) for the exact timing relative to `_install` / `_execute` / `_stop` / `_uninstall`. |
-| Arrow uninstall | Same as method end — `DeallocateByOwner` is called once `_uninstall` finishes. |
+| Variable assembly (any method execution) | For each `arrow.Netbridge` entry the runtime does not already hold a port for, `Allocate(ctx, namespace, port.Protocol, port.Default)` is called. Result `→ vars[port.Name] = strconv.Itoa(allocated)`. On error: abort if `Required`, skip otherwise. This is **layer 4** of the 6-layer variable resolution pipeline (between manifest defaults and stored vars from last execution). A port named in the stored variables of the previous execution is **held**: it is not allocated again, and layer 5 supplies its number. |
+| Method execution begins / ends | No Netbridge work. The ports stay with the arrow, so a method run beside a live server sees the number that server is bound to. |
+| Arrow uninstall | No Netbridge work: the ports stay held with the arrow's runtime, and a reinstall runs on the same numbers. |
+| Runtime forgotten (arrow removed from the catalogue) | `runtime.Forget` calls `DeallocateByOwner(ctx, namespace)` before forgetting the aggregate, whether or not a runtime aggregate exists (an install that failed after allocating leaves ports but no runtime). A failed release stops the forget so it can be retried. |
 
-The assembler currently uses the **bare namespace string** as the owner key. Two simultaneous executions of the same arrow would share the key — and the second `Allocate` for the same `preferred` port would fall back to the ephemeral range because the first execution's allocation is already in the read model. There is no per-execution scoping.
+The assembler uses the **bare namespace string** as the owner key. Netbridge serializes `Allocate` and `DeallocateByOwner` and waits for each command's projection before returning, so back-to-back allocations (the assembler allocates every declared port in a row) and concurrent assemblies never pick a port whose allocation is still being projected.
 
 ---
 
@@ -392,8 +392,8 @@ Note: `domain/netbridge.Protocol` and `domain/netbridge.PortDef` come from the *
 - **Concurrent strategy discovery.** Probing starts in a goroutine at `Build()` time but the caller never blocks on it; the first allocation receives the result through a buffered channel guarded by `sync.Once`.
 - **No interface-leak of strategies.** UPnP, NAT-PMP, and IGD types are confined to `internal/strategies`. The public `Netbridge` interface mentions ports and protocols only.
 - **Event log is the source of truth.** The read model is rebuildable from the asynx stream. Read-model writes during projection are silently ignored if they fail.
-- **Sequential allocation.** Each `Allocate` call is independent. The assembler rolls back partial allocations on a `Required` failure by calling `DeallocateByOwner` (or the next execution's deallocation will pick up orphans, since the owner key is the namespace).
-- **No port stability across executions.** A new execution may receive a different number than the previous one if the preferred port has been claimed elsewhere in the meantime.
+- **Serialized allocation.** `Allocate` and `DeallocateByOwner` hold one mutex and wait for the read model to reflect their commands before returning. The read model is projected asynchronously: without the wait, a second allocation could pick the port the first just took and its `AllocatePort` would be rejected with `ErrValidation`.
+- **Port stability.** An arrow keeps the numbers of its first execution for as long as its runtime lives (see §9). A partial allocation left by a `Required` failure stays held under the owner key and is released with the rest by `DeallocateByOwner` when the runtime is forgotten.
 
 ---
 

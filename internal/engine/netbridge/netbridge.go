@@ -59,6 +59,11 @@ type netbridgeService struct {
 	stratsCh  <-chan []strategies.Strategy
 	strats    []strategies.Strategy
 	once      sync.Once
+	// mu serializes allocation. Choosing a port reads the read model, which is
+	// projected asynchronously, so two allocations in flight at once (or back to
+	// back before the projection runs) would pick the same candidate and the
+	// second command would be rejected.
+	mu        sync.Mutex
 	portStart int
 	portEnd   int
 }
@@ -100,6 +105,9 @@ func (n *netbridgeService) Allocate(
 	protocol netbridge.Protocol,
 	preferred int,
 ) (int, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	port, err := findAvailablePort(ctx, preferred, n.portStart, n.portEnd, protocol, n.readModel)
 	if err != nil {
 		return 0, err
@@ -122,6 +130,7 @@ func (n *netbridgeService) Allocate(
 	if err != nil {
 		return 0, err
 	}
+	n.waitForProjection()
 
 	return port, nil
 }
@@ -131,6 +140,9 @@ func (n *netbridgeService) DeallocateByOwner(
 	ctx context.Context,
 	ownerKey string,
 ) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	allocations, err := n.readModel.FindByOwner(ctx, ownerKey)
 	if err != nil {
 		return err
@@ -146,6 +158,7 @@ func (n *netbridgeService) DeallocateByOwner(
 			return sendErr
 		}
 	}
+	n.waitForProjection()
 
 	return nil
 }

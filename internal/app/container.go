@@ -303,6 +303,7 @@ func New(
 		engines.Manifold,
 		engines.Wizard,
 		engines.Surface,
+		engines.Netbridge,
 		os,
 		h,
 		engines.Providers,

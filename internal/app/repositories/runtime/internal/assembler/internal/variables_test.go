@@ -472,6 +472,48 @@ func TestResolveVariables_Netbridge_SuccessfulAllocation(t *testing.T) {
 	assert.Equal(t, "9000", vars["API_PORT"])
 }
 
+func TestResolveVariables_Netbridge_PortHeldFromTheLastReturn_IsNotAllocatedAgain(t *testing.T) {
+	ns := testNsForVars()
+	arrow := &domain.Arrow{
+		Namespace: ns,
+		Netbridge: []netbridge.PortDef{
+			{Name: "API_PORT", Protocol: netbridge.ProtocolTCP, Default: 8080, Required: true},
+		},
+	}
+	axRuntime := newTestAsynxRuntimeForVars(t)
+	_, err := axRuntime.Send(context.Background(), &setStoredVarsCommand{ns: ns, storedVars: map[string]string{"API_PORT": "9000"}})
+	require.NoError(t, err)
+	nb := &mocks.Netbridge{AllocatePort: 7000}
+
+	vars, err := assemblerinternal.ResolveVariables(context.Background(), ns, arrow, domain.Target{}, domain.OSDarwinARM64,
+		testGetArrow(arrow), axRuntime, nil, nb, nil, nil, stepsUnderTest(arrow))
+	require.NoError(t, err)
+	assert.Equal(t, "9000", vars["API_PORT"], "a method run beside a live server must see the port that server is on")
+	assert.Zero(t, nb.AllocateCalls, "the arrow's ports are held until its runtime is forgotten")
+}
+
+func TestResolveVariables_Netbridge_OnlyThePortsNotHeldAreAllocated(t *testing.T) {
+	ns := testNsForVars()
+	arrow := &domain.Arrow{
+		Namespace: ns,
+		Netbridge: []netbridge.PortDef{
+			{Name: "GAME_PORT", Protocol: netbridge.ProtocolTCP, Default: 25565, Required: true},
+			{Name: "QUERY_PORT", Protocol: netbridge.ProtocolUDP, Default: 25566, Required: true},
+		},
+	}
+	axRuntime := newTestAsynxRuntimeForVars(t)
+	_, err := axRuntime.Send(context.Background(), &setStoredVarsCommand{ns: ns, storedVars: map[string]string{"GAME_PORT": "25565"}})
+	require.NoError(t, err)
+	nb := &mocks.Netbridge{AllocatePort: 25566}
+
+	vars, err := assemblerinternal.ResolveVariables(context.Background(), ns, arrow, domain.Target{}, domain.OSDarwinARM64,
+		testGetArrow(arrow), axRuntime, nil, nb, nil, nil, stepsUnderTest(arrow))
+	require.NoError(t, err)
+	assert.Equal(t, "25565", vars["GAME_PORT"])
+	assert.Equal(t, "25566", vars["QUERY_PORT"])
+	assert.Equal(t, 1, nb.AllocateCalls)
+}
+
 func TestResolveVariables_Netbridge_RequiredAllocationError(t *testing.T) {
 	ns := testNsForVars()
 	arrow := &domain.Arrow{

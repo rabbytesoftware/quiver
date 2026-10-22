@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge"
+
 	"github.com/char2cs/asynx"
 
 	runtimeinternal "github.com/rabbytesoftware/quiver.core/internal/app/repositories/runtime/internal"
@@ -70,4 +72,10 @@ func SurfaceHooks(
 ) {
 	hooks := withSurface(runtimeinternal.CatalogHooks{}, surfaces)
 	return hooks.SurfaceReady, hooks.CloseSurface
+}
+
+// WithNetbridge hands a test repository the Netbridge New would have been given.
+func WithNetbridge(rt Runtime, nb netbridge.Netbridge) Runtime {
+	rt.(*runtimeRepository).netbridge = nb
+	return rt
 }

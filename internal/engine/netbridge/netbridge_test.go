@@ -3,7 +3,9 @@ package netbridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
+	"sync"
 	"testing"
 
 	asynxstore "github.com/char2cs/asynx/store"
@@ -374,6 +376,87 @@ func TestAllocate_SamePreferredPortTwiceGetsDifferentPort(
 	assert.NotEqual(t, preferred, port2)
 	assert.GreaterOrEqual(t, port2, testEphemeralPortStart)
 	assert.LessOrEqual(t, port2, testEphemeralPortEnd)
+}
+
+// The assembler allocates every declared port back to back. The read model is
+// projected asynchronously, so without Allocate waiting for its own projection
+// the second call picks the port the first just took and the command is rejected.
+func TestAllocate_BackToBack_NeverReusesAPortStillBeingProjected(
+	t *testing.T,
+) {
+	nb := buildNetbridge(t)
+	ctx := context.Background()
+
+	taken := freePort(t)
+	_, err := nb.Allocate(ctx, "owner-a", netbridge.ProtocolTCP, taken)
+	require.NoError(t, err)
+
+	seen := map[int]bool{taken: true}
+	for i := 0; i < 20; i++ {
+		proto := netbridge.ProtocolTCP
+		if i%2 == 1 {
+			proto = netbridge.ProtocolUDP
+		}
+		port, err := nb.Allocate(ctx, "owner-b", proto, taken)
+		require.NoError(t, err, "allocation %d", i)
+		require.False(t, seen[port], "port %d handed out twice", port)
+		seen[port] = true
+	}
+}
+
+func TestAllocate_Concurrent_NeverHandsOutAPortTwice(
+	t *testing.T,
+) {
+	nb := buildNetbridge(t)
+	ctx := context.Background()
+
+	const workers = 16
+	ports := make(chan int, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			port, err := nb.Allocate(ctx, fmt.Sprintf("owner-%d", i), netbridge.ProtocolTCP, 0)
+			if err != nil {
+				errs <- err
+				return
+			}
+			ports <- port
+		}()
+	}
+	wg.Wait()
+	close(ports)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	seen := map[int]bool{}
+	for port := range ports {
+		require.False(t, seen[port], "port %d handed out twice", port)
+		seen[port] = true
+	}
+	assert.Len(t, seen, workers)
+}
+
+func TestDeallocateByOwner_FreesThePortsForTheNextAllocation(
+	t *testing.T,
+) {
+	nb := buildNetbridge(t)
+	ctx := context.Background()
+
+	preferred := freePort(t)
+	first, err := nb.Allocate(ctx, "owner-a", netbridge.ProtocolTCP, preferred)
+	require.NoError(t, err)
+	require.Equal(t, preferred, first)
+
+	require.NoError(t, nb.DeallocateByOwner(ctx, "owner-a"))
+
+	again, err := nb.Allocate(ctx, "owner-b", netbridge.ProtocolTCP, preferred)
+	require.NoError(t, err)
+	assert.Equal(t, preferred, again, "a released port is immediately available again")
 }
 
 func TestShutdown_DrainsAsynx(

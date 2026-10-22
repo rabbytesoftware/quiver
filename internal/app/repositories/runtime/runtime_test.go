@@ -541,7 +541,7 @@ func TestLifecycleNew_Success(t *testing.T) {
 	getArrow := func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error) {
 		return cat.Get(ctx, ns)
 	}
-	lc, err := runtime.New(getArrow, getArrow, axRuntime, nil, nil, nil, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, nil)
+	lc, err := runtime.New(getArrow, getArrow, axRuntime, nil, nil, nil, nil, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, lc)
 }
@@ -594,7 +594,7 @@ func TestLifecycleNew_ShutdownAsynx_Error(t *testing.T) {
 	getArrow := func(ctx context.Context, ns domain.Namespace) (*domain.Arrow, error) {
 		return cat.Get(ctx, ns)
 	}
-	_, err := runtime.New(getArrow, getArrow, axRuntime, nil, nil, nil, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, nil)
+	_, err := runtime.New(getArrow, getArrow, axRuntime, nil, nil, nil, nil, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, nil)
 	require.Error(t, err)
 }
 
@@ -1015,7 +1015,7 @@ func newPlanningRuntime(
 	getDepArrow := func(context.Context, domain.Namespace) (*domain.Arrow, error) {
 		return nil, errors.New("no dependencies")
 	}
-	lc, err := runtime.New(getArrow, getDepArrow, newTestAsynxRuntime(t), w, nil, &mocks.Vault{}, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, nil)
+	lc, err := runtime.New(getArrow, getDepArrow, newTestAsynxRuntime(t), w, nil, nil, &mocks.Vault{}, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, nil)
 	require.NoError(t, err)
 	return lc
 }
@@ -1672,6 +1672,50 @@ func TestForget_MissingRuntime_IsANoop(t *testing.T) {
 	assert.False(t, forgetCalled)
 }
 
+func TestForget_ReleasesThePortsTheArrowHeld(t *testing.T) {
+	ax := &appMocks.AsynxRuntime{
+		ExistsFn: func(_ context.Context, _ string) (bool, error) { return true, nil },
+		ForgetFn: func(_ context.Context, _ string) error { return nil },
+	}
+	nb := &mocks.Netbridge{}
+	repo := runtime.WithNetbridge(newRepoWithAssembler(t, ax, successAssembler()), nb)
+
+	require.NoError(t, repo.Forget(context.Background(), testNs()))
+	assert.Equal(t, []string{testNs().String()}, nb.DeallocatedOwners)
+}
+
+// A BeginInstall that failed after allocating ports leaves no runtime to
+// forget, yet the ports are held: they are released all the same.
+func TestForget_MissingRuntime_StillReleasesPorts(t *testing.T) {
+	ax := &appMocks.AsynxRuntime{
+		ExistsFn: func(_ context.Context, _ string) (bool, error) { return false, nil },
+	}
+	nb := &mocks.Netbridge{}
+	repo := runtime.WithNetbridge(newRepoWithAssembler(t, ax, successAssembler()), nb)
+
+	require.NoError(t, repo.Forget(context.Background(), testNs()))
+	assert.Equal(t, []string{testNs().String()}, nb.DeallocatedOwners)
+}
+
+func TestForget_ReleasePortsError_StopsBeforeForgetting(t *testing.T) {
+	releaseErr := errors.New("release failed")
+	forgetCalled := false
+	ax := &appMocks.AsynxRuntime{
+		ExistsFn: func(_ context.Context, _ string) (bool, error) { return true, nil },
+		ForgetFn: func(_ context.Context, _ string) error {
+			forgetCalled = true
+			return nil
+		},
+	}
+	nb := &mocks.Netbridge{DeallocateErr: releaseErr}
+	repo := runtime.WithNetbridge(newRepoWithAssembler(t, ax, successAssembler()), nb)
+
+	err := repo.Forget(context.Background(), testNs())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, releaseErr)
+	assert.False(t, forgetCalled, "a runtime whose ports could not be released must stay forgettable on retry")
+}
+
 func TestForget_ExistsError_Propagates(t *testing.T) {
 	existsErr := errors.New("exists failed")
 	ax := &appMocks.AsynxRuntime{
@@ -1945,7 +1989,7 @@ func TestBeginInstall_ChecksumMismatch_RefreshesManifestAndRetriesWithItsSteps(t
 	getDepArrow := func(context.Context, domain.Namespace) (*domain.Arrow, error) {
 		return nil, errors.New("no dependencies")
 	}
-	lc, err := runtime.New(getArrow, getDepArrow, newTestAsynxRuntime(t), w, nil, &mocks.Vault{}, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, refresh)
+	lc, err := runtime.New(getArrow, getDepArrow, newTestAsynxRuntime(t), w, nil, nil, &mocks.Vault{}, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, refresh)
 	require.NoError(t, err)
 	ended, unsub, err := lc.ListenEnded(context.Background(), ns)
 	require.NoError(t, err)
@@ -1996,7 +2040,7 @@ func TestBeginInstall_ChecksumMismatch_ArrowUnreadableAfterRefresh_FailsWithoutR
 		refreshed.Store(true)
 		return nil
 	}
-	lc, err := runtime.New(getArrow, getArrow, newTestAsynxRuntime(t), w, nil, &mocks.Vault{}, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, refresh)
+	lc, err := runtime.New(getArrow, getArrow, newTestAsynxRuntime(t), w, nil, nil, &mocks.Vault{}, f.markInstalled, f.markUninstalled, f.markLastUsed, f.hasDependents, f.listArrows, domain.OSDarwinARM64, func(context.Context) ([]domain.Namespace, error) { return nil, nil }, refresh)
 	require.NoError(t, err)
 	ended, unsub, err := lc.ListenEnded(context.Background(), ns)
 	require.NoError(t, err)

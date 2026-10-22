@@ -19,6 +19,7 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	domainRuntime "github.com/rabbytesoftware/quiver.core/internal/domain/runtime"
 	domainStep "github.com/rabbytesoftware/quiver.core/internal/domain/runtime/step"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/surface"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
 	wizardPkg "github.com/rabbytesoftware/quiver.core/internal/engine/wizard"
@@ -171,6 +172,7 @@ type runtimeRepository struct {
 	listArrows            ListArrowsFn
 	listRuntimeAggregates ListRuntimeAggregatesFn
 	closeSurface          func(ns domain.Namespace)
+	netbridge             netbridge.Netbridge
 	drainWg               sync.WaitGroup // tracks only one-shot-method drains; see waitDrains
 	drainMu               sync.Mutex
 	drainClosed           bool
@@ -182,6 +184,7 @@ func New(
 	axRuntime asynx.Asynx[domainRuntime.ArrowRuntime],
 	w wizardPkg.Wizard,
 	surfaces surface.Surface,
+	nb netbridge.Netbridge,
 	v vault.Vault,
 	markInstalled MarkInstalledFn,
 	markUninstalled MarkUninstalledFn,
@@ -195,7 +198,8 @@ func New(
 	repo := &runtimeRepository{
 		axRuntime:             axRuntime,
 		wizard:                w,
-		assembler:             plannedAssembler{assembler.New(assembler.GetArrowFn(getArrow), assembler.GetArrowFn(getDepArrow), axRuntime, v, nil, surfaces, os), getArrow, os},
+		assembler:             plannedAssembler{assembler.New(assembler.GetArrowFn(getArrow), assembler.GetArrowFn(getDepArrow), axRuntime, v, nb, surfaces, os), getArrow, os},
+		netbridge:             nb,
 		hasDependents:         hasDependents,
 		listArrows:            listArrows,
 		listRuntimeAggregates: listRuntimeAggregates,
@@ -857,6 +861,11 @@ func (s *runtimeRepository) MarkReady(ctx context.Context, ns domain.Namespace) 
 }
 
 func (s *runtimeRepository) Forget(ctx context.Context, ns domain.Namespace) error {
+	if s.netbridge != nil {
+		if err := s.netbridge.DeallocateByOwner(ctx, ns.String()); err != nil {
+			return fmt.Errorf("forget runtime: release ports: %w", err)
+		}
+	}
 	exists, err := s.axRuntime.Exists(ctx, ns.String())
 	if err != nil {
 		return fmt.Errorf("forget runtime: %w", err)
