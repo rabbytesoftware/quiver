@@ -67,6 +67,28 @@ func TestUnixProcess_Interrupt(t *testing.T) {
 	}
 }
 
+// The exit watcher marks a process Finished as soon as it is gone. A stop that
+// signalled it just before and marks it Stopping afterwards must not undo that:
+// TestUnixProcess_Interrupt failed now and then with the process stuck "stopping".
+func TestUnixProcess_SetStatus_FinishedIsFinal(t *testing.T) {
+	proc := startTestProcess(t, "echo done")
+	defer proc.Close()
+	if err := proc.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	unix, ok := proc.(*unixProcess)
+	if !ok {
+		t.Fatalf("process is %T, want *unixProcess", proc)
+	}
+
+	for _, late := range []models.Status{models.StatusStopping, models.StatusKilling, models.StatusRunning} {
+		unix.setStatus(late)
+		if got := proc.Status(); got != models.StatusFinished {
+			t.Errorf("after setStatus(%v) Status = %v, want %v", late, got, models.StatusFinished)
+		}
+	}
+}
+
 func TestUnixProcess_Stop_InvalidState(t *testing.T) {
 	proc := startTestProcess(t, "echo done")
 	defer proc.Close()
