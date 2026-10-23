@@ -112,25 +112,14 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 		o(&cfg)
 	}
 
-	var eventsPath string
-	var err error
-	if cfg.homeDir != "" {
-		eventsPath, err = paths.EventsAt(cfg.homeDir)
-	} else {
-		eventsPath, err = paths.Events()
-	}
+	// Resolved before any store opens, so a failure here owes nothing a close.
+	dirs, err := resolveDirs(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("engine container: %w", err)
 	}
 
-	// Resolved before any store opens, so a failure here owes nothing a close.
-	runDir, err := resolveRunDir(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("engine container: run dir: %w", err)
-	}
-
 	es, err := sqlite.NewEventStore(filepath.Join(
-		eventsPath,
+		dirs.events,
 		"netbridge.db",
 	))
 	if err != nil {
@@ -138,7 +127,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 	}
 
 	ss, err := sqlite.NewSnapshotStore(filepath.Join(
-		eventsPath,
+		dirs.events,
 		"netbridge_snapshots.db",
 	))
 	if err != nil {
@@ -146,7 +135,11 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 		return nil, fmt.Errorf("engine container: %w", err)
 	}
 
-	nb, err := netbridge.New().WithEventStore(es).WithSnapshotStore(ss).Build(ctx)
+	nb, err := netbridge.New().
+		WithEventStore(es).
+		WithSnapshotStore(ss).
+		WithDatabasePath(filepath.Join(dirs.store, "netbridge_ports.db")).
+		Build(ctx)
 	if err != nil {
 		shutdown.CloseAll(es, ss)
 		return nil, fmt.Errorf("engine container: netbridge: %w", err)
@@ -154,7 +147,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 
 	wiz, err := wizard.New(nil, config.GetArrows().ExtractMaxBytes, wizardOptions(cfg)...)
 	if err != nil {
-		shutdown.CloseAll(es, ss)
+		abandonNetbridge(ctx, nb, es, ss)
 		return nil, fmt.Errorf("engine container: wizard: %w", err)
 	}
 
@@ -191,7 +184,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 
 	providers, err := newProviders(metadata.GetPlatforms(), config.GetSearch())
 	if err != nil {
-		shutdown.CloseAll(es, ss)
+		abandonNetbridge(ctx, nb, es, ss)
 		return nil, fmt.Errorf("engine container: providers: %w", err)
 	}
 
@@ -200,7 +193,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 	// failure paths owes it a close.
 	v, err := vault.New(vaultPath, namespacesPath, 0)
 	if err != nil {
-		shutdown.CloseAll(es, ss)
+		abandonNetbridge(ctx, nb, es, ss)
 		return nil, fmt.Errorf("engine container: vault: %w", err)
 	}
 
@@ -210,7 +203,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 		Wizard:    wiz,
 		Netbridge: nb,
 		DepTree:   deptree.New(),
-		Surface:   surface.New(runDir),
+		Surface:   surface.New(dirs.run),
 		Providers: providers,
 
 		netbridgeEvents:    es,
@@ -218,13 +211,49 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 	}, nil
 }
 
-func resolveRunDir(
+// abandonNetbridge releases what a Netbridge that was built holds when a later
+// step of New fails: its drain, the read model database it opened, and the
+// event and snapshot stores it was given.
+func abandonNetbridge(
+	ctx context.Context,
+	nb netbridge.Netbridge,
+	es io.Closer,
+	ss io.Closer,
+) {
+	_ = nb.Shutdown(ctx)
+	shutdown.CloseAll(es, ss)
+}
+
+// engineDirs are the directories the engines keep their state in.
+type engineDirs struct {
+	events string
+	store  string
+	run    string
+}
+
+func resolveDirs(
 	cfg engineOpts,
-) (string, error) {
+) (engineDirs, error) {
+	events, store, run := paths.Events, paths.Store, paths.Run
 	if cfg.homeDir != "" {
-		return paths.RunAt(cfg.homeDir)
+		events = func() (string, error) { return paths.EventsAt(cfg.homeDir) }
+		store = func() (string, error) { return paths.StoreAt(cfg.homeDir) }
+		run = func() (string, error) { return paths.RunAt(cfg.homeDir) }
 	}
-	return paths.Run()
+
+	var dirs engineDirs
+	var err error
+	if dirs.events, err = events(); err != nil {
+		return dirs, fmt.Errorf("events dir: %w", err)
+	}
+	if dirs.store, err = store(); err != nil {
+		return dirs, fmt.Errorf("store dir: %w", err)
+	}
+	if dirs.run, err = run(); err != nil {
+		return dirs, fmt.Errorf("run dir: %w", err)
+	}
+
+	return dirs, nil
 }
 
 func wizardOptions(

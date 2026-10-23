@@ -360,3 +360,16 @@ func TestHostLookup_PlatformHosts_AnswerThroughTheHostContract(t *testing.T) {
 		})
 	}
 }
+
+// A later step of New failing must not strand what Netbridge opened: on Windows
+// the read model database it holds could not be removed with the home directory.
+func TestAbandonNetbridge_ShutsItDownAndClosesTheStores(t *testing.T) {
+	nb := &mocks.Netbridge{}
+	es, ss := &countingCloser{}, &countingCloser{}
+
+	abandonNetbridge(context.Background(), nb, es, ss)
+
+	assert.Equal(t, 1, nb.ShutdownCalls)
+	assert.Equal(t, 1, es.calls)
+	assert.Equal(t, 1, ss.calls)
+}

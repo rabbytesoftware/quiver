@@ -4,18 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/char2cs/asynx"
+	"github.com/char2cs/asynx/models"
 	asynxstore "github.com/char2cs/asynx/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rabbytesoftware/quiver.core/internal/adapter/eventstore/sqlite"
 	"github.com/rabbytesoftware/quiver.core/internal/core/config"
 	"github.com/rabbytesoftware/quiver.core/internal/domain/netbridge"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/commands"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/mocks"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/ports"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/store"
@@ -692,4 +698,159 @@ func TestProbeStrategy_ReportsAnAvailableStrategy(
 	t *testing.T,
 ) {
 	assert.True(t, probeStrategy(context.Background(), &mocks.AlwaysAvailableStrategy{}))
+}
+
+// buildOver builds a Netbridge over existing asynx stores with the given read
+// model: what a daemon restart does when the read model is in memory.
+func buildOver(
+	t *testing.T,
+	es models.Store,
+	ss models.SnapshotStore,
+	rm store.PortStore,
+	start int,
+	end int,
+) *netbridgeService {
+	t.Helper()
+
+	b := New().WithEventStore(es).WithSnapshotStore(ss).WithStrategies([]strategies.Strategy{}).WithEphemeralPortRange(start, end)
+	if rm != nil {
+		b = b.WithStore(rm)
+	}
+	nb, err := b.Build(context.Background())
+	require.NoError(t, err)
+	impl, ok := nb.(*netbridgeService)
+	require.True(t, ok)
+	return impl
+}
+
+// The event store outlives the process but an in-memory read model does not.
+// Allocating over that gap picked a port whose aggregate already existed and the
+// command was rejected with ErrValidation, which stopped every arrow's start.
+func TestAllocate_ReadModelBehindTheEventStore_AdoptsTheClaimedPort(
+	t *testing.T,
+) {
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
+	ctx := context.Background()
+
+	before := buildOver(t, es, ss, nil, testEphemeralPortStart, testEphemeralPortEnd)
+	preferred := freePort(t)
+	first, err := before.Allocate(ctx, "owner-a", netbridge.ProtocolTCP, preferred)
+	require.NoError(t, err)
+	require.Equal(t, preferred, first)
+	before.waitForProjection()
+
+	after := buildOver(t, es, ss, store.NewPortMemory(), testEphemeralPortStart, testEphemeralPortEnd)
+	got, err := after.Allocate(ctx, "owner-b", netbridge.ProtocolTCP, preferred)
+	require.NoError(t, err)
+	assert.NotEqual(t, preferred, got, "the port owner-a holds must not be handed out again")
+
+	claimed, err := after.readModel.FindByPort(ctx, preferred)
+	require.NoError(t, err)
+	require.NotNil(t, claimed, "the stale allocation is adopted into the read model")
+	assert.Equal(t, "owner-a", claimed.OwnerKey)
+
+	require.NoError(t, after.DeallocateByOwner(ctx, "owner-a"))
+	again, err := after.Allocate(ctx, "owner-c", netbridge.ProtocolTCP, preferred)
+	require.NoError(t, err)
+	assert.Equal(t, preferred, again, "an adopted allocation can be released like any other")
+}
+
+func TestAllocate_MoreStaleAllocationsThanAttempts_ReportsNoPortAvailable(
+	t *testing.T,
+) {
+	es := asynxstore.New()
+	ss := asynxstore.NewSnapshots()
+	ctx := context.Background()
+	start := testEphemeralPortStart
+	end := start + maxAllocateAttempts + 40
+
+	// The aggregates are written straight through the command: all that matters
+	// is that the event store holds them, not that the OS lets this test bind
+	// them (a CI runner has some of this range in use).
+	before := buildOver(t, es, ss, nil, start, end)
+	for port := start; port <= end; port++ {
+		_, err := before.ax.Send(ctx, commands.AllocatePort{Port: port, Protocol: netbridge.ProtocolTCP, OwnerKey: "owner-a"})
+		require.NoError(t, err)
+	}
+	before.waitForProjection()
+
+	// Hold a few ports of the range so the test cannot depend on them being free.
+	for port := start; port < start+5; port++ {
+		if ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port)); err == nil {
+			t.Cleanup(func() { _ = ln.Close() })
+		}
+	}
+
+	after := buildOver(t, es, ss, store.NewPortMemory(), start, end)
+	_, err := after.Allocate(ctx, "owner-b", netbridge.ProtocolTCP, 0)
+	require.ErrorIs(t, err, ErrNoPortAvailable)
+}
+
+func TestBuilder_WithDatabasePath_ReadModelSurvivesARestart(
+	t *testing.T,
+) {
+	dir := t.TempDir()
+	// build returns the Netbridge and what a stopping process would close: on
+	// Windows an open database file cannot be removed with the temp directory.
+	build := func() (*netbridgeService, func()) {
+		es, err := sqlite.NewEventStore(filepath.Join(dir, "events.db"))
+		require.NoError(t, err)
+		ss, err := sqlite.NewSnapshotStore(filepath.Join(dir, "snapshots.db"))
+		require.NoError(t, err)
+		nb, err := New().WithEventStore(es).WithSnapshotStore(ss).WithStrategies([]strategies.Strategy{}).
+			WithDatabasePath(filepath.Join(dir, "ports.db")).Build(context.Background())
+		require.NoError(t, err)
+		impl, ok := nb.(*netbridgeService)
+		require.True(t, ok)
+		return impl, func() { _ = es.Close(); _ = ss.Close() }
+	}
+	ctx := context.Background()
+
+	first, closeFirst := build()
+	port, err := first.Allocate(ctx, "owner-a", netbridge.ProtocolTCP, 0)
+	require.NoError(t, err)
+	require.NoError(t, first.Shutdown(ctx))
+	closeFirst()
+	_, err = first.readModel.FindByPort(ctx, port)
+	require.Error(t, err, "Shutdown closes the read model Build opened")
+
+	second, closeSecond := build()
+	t.Cleanup(func() {
+		_ = second.Shutdown(ctx)
+		closeSecond()
+	})
+	held, err := second.readModel.FindByPort(ctx, port)
+	require.NoError(t, err)
+	require.NotNil(t, held, "the allocation is still in the read model after a restart")
+	assert.Equal(t, "owner-a", held.OwnerKey)
+
+	require.NoError(t, second.DeallocateByOwner(ctx, "owner-a"), "a release after a restart finds what it must free")
+	gone, err := second.readModel.FindByPort(ctx, port)
+	require.NoError(t, err)
+	assert.Nil(t, gone)
+}
+
+func TestBuilder_WithDatabasePath_UnopenablePath_FailsTheBuild(
+	t *testing.T,
+) {
+	notADir := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o600))
+
+	_, err := New().WithEventStore(asynxstore.New()).WithSnapshotStore(asynxstore.NewSnapshots()).
+		WithDatabasePath(filepath.Join(notADir, "ports.db")).Build(context.Background())
+	require.ErrorIs(t, err, ErrBuildFailed)
+}
+
+func TestBuilder_WithStore_TakesPrecedenceOverDatabasePath(
+	t *testing.T,
+) {
+	custom := store.NewPortMemory()
+	nb, err := New().WithEventStore(asynxstore.New()).WithSnapshotStore(asynxstore.NewSnapshots()).
+		WithStore(custom).WithDatabasePath(filepath.Join(t.TempDir(), "ports.db")).Build(context.Background())
+	require.NoError(t, err)
+
+	impl := nb.(*netbridgeService)
+	assert.Equal(t, custom, impl.readModel)
+	assert.False(t, impl.ownsReadModel, "an injected read model is the caller's to close")
 }

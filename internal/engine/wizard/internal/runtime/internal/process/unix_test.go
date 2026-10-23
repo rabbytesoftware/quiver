@@ -67,6 +67,28 @@ func TestUnixProcess_Interrupt(t *testing.T) {
 	}
 }
 
+// The exit watcher marks a process Finished as soon as it is gone. A stop that
+// signalled it just before and marks it Stopping afterwards must not undo that:
+// TestUnixProcess_Interrupt failed now and then with the process stuck "stopping".
+func TestUnixProcess_SetStatus_FinishedIsFinal(t *testing.T) {
+	proc := startTestProcess(t, "echo done")
+	defer proc.Close()
+	if err := proc.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	unix, ok := proc.(*unixProcess)
+	if !ok {
+		t.Fatalf("process is %T, want *unixProcess", proc)
+	}
+
+	for _, late := range []models.Status{models.StatusStopping, models.StatusKilling, models.StatusRunning} {
+		unix.setStatus(late)
+		if got := proc.Status(); got != models.StatusFinished {
+			t.Errorf("after setStatus(%v) Status = %v, want %v", late, got, models.StatusFinished)
+		}
+	}
+}
+
 func TestUnixProcess_Stop_InvalidState(t *testing.T) {
 	proc := startTestProcess(t, "echo done")
 	defer proc.Close()
@@ -289,17 +311,26 @@ func TestStartCommon_InvalidState(t *testing.T) {
 	}
 }
 
+// The wait ends when the process exits or the context is done. Stop signals a
+// `sleep` that exits at once, so with an already cancelled context both were
+// ready and the select picked one at random: the test through Stop() failed now
+// and then under load. Nothing is signalled here, so only the context can end it.
 func TestUnixProcess_StopWithTimeout_ContextCancelled(t *testing.T) {
 	proc := startTestProcess(t, "sleep 10")
 	defer proc.Kill(context.Background())
 	defer proc.Close()
+	unix, ok := proc.(*unixProcess)
+	if !ok {
+		t.Fatalf("process is %T, want *unixProcess", proc)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled
 
-	err := proc.Stop(ctx)
-	if err == nil {
-		t.Error("Stop() with cancelled context should return error")
+	err := unix.stopWithTimeout(ctx, 0, func() error { return nil }, models.StatusStopping)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("stopWithTimeout() with a cancelled context = %v, want context.Canceled", err)
 	}
 }
 
