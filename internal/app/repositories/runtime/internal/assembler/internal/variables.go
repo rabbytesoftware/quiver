@@ -126,31 +126,21 @@ func ResolveVariables( //nolint:gocyclo
 		}
 	}
 
-	// Layer 4: netbridge ports
-	if nb != nil { //nolint:nestif
-		for _, port := range arrow.Netbridge {
-			allocated, err := nb.Allocate(
-				ctx,
-				ns.String(),
-				port.Protocol,
-				port.Default,
-			)
-			if err != nil {
-				if port.Required {
-					return nil, err
-				}
-				continue
-			}
+	// A port the previous execution already ran with is the arrow's own for as
+	// long as its runtime lives: allocating another would leak the first and
+	// hand a method run beside a live server a port that server is not on.
+	var stored map[string]string
+	if runtime, err := axRuntime.Get(ctx, ns.String()); err == nil && runtime.LastReturn != nil {
+		stored = carryForward(arrow, runtime.LastReturn.Variables)
+	}
 
-			vars[port.Name] = strconv.Itoa(allocated)
-		}
+	// Layer 4: netbridge ports
+	if err := allocatePorts(ctx, ns, arrow, nb, stored, vars); err != nil {
+		return nil, err
 	}
 
 	// Layer 5: stored vars from last return
-	runtime, err := axRuntime.Get(ctx, ns.String())
-	if err == nil && runtime.LastReturn != nil {
-		maps.Copy(vars, carryForward(arrow, runtime.LastReturn.Variables))
-	}
+	maps.Copy(vars, stored)
 
 	// Layer 6: user vars (highest priority, built-ins excepted)
 	applyUserVars(vars, userVars)
@@ -160,6 +150,36 @@ func ResolveVariables( //nolint:gocyclo
 	}
 
 	return vars, nil
+}
+
+// allocatePorts asks Netbridge for every declared port the arrow does not hold
+// yet and binds each name to its number in vars.
+func allocatePorts(
+	ctx context.Context,
+	ns domain.Namespace,
+	arrow *domain.Arrow,
+	nb netbridge.Netbridge,
+	held map[string]string,
+	vars map[string]string,
+) error {
+	if nb == nil {
+		return nil
+	}
+	for _, port := range arrow.Netbridge {
+		if held[port.Name] != "" {
+			continue
+		}
+		allocated, err := nb.Allocate(ctx, ns.String(), port.Protocol, port.Default)
+		if err != nil {
+			if port.Required {
+				return fmt.Errorf("allocate port %s: %w", port.Name, err)
+			}
+			continue
+		}
+		vars[port.Name] = strconv.Itoa(allocated)
+	}
+
+	return nil
 }
 
 // builtIns computes the variables every run gets: its workdir, identity,

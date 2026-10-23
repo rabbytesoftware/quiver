@@ -33,6 +33,7 @@ import (
 	domainRuntime "github.com/rabbytesoftware/quiver.core/internal/domain/runtime"
 	domainStep "github.com/rabbytesoftware/quiver.core/internal/domain/runtime/step"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/manifold"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/provider"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/surface"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/vault"
@@ -90,6 +91,7 @@ func New(
 	m manifold.Manifold,
 	w wizardPkg.Wizard,
 	surfaces surface.Surface,
+	nb netbridge.Netbridge,
 	os domain.OS,
 	hub apphub.WebSocketHub,
 	providers []provider.Provider,
@@ -121,7 +123,7 @@ func New(
 	}
 
 	targets := &updateTargets{}
-	rt, err := newRuntime(cat, axArrow, axRuntime, w, surfaces, v, g, os, listRuntimeAggregates, targets.lookup)
+	rt, err := newRuntime(cat, axArrow, axRuntime, w, surfaces, nb, v, g, os, listRuntimeAggregates, targets.lookup)
 	if err != nil {
 		discardCollection(coll)
 		return nil, fmt.Errorf("repositories: runtime: %w", err)
@@ -193,6 +195,7 @@ func newRuntime(
 	axRuntime asynx.Asynx[domainRuntime.ArrowRuntime],
 	w wizardPkg.Wizard,
 	surfaces surface.Surface,
+	nb netbridge.Netbridge,
 	v vault.Vault,
 	g graph.Graph,
 	os domain.OS,
@@ -205,6 +208,7 @@ func newRuntime(
 		axRuntime,
 		w,
 		surfaces,
+		nb,
 		v,
 		cat.MarkInstalled,
 		cat.MarkUninstalled,

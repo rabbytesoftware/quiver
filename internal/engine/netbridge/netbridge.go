@@ -4,6 +4,7 @@ package netbridge
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/char2cs/asynx"
 
@@ -13,6 +14,14 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/projections"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/store"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/strategies"
+)
+
+const (
+	// strategyWait is how long an allocation waits for router discovery that
+	// has not finished before going on without forwarding.
+	strategyWait = 3 * time.Second
+	// strategyProbeTimeout bounds each strategy's availability probe.
+	strategyProbeTimeout = 5 * time.Second
 )
 
 // Netbridge manages dynamic port allocation and best-effort router forwarding.
@@ -57,8 +66,17 @@ type netbridgeService struct {
 	ax        asynx.Asynx[ports.PortAllocation]
 	readModel store.PortStore
 	stratsCh  <-chan []strategies.Strategy
-	strats    []strategies.Strategy
-	once      sync.Once
+	// strats is guarded by mu together with stratsReady: the discovery result
+	// is read from stratsCh once it arrives, and a call that finds it late
+	// proceeds without forwarding instead of waiting for it.
+	strats      []strategies.Strategy
+	stratsReady bool
+	stratsWait  time.Duration
+	// mu serializes allocation. Choosing a port reads the read model, which is
+	// projected asynchronously, so two allocations in flight at once (or back to
+	// back before the projection runs) would pick the same candidate and the
+	// second command would be rejected.
+	mu        sync.Mutex
 	portStart int
 	portEnd   int
 }
@@ -78,19 +96,38 @@ func newNetbridge(
 	}
 
 	return &netbridgeService{
-		ax:        ax,
-		readModel: readModel,
-		stratsCh:  stratsCh,
-		portStart: portStart,
-		portEnd:   portEnd,
+		ax:         ax,
+		readModel:  readModel,
+		stratsCh:   stratsCh,
+		stratsWait: strategyWait,
+		portStart:  portStart,
+		portEnd:    portEnd,
 	}, nil
 }
 
-func (n *netbridgeService) resolveStrategies() []strategies.Strategy {
-	n.once.Do(func() {
-		n.strats = <-n.stratsCh
-	})
-	return n.strats
+// resolveStrategies returns the router-forwarding strategies discovery found.
+// Forwarding is best-effort, so a discovery still running after stratsWait is
+// not waited for: this call goes without strategies and a later one picks the
+// result up. Callers hold n.mu.
+func (n *netbridgeService) resolveStrategies(
+	ctx context.Context,
+) []strategies.Strategy {
+	if n.stratsReady {
+		return n.strats
+	}
+
+	wait := time.NewTimer(n.stratsWait)
+	defer wait.Stop()
+
+	select {
+	case found := <-n.stratsCh:
+		n.strats, n.stratsReady = found, true
+		return n.strats
+	case <-wait.C:
+		return nil
+	case <-ctx.Done():
+		return nil
+	}
 }
 
 // Allocate finds an available port, attempts router forwarding, and records the allocation.
@@ -100,13 +137,16 @@ func (n *netbridgeService) Allocate(
 	protocol netbridge.Protocol,
 	preferred int,
 ) (int, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	port, err := findAvailablePort(ctx, preferred, n.portStart, n.portEnd, protocol, n.readModel)
 	if err != nil {
 		return 0, err
 	}
 
 	forwarded := false
-	for _, s := range n.resolveStrategies() {
+	for _, s := range n.resolveStrategies(ctx) {
 		if err := s.Forward(ctx, port, protocol); err == nil {
 			forwarded = true
 			break
@@ -122,6 +162,7 @@ func (n *netbridgeService) Allocate(
 	if err != nil {
 		return 0, err
 	}
+	n.waitForProjection()
 
 	return port, nil
 }
@@ -131,13 +172,16 @@ func (n *netbridgeService) DeallocateByOwner(
 	ctx context.Context,
 	ownerKey string,
 ) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	allocations, err := n.readModel.FindByOwner(ctx, ownerKey)
 	if err != nil {
 		return err
 	}
 
 	for _, alloc := range allocations {
-		for _, s := range n.resolveStrategies() {
+		for _, s := range n.resolveStrategies(ctx) {
 			_ = s.Reverse(ctx, alloc.Port, alloc.Protocol)
 		}
 
@@ -146,6 +190,7 @@ func (n *netbridgeService) DeallocateByOwner(
 			return sendErr
 		}
 	}
+	n.waitForProjection()
 
 	return nil
 }

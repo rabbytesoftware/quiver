@@ -143,7 +143,7 @@ func (b *Builder) discoverStrategies(
 		}
 		active := make([]strategies.Strategy, 0, len(all))
 		for _, s := range all {
-			if s.Available(ctx) {
+			if probeStrategy(ctx, s) {
 				active = append(active, s)
 			}
 		}
@@ -152,6 +152,15 @@ func (b *Builder) discoverStrategies(
 	}()
 
 	return ch
+}
+
+// probeStrategy asks s whether the router speaks its protocol, giving up after
+// strategyProbeTimeout so one silent protocol cannot hold up the next.
+func probeStrategy(ctx context.Context, s strategies.Strategy) bool {
+	ctx, cancel := context.WithTimeout(ctx, strategyProbeTimeout)
+	defer cancel()
+
+	return s.Available(ctx)
 }
 
 func (b *Builder) resolveStore() (store.PortStore, error) {

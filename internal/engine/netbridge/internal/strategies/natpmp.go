@@ -3,6 +3,7 @@ package strategies
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/jackpal/gateway"
 	natpmp "github.com/jackpal/go-nat-pmp"
@@ -34,8 +35,13 @@ func NewNATPMP() Strategy {
 	}
 }
 
+// natpmpTimeout bounds every exchange with the gateway. go-nat-pmp's default
+// retries for about two minutes, which a gateway that does not speak NAT-PMP
+// (most of them) turns into a two-minute stall of whoever asked.
+const natpmpTimeout = 3 * time.Second
+
 func natpmpNewClient(gw net.IP) natpmpClient {
-	return natpmp.NewClient(gw)
+	return natpmp.NewClientWithTimeout(gw, natpmpTimeout)
 }
 
 func (s *natpmpStrategy) Name() string {
