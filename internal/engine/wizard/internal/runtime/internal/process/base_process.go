@@ -178,11 +178,18 @@ func (p *baseProcess) Error() string               { return p.output.getError() 
 func (p *baseProcess) StreamOutput() <-chan string { return p.output.outChan }
 func (p *baseProcess) StreamError() <-chan string  { return p.output.errChan }
 
+// setStatus records a transition, except out of Finished: the exit watcher sets
+// it as soon as the process is gone, which can happen between a stop signal being
+// sent and the stop marking the process Stopping. Letting that late write win left
+// an exited process reported as stopping for good.
 func (p *baseProcess) setStatus(
 	status models.Status,
 ) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.status.IsFinished() {
+		return
+	}
 	p.status = status
 }
 
