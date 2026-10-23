@@ -187,7 +187,7 @@ func writeEntry(
 ) {
 	t.Helper()
 
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), workspaceDirMod))
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), workspaceDirMod)) // #nosec G301 -- test workspace directory
 
 	switch {
 	case e.Link != "":

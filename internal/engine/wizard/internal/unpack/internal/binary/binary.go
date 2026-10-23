@@ -111,7 +111,7 @@ func copyExecutable(
 func chmodExecutable(
 	path string,
 ) error {
-	if err := os.Chmod(path, executablePerm); err != nil {
+	if err := os.Chmod(path, executablePerm); err != nil { // #nosec G302 -- an unpacked single-file tool must be executable
 		return fmt.Errorf("unpack: chmod %s: %w", path, err)
 	}
 
