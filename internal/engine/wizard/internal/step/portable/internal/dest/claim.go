@@ -126,7 +126,7 @@ func markOwned(
 		return fmt.Errorf("portable: mark %s: %w", dir, err)
 	}
 
-	if err := os.WriteFile(marker, []byte(source+"\n"), ownerMarkerPerm); err != nil {
+	if err := os.WriteFile(marker, []byte(source+"\n"), ownerMarkerPerm); err != nil { // #nosec G306 -- the marker only names the download it came from
 		return fmt.Errorf("portable: mark %s: %w", dir, err)
 	}
 
