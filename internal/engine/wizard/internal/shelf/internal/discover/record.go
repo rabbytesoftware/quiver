@@ -107,7 +107,7 @@ func recordCandidate(
 	name Namer,
 ) (models.Candidate, bool) {
 	rel, ok := localPath(app.Entry)
-	if !ok {
+	if !ok || inResourceFork(rel) {
 		return models.Candidate{}, false
 	}
 
@@ -123,6 +123,19 @@ func recordCandidate(
 		Icon:    recordIcon(root, workdir, app.Icon),
 		Depth:   1,
 	}, true
+}
+
+// inResourceFork reports whether rel lies inside a __MACOSX directory. Records
+// written before the unpacker learned to skip it list the stub bundles in there.
+func inResourceFork(
+	rel string,
+) bool {
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == domain.ResourceForkDir {
+			return true
+		}
+	}
+	return false
 }
 
 func localPath(

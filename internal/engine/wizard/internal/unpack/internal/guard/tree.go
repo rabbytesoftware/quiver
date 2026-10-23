@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/rabbytesoftware/quiver.core/internal/core/fns"
+	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/unpack/internal/models"
 )
 
@@ -47,6 +48,9 @@ func (g *Guard) Apps(
 	apps := []models.App{}
 	wrappers := []string{}
 	for _, name := range g.TopLevel() {
+		if name == domain.ResourceForkDir {
+			continue
+		}
 		entry := filepath.Join(dir, name)
 		if hasSuffixFold(name, suffix) && isKind(entry, dirs) {
 			apps = append(apps, models.App{Name: name[:len(name)-len(suffix)], Entry: entry})

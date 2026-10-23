@@ -57,3 +57,20 @@ func TestInstall_ArchiveFileNamedLikeABundleRecordsNothing(t *testing.T) {
 	assert.Equal(t, "not a bundle", mocks.ReadString(t, filepath.Join(workDir, "notes.app")))
 	assert.NoFileExists(t, filepath.Join(workDir, domain.PortableRecordFile))
 }
+
+func TestInstall_ArchiveWithResourceForkRecordsOnlyTheRealBundle(t *testing.T) {
+	workDir := t.TempDir()
+	mocks.WriteFile(t, filepath.Join(workDir, ".dl"), mocks.ZipFiles(t, map[string]string{
+		"Prism Launcher.app/Contents/MacOS/prismlauncher":     "bin",
+		"__MACOSX/Prism Launcher.app/Contents/._Info.plist":   "fork",
+		"__MACOSX/Prism Launcher.app/Contents/MacOS/._binary": "fork",
+	}))
+
+	err := runPortableNamed(t, wizstep.Request{WorkDir: workDir}, ".dl", "PrismLauncher", "PrismLauncher")
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.PortableRecord{Apps: []domain.PortableApp{{
+		Name:  "Prism Launcher",
+		Entry: "PrismLauncher/Prism Launcher.app",
+	}}}, readRecord(t, workDir))
+}

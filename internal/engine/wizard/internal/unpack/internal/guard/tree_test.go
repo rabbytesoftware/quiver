@@ -175,6 +175,21 @@ func TestGuard_Apps_FindsBundlesOneWrapperDeep(t *testing.T) {
 	}, g.Apps(dest, ".app", true))
 }
 
+// macOS archivers add a __MACOSX directory mirroring the real tree with
+// AppleDouble stubs. A bundle name inside it is not an app: recording it made a
+// Prism Launcher zip look like two apps and nothing was exposed.
+func TestGuard_Apps_IgnoresTheResourceForkDirectory(t *testing.T) {
+	g, dest := openGuard(t)
+	for _, dir := range []string{"Prism Launcher.app/Contents", "__MACOSX/Prism Launcher.app/Contents"} {
+		require.NoError(t, g.Dir(dir, 0o755))
+	}
+	require.NoError(t, g.File(context.Background(), "__MACOSX/Prism Launcher.app/Contents/._Info.plist", 0o644, strings.NewReader("x")))
+
+	assert.Equal(t, []models.App{
+		{Name: "Prism Launcher", Entry: filepath.Join(dest, "Prism Launcher.app")},
+	}, g.Apps(dest, ".app", true))
+}
+
 func TestGuard_Apps_NestedWrapperVanished(t *testing.T) {
 	g, dest := openGuard(t)
 	require.NoError(t, g.Dir("wrap/Tool.app", 0o755))
