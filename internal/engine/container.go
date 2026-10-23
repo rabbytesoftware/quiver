@@ -112,35 +112,14 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 		o(&cfg)
 	}
 
-	var eventsPath string
-	var err error
-	if cfg.homeDir != "" {
-		eventsPath, err = paths.EventsAt(cfg.homeDir)
-	} else {
-		eventsPath, err = paths.Events()
-	}
-	if err != nil {
-		return nil, fmt.Errorf("engine container: %w", err)
-	}
-
-	var storePath string
-	if cfg.homeDir != "" {
-		storePath, err = paths.StoreAt(cfg.homeDir)
-	} else {
-		storePath, err = paths.Store()
-	}
-	if err != nil {
-		return nil, fmt.Errorf("engine container: %w", err)
-	}
-
 	// Resolved before any store opens, so a failure here owes nothing a close.
-	runDir, err := resolveRunDir(cfg)
+	dirs, err := resolveDirs(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("engine container: run dir: %w", err)
+		return nil, fmt.Errorf("engine container: %w", err)
 	}
 
 	es, err := sqlite.NewEventStore(filepath.Join(
-		eventsPath,
+		dirs.events,
 		"netbridge.db",
 	))
 	if err != nil {
@@ -148,7 +127,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 	}
 
 	ss, err := sqlite.NewSnapshotStore(filepath.Join(
-		eventsPath,
+		dirs.events,
 		"netbridge_snapshots.db",
 	))
 	if err != nil {
@@ -159,7 +138,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 	nb, err := netbridge.New().
 		WithEventStore(es).
 		WithSnapshotStore(ss).
-		WithDatabasePath(filepath.Join(storePath, "netbridge_ports.db")).
+		WithDatabasePath(filepath.Join(dirs.store, "netbridge_ports.db")).
 		Build(ctx)
 	if err != nil {
 		shutdown.CloseAll(es, ss)
@@ -224,7 +203,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 		Wizard:    wiz,
 		Netbridge: nb,
 		DepTree:   deptree.New(),
-		Surface:   surface.New(runDir),
+		Surface:   surface.New(dirs.run),
 		Providers: providers,
 
 		netbridgeEvents:    es,
@@ -232,13 +211,36 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 	}, nil
 }
 
-func resolveRunDir(
+// engineDirs are the directories the engines keep their state in.
+type engineDirs struct {
+	events string
+	store  string
+	run    string
+}
+
+func resolveDirs(
 	cfg engineOpts,
-) (string, error) {
+) (engineDirs, error) {
+	events, store, run := paths.Events, paths.Store, paths.Run
 	if cfg.homeDir != "" {
-		return paths.RunAt(cfg.homeDir)
+		events = func() (string, error) { return paths.EventsAt(cfg.homeDir) }
+		store = func() (string, error) { return paths.StoreAt(cfg.homeDir) }
+		run = func() (string, error) { return paths.RunAt(cfg.homeDir) }
 	}
-	return paths.Run()
+
+	var dirs engineDirs
+	var err error
+	if dirs.events, err = events(); err != nil {
+		return dirs, fmt.Errorf("events dir: %w", err)
+	}
+	if dirs.store, err = store(); err != nil {
+		return dirs, fmt.Errorf("store dir: %w", err)
+	}
+	if dirs.run, err = run(); err != nil {
+		return dirs, fmt.Errorf("run dir: %w", err)
+	}
+
+	return dirs, nil
 }
 
 func wizardOptions(
