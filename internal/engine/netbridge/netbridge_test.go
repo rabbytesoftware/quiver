@@ -791,7 +791,9 @@ func TestBuilder_WithDatabasePath_ReadModelSurvivesARestart(
 	t *testing.T,
 ) {
 	dir := t.TempDir()
-	build := func() *netbridgeService {
+	// build returns the Netbridge and what a stopping process would close: on
+	// Windows an open database file cannot be removed with the temp directory.
+	build := func() (*netbridgeService, func()) {
 		es, err := sqlite.NewEventStore(filepath.Join(dir, "events.db"))
 		require.NoError(t, err)
 		ss, err := sqlite.NewSnapshotStore(filepath.Join(dir, "snapshots.db"))
@@ -801,19 +803,23 @@ func TestBuilder_WithDatabasePath_ReadModelSurvivesARestart(
 		require.NoError(t, err)
 		impl, ok := nb.(*netbridgeService)
 		require.True(t, ok)
-		return impl
+		return impl, func() { _ = es.Close(); _ = ss.Close() }
 	}
 	ctx := context.Background()
 
-	first := build()
+	first, closeFirst := build()
 	port, err := first.Allocate(ctx, "owner-a", netbridge.ProtocolTCP, 0)
 	require.NoError(t, err)
 	require.NoError(t, first.Shutdown(ctx))
+	closeFirst()
 	_, err = first.readModel.FindByPort(ctx, port)
 	require.Error(t, err, "Shutdown closes the read model Build opened")
 
-	second := build()
-	t.Cleanup(func() { _ = second.Shutdown(ctx) })
+	second, closeSecond := build()
+	t.Cleanup(func() {
+		_ = second.Shutdown(ctx)
+		closeSecond()
+	})
 	held, err := second.readModel.FindByPort(ctx, port)
 	require.NoError(t, err)
 	require.NotNil(t, held, "the allocation is still in the read model after a restart")

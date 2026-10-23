@@ -16,6 +16,7 @@ type Netbridge struct {
 	// key of every DeallocateByOwner call.
 	AllocateCalls     int
 	DeallocatedOwners []string
+	ShutdownCalls     int
 }
 
 func (m *Netbridge) Allocate(_ context.Context, _ string, _ netbridge.Protocol, _ int) (int, error) {
@@ -29,5 +30,6 @@ func (m *Netbridge) DeallocateByOwner(_ context.Context, ownerKey string) error 
 }
 
 func (m *Netbridge) Shutdown(_ context.Context) error {
+	m.ShutdownCalls++
 	return m.ShutdownErr
 }

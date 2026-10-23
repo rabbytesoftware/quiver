@@ -147,7 +147,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 
 	wiz, err := wizard.New(nil, config.GetArrows().ExtractMaxBytes, wizardOptions(cfg)...)
 	if err != nil {
-		shutdown.CloseAll(es, ss)
+		abandonNetbridge(ctx, nb, es, ss)
 		return nil, fmt.Errorf("engine container: wizard: %w", err)
 	}
 
@@ -184,7 +184,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 
 	providers, err := newProviders(metadata.GetPlatforms(), config.GetSearch())
 	if err != nil {
-		shutdown.CloseAll(es, ss)
+		abandonNetbridge(ctx, nb, es, ss)
 		return nil, fmt.Errorf("engine container: providers: %w", err)
 	}
 
@@ -193,7 +193,7 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 	// failure paths owes it a close.
 	v, err := vault.New(vaultPath, namespacesPath, 0)
 	if err != nil {
-		shutdown.CloseAll(es, ss)
+		abandonNetbridge(ctx, nb, es, ss)
 		return nil, fmt.Errorf("engine container: vault: %w", err)
 	}
 
@@ -209,6 +209,19 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 		netbridgeEvents:    es,
 		netbridgeSnapshots: ss,
 	}, nil
+}
+
+// abandonNetbridge releases what a Netbridge that was built holds when a later
+// step of New fails: its drain, the read model database it opened, and the
+// event and snapshot stores it was given.
+func abandonNetbridge(
+	ctx context.Context,
+	nb netbridge.Netbridge,
+	es io.Closer,
+	ss io.Closer,
+) {
+	_ = nb.Shutdown(ctx)
+	shutdown.CloseAll(es, ss)
 }
 
 // engineDirs are the directories the engines keep their state in.
