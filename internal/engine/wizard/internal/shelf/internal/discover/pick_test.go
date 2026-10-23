@@ -54,6 +54,7 @@ func TestPick(t *testing.T) {
 		{name: "repo name, shallowest first", found: []models.Candidate{one, tool, shallowTool}, want: shallowTool},
 		{name: "entry name", found: []models.Candidate{tool, one}, entryName: "one", want: one},
 		{name: "no match", found: []models.Candidate{one, {Name: "Two"}}, wantReason: models.ReasonAmbiguous},
+		{name: "separators and case do not tell names apart", found: []models.Candidate{one, {Name: "T-o_o l", Depth: 3}}, want: models.Candidate{Name: "T-o_o l", Depth: 3}},
 	}
 
 	for _, tc := range testCases {
@@ -61,6 +62,34 @@ func TestPick(t *testing.T) {
 			got, reason := Pick(tc.found, "tool", tc.entryName)
 			assert.Equal(t, tc.want, got)
 			assert.Equal(t, tc.wantReason, reason)
+		})
+	}
+}
+
+func TestPick_BundleNamedWithASpaceMatchesTheRepository(t *testing.T) {
+	found := []models.Candidate{{Name: "Prism Launcher", Depth: 1}, {Name: "Helper", Depth: 1}}
+
+	got, reason := Pick(found, "PrismLauncher", "PrismLauncher")
+
+	assert.Empty(t, reason)
+	assert.Equal(t, "Prism Launcher", got.Name)
+}
+
+func TestSameName(t *testing.T) {
+	testCases := []struct {
+		a, b string
+		want bool
+	}{
+		{"Prism Launcher", "PrismLauncher", true},
+		{"prism-launcher", "PrismLauncher", true},
+		{"Prism_Launcher.exe", "PrismLauncherexe", true},
+		{"Prism", "PrismLauncher", false},
+		{"", "", true},
+		{" ", "-", false},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.a+"|"+tc.b, func(t *testing.T) {
+			assert.Equal(t, tc.want, sameName(tc.a, tc.b))
 		})
 	}
 }

@@ -107,3 +107,44 @@ func TestShelf_AppEntry_StartsTheArrowsCopyWhenTheAppExistsUnmanaged(t *testing.
 	require.NoError(t, f.shelf.Remove(ctx, wd))
 	assert.Equal(t, "user install", mocks.ReadBundleVersion(t, existing), "an app Quiver never owned is left intact")
 }
+
+// A Fletcher arrow names its entries after the repository (PrismLauncher) while
+// the bundle in the zip is Prism Launcher.app. Whether the recorded apps are
+// the real bundle alone or, as the unpacker once recorded, the bundle plus the
+// stub in the zip's __MACOSX directory, the app is found, placed and startable.
+func TestShelf_AppEntry_DarwinBundleNamedWithASpace(t *testing.T) {
+	mocks.RequireUnixHost(t)
+	testCases := []struct {
+		name   string
+		record []domain.PortableApp
+	}{
+		{name: "the real bundle only", record: []domain.PortableApp{
+			{Name: "Prism Launcher", Entry: "PrismLauncher/Prism Launcher.app"},
+		}},
+		{name: "the real bundle and the __MACOSX stub", record: []domain.PortableApp{
+			{Name: "Prism Launcher", Entry: "PrismLauncher/Prism Launcher.app"},
+			{Name: "Prism Launcher", Entry: "PrismLauncher/__MACOSX/Prism Launcher.app"},
+		}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "darwin")
+			wd := f.Workdir(t, mocks.NsA)
+			bundle := filepath.Join(wd, "PrismLauncher", "Prism Launcher.app")
+			mocks.WriteFile(t, filepath.Join(bundle, "Contents", "MacOS", "prismlauncher"), "x", 0o755)
+			mocks.WriteFile(t, filepath.Join(wd, "PrismLauncher", "__MACOSX", "Prism Launcher.app", "Contents", "._Info.plist"), "fork", 0o644)
+			mocks.WriteRecord(t, wd, tc.record...)
+			expose := domain.Expose{Desktop: []domain.ExposeEntry{{Name: "PrismLauncher", Path: domain.ExposeAuto}}}
+			ctx := context.Background()
+
+			got, err := f.shelf.Apply(ctx, mocks.NsA, wd, expose, domain.ArrowMedia{})
+
+			require.NoError(t, err)
+			assert.Empty(t, got.Refused)
+			require.Len(t, got.Entries, 1, "the app must be exposed, not skipped as ambiguous")
+			exe, err := f.shelf.AppEntry(ctx, wd)
+			require.NoError(t, err, "Start looks the app up through the marker Apply wrote")
+			assert.Equal(t, filepath.Join(got.Entries[0].Location, "Contents", "MacOS", "prismlauncher"), exe)
+		})
+	}
+}

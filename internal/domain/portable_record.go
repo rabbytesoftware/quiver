@@ -2,6 +2,11 @@ package domain
 
 const PortableRecordFile = ".quiver-apps.json"
 
+// ResourceForkDir is the directory macOS archivers add to a zip to carry
+// resource forks and Finder metadata. It mirrors the real tree with AppleDouble
+// stubs, so a bundle inside it is not an app and is never recorded or exposed.
+const ResourceForkDir = "__MACOSX"
+
 type PortableApp struct {
 	Name  string `json:"name"           yaml:"name"`
 	Entry string `json:"entry"          yaml:"entry"`

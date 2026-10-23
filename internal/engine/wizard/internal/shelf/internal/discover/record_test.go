@@ -317,3 +317,21 @@ func TestRecord_Candidates_BundleSymlinkSkipped(t *testing.T) {
 
 	assert.Empty(t, Record(wd, BundleName))
 }
+
+// Records written before the unpacker skipped __MACOSX list its stub bundles;
+// they stay on disk until the arrow's next install or update.
+func TestRecord_Candidates_IgnoresBundlesInTheResourceForkDirectory(t *testing.T) {
+	mocks.RequireUnixHost(t)
+	wd := t.TempDir()
+	mocks.WriteFile(t, filepath.Join(wd, "App", "Prism Launcher.app", "Contents", "Info.plist"), "x", 0o644)
+	mocks.WriteFile(t, filepath.Join(wd, "App", "__MACOSX", "Prism Launcher.app", "Contents", "._Info.plist"), "x", 0o644)
+	mocks.WriteRecord(t, wd,
+		domain.PortableApp{Name: "Prism Launcher", Entry: "App/Prism Launcher.app"},
+		domain.PortableApp{Name: "Prism Launcher", Entry: "App/__MACOSX/Prism Launcher.app"},
+	)
+
+	got := Record(wd, BundleName)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, filepath.Join(wd, "App", "Prism Launcher.app"), got[0].Target)
+}

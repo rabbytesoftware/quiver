@@ -3,6 +3,7 @@ package discover
 import (
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/rabbytesoftware/quiver.core/internal/domain"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/wizard/internal/shelf/internal/fsguard"
@@ -73,12 +74,34 @@ func matching(
 ) []models.Candidate {
 	matches := []models.Candidate{}
 	for _, c := range found {
-		if strings.EqualFold(c.Name, repo) || (entryName != "" && strings.EqualFold(c.Name, entryName)) {
+		if sameName(c.Name, repo) || (entryName != "" && sameName(c.Name, entryName)) {
 			matches = append(matches, c)
 		}
 	}
 	sort.SliceStable(matches, func(i, j int) bool { return matches[i].Depth < matches[j].Depth })
 	return matches
+}
+
+// sameName compares an app's name with a repository or entry name the way a
+// person would: a repository is PrismLauncher where its bundle is Prism
+// Launcher.app, and neither case nor separators tell two apps apart.
+func sameName(
+	a string,
+	b string,
+) bool {
+	return strings.EqualFold(a, b) || (squash(a) != "" && squash(a) == squash(b))
+}
+
+func squash(
+	name string,
+) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '-', '_', '.':
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, name)
 }
 
 func shallowest(
