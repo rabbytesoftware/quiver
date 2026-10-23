@@ -5,9 +5,11 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"time"
 
 	natpmp "github.com/jackpal/go-nat-pmp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/rabbytesoftware/quiver.core/internal/domain/netbridge"
 )
@@ -390,4 +392,29 @@ func (m *mockNATPMPClient) AddPortMapping(
 	})
 
 	return &natpmp.AddPortMappingResult{}, nil
+}
+
+// A gateway that never answers NAT-PMP must cost seconds, not the two minutes
+// go-nat-pmp retries for by default: that default stalled every first
+// allocation on CI runners.
+func TestNatpmpNewClient_SilentGatewayTimesOutQuickly(t *testing.T) {
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 5351})
+	if err != nil {
+		t.Skipf("NAT-PMP port is not free here: %v", err)
+	}
+	defer conn.Close()
+	go func() {
+		buf := make([]byte, 64)
+		for {
+			if _, _, err := conn.ReadFromUDP(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	started := time.Now()
+	_, err = natpmpNewClient(net.IPv4(127, 0, 0, 1)).GetExternalAddress()
+
+	require.Error(t, err)
+	assert.Less(t, time.Since(started), 20*time.Second)
 }

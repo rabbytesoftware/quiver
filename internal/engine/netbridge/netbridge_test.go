@@ -7,7 +7,9 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/char2cs/asynx"
 	asynxstore "github.com/char2cs/asynx/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,6 +17,7 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/core/config"
 	"github.com/rabbytesoftware/quiver.core/internal/domain/netbridge"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/mocks"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/ports"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/store"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/strategies"
 )
@@ -459,6 +462,82 @@ func TestDeallocateByOwner_FreesThePortsForTheNextAllocation(
 	assert.Equal(t, preferred, again, "a released port is immediately available again")
 }
 
+// newNetbridgeWithDiscovery builds a Netbridge whose router discovery is the
+// given channel, so a test controls when (and whether) it finishes.
+func newNetbridgeWithDiscovery(
+	t *testing.T,
+	discovery <-chan []strategies.Strategy,
+	wait time.Duration,
+) *netbridgeService {
+	t.Helper()
+
+	ax, err := asynx.New[ports.PortAllocation]().
+		WithEventStore(asynxstore.New()).
+		WithSnapshotStore(asynxstore.NewSnapshots()).
+		WithShardingOpts(asynx.ShardingOpts{Shards: 2, QueueDepth: 100}).
+		Build()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ax.Shutdown(context.Background()) })
+
+	nb, err := newNetbridge(ax, store.NewPortMemory(), discovery, testEphemeralPortStart, testEphemeralPortEnd)
+	require.NoError(t, err)
+	impl, ok := nb.(*netbridgeService)
+	require.True(t, ok)
+	impl.stratsWait = wait
+
+	return impl
+}
+
+// A router that never answers discovery (a gateway that ignores NAT-PMP made
+// every allocation wait two minutes) must not hold an allocation up: forwarding
+// is best-effort.
+func TestAllocate_SlowDiscovery_DoesNotStallTheAllocation(
+	t *testing.T,
+) {
+	discovery := make(chan []strategies.Strategy, 1)
+	nb := newNetbridgeWithDiscovery(t, discovery, 50*time.Millisecond)
+
+	started := time.Now()
+	port, err := nb.Allocate(context.Background(), "owner", netbridge.ProtocolTCP, 0)
+	require.NoError(t, err)
+	assert.Less(t, time.Since(started), 5*time.Second)
+
+	alloc, err := nb.readModel.FindByPort(context.Background(), port)
+	require.NoError(t, err)
+	require.NotNil(t, alloc)
+	assert.False(t, alloc.Forwarded, "no strategy was known yet, so nothing could forward")
+}
+
+func TestAllocate_DiscoveryFinishingLate_IsUsedByTheNextAllocation(
+	t *testing.T,
+) {
+	discovery := make(chan []strategies.Strategy, 1)
+	nb := newNetbridgeWithDiscovery(t, discovery, 20*time.Millisecond)
+	ctx := context.Background()
+
+	_, err := nb.Allocate(ctx, "owner", netbridge.ProtocolTCP, 0)
+	require.NoError(t, err)
+
+	discovery <- []strategies.Strategy{&mocks.AlwaysAvailableStrategy{}}
+
+	port, err := nb.Allocate(ctx, "owner", netbridge.ProtocolTCP, 0)
+	require.NoError(t, err)
+	alloc, err := nb.readModel.FindByPort(ctx, port)
+	require.NoError(t, err)
+	require.NotNil(t, alloc)
+	assert.True(t, alloc.Forwarded)
+}
+
+func TestAllocate_CancelledContext_DoesNotWaitForDiscovery(
+	t *testing.T,
+) {
+	nb := newNetbridgeWithDiscovery(t, make(chan []strategies.Strategy), time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	assert.Empty(t, nb.resolveStrategies(ctx))
+}
+
 func TestShutdown_DrainsAsynx(
 	t *testing.T,
 ) {
@@ -521,7 +600,7 @@ func TestBuilder_WithForwarding_DisabledDropsInjectedStrategies(
 ) {
 	nb := buildNetbridgeNoForwarding(t, &mocks.AlwaysAvailableStrategy{})
 
-	assert.Empty(t, nb.resolveStrategies())
+	assert.Empty(t, nb.resolveStrategies(context.Background()))
 }
 
 func TestBuilder_WithForwarding_EnabledKeepsInjectedStrategies(
@@ -540,7 +619,7 @@ func TestBuilder_WithForwarding_EnabledKeepsInjectedStrategies(
 
 	impl, ok := nb.(*netbridgeService)
 	require.True(t, ok)
-	assert.Len(t, impl.resolveStrategies(), 1)
+	assert.Len(t, impl.resolveStrategies(context.Background()), 1)
 }
 
 // No preferred port is asked for: which port comes back is the allocator's
@@ -587,4 +666,30 @@ func TestDeallocateByOwner_ForwardingDisabled_SkipsReverse(
 	realloc, err := nb.Allocate(ctx, "owner-nofwd-rev", netbridge.ProtocolTCP, port)
 	require.NoError(t, err)
 	assert.Equal(t, port, realloc)
+}
+
+// blockingStrategy only answers its availability probe when the probe's context
+// ends, like a router that never replies.
+type blockingStrategy struct{ mocks.AlwaysAvailableStrategy }
+
+func (blockingStrategy) Available(ctx context.Context) bool {
+	<-ctx.Done()
+	return false
+}
+
+func TestProbeStrategy_GivesUpWhenTheContextEnds(
+	t *testing.T,
+) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	assert.False(t, probeStrategy(ctx, &blockingStrategy{}))
+	assert.Less(t, time.Since(started), 5*time.Second)
+}
+
+func TestProbeStrategy_ReportsAnAvailableStrategy(
+	t *testing.T,
+) {
+	assert.True(t, probeStrategy(context.Background(), &mocks.AlwaysAvailableStrategy{}))
 }

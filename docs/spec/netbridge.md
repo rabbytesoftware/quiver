@@ -92,7 +92,7 @@ Netbridge is constructed via the builder in `builder.go`.
 6. Calls the internal `newNetbridge` constructor, which subscribes the projection handler (`projections.HandlePortEvent`) to the `port.*` event family.
 7. Returns the wired `Netbridge` implementation.
 
-The strategy channel is **lazily** read on first call to `Allocate` or `DeallocateByOwner` via a `sync.Once`. The probe goroutine is launched at `Build()` time so it can run concurrently with whatever the caller does next; the receive only blocks the first allocation if discovery has not yet completed. Subsequent calls reuse the cached slice.
+The strategy channel is read lazily, on the first `Allocate` or `DeallocateByOwner`. The probe goroutine is launched at `Build()` time so it can run concurrently with whatever the caller does next, and each strategy's probe is bounded (5 s; NAT-PMP's own exchanges 3 s). Forwarding is best-effort, so a call waits at most 3 s for a discovery that has not finished and otherwise proceeds without strategies (nothing is forwarded or reversed by that call); the result is picked up by the first call after it arrives. Without these bounds a gateway that ignores NAT-PMP stalled the first allocation for about two minutes (go-nat-pmp's default retry schedule).
 
 ---
 
@@ -389,7 +389,7 @@ Note: `domain/netbridge.Protocol` and `domain/netbridge.PortDef` come from the *
 
 - **Owner-scoped**, not arrow-scoped. Netbridge does not import from `internal/domain/arrow`-style packages — only `domain/netbridge` for the manifest types.
 - **Best-effort forwarding.** Allocation succeeds even when both UPnP and NAT-PMP fail; the caller observes external reachability through the `Forwarded` field on the persisted aggregate.
-- **Concurrent strategy discovery.** Probing starts in a goroutine at `Build()` time but the caller never blocks on it; the first allocation receives the result through a buffered channel guarded by `sync.Once`.
+- **Concurrent, bounded strategy discovery.** Probing starts in a goroutine at `Build()` time. A call never waits more than the discovery wait (3 s) for it; the result arrives through a buffered channel and is read under the allocation mutex by the first call that finds it.
 - **No interface-leak of strategies.** UPnP, NAT-PMP, and IGD types are confined to `internal/strategies`. The public `Netbridge` interface mentions ports and protocols only.
 - **Event log is the source of truth.** The read model is rebuildable from the asynx stream. Read-model writes during projection are silently ignored if they fail.
 - **Serialized allocation.** `Allocate` and `DeallocateByOwner` hold one mutex and wait for the read model to reflect their commands before returning. The read model is projected asynchronously: without the wait, a second allocation could pick the port the first just took and its `AllocatePort` would be rejected with `ErrValidation`.
