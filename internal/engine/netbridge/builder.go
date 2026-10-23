@@ -16,6 +16,7 @@ import (
 // Builder constructs a Netbridge instance.
 type Builder struct {
 	readModel     store.PortStore
+	dbPath        string
 	eventStore    models.Store
 	snapshotStore models.SnapshotStore
 	strategies    []strategies.Strategy
@@ -34,6 +35,18 @@ func (b *Builder) WithStore(
 	s store.PortStore,
 ) *Builder {
 	b.readModel = s
+	return b
+}
+
+// WithDatabasePath keeps the port read model in a SQLite database at path, so
+// it survives a restart alongside the event store it is projected from. Without
+// it (or WithStore) the read model is in memory and starts empty on every
+// process start while the port aggregates persist. Netbridge owns the opened
+// database and closes it in Shutdown.
+func (b *Builder) WithDatabasePath(
+	path string,
+) *Builder {
+	b.dbPath = path
 	return b
 }
 
@@ -109,14 +122,25 @@ func (b *Builder) Build(
 		return nil, fmt.Errorf("%w: %w", ErrBuildFailed, err)
 	}
 
-	rm, err := b.resolveStore()
+	rm, owned, err := b.resolveStore()
 	if err != nil {
 		return nil, err
 	}
 
 	portStart, portEnd := b.resolvePortRange()
 
-	return newNetbridge(ax, rm, b.discoverStrategies(ctx), portStart, portEnd)
+	nb, err := newNetbridge(ax, rm, b.discoverStrategies(ctx), portStart, portEnd)
+	if err != nil {
+		if owned {
+			_ = rm.Close()
+		}
+		return nil, err
+	}
+	if svc, ok := nb.(*netbridgeService); ok {
+		svc.ownsReadModel = owned
+	}
+
+	return nb, nil
 }
 
 func (b *Builder) discoverStrategies(
@@ -163,12 +187,21 @@ func probeStrategy(ctx context.Context, s strategies.Strategy) bool {
 	return s.Available(ctx)
 }
 
-func (b *Builder) resolveStore() (store.PortStore, error) {
+// resolveStore returns the read model and whether Build opened it (and so
+// Netbridge must close it).
+func (b *Builder) resolveStore() (store.PortStore, bool, error) {
 	if b.readModel != nil {
-		return b.readModel, nil
+		return b.readModel, false, nil
+	}
+	if b.dbPath != "" {
+		rm, err := store.NewPortSQLite(b.dbPath)
+		if err != nil {
+			return nil, false, fmt.Errorf("%w: %w", ErrBuildFailed, err)
+		}
+		return rm, true, nil
 	}
 
-	return store.NewPortMemory(), nil
+	return store.NewPortMemory(), false, nil
 }
 
 func (b *Builder) resolveForwarding() bool {

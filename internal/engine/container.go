@@ -123,6 +123,16 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 		return nil, fmt.Errorf("engine container: %w", err)
 	}
 
+	var storePath string
+	if cfg.homeDir != "" {
+		storePath, err = paths.StoreAt(cfg.homeDir)
+	} else {
+		storePath, err = paths.Store()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("engine container: %w", err)
+	}
+
 	// Resolved before any store opens, so a failure here owes nothing a close.
 	runDir, err := resolveRunDir(cfg)
 	if err != nil {
@@ -146,7 +156,11 @@ func New(ctx context.Context, opts ...Option) (*Container, error) {
 		return nil, fmt.Errorf("engine container: %w", err)
 	}
 
-	nb, err := netbridge.New().WithEventStore(es).WithSnapshotStore(ss).Build(ctx)
+	nb, err := netbridge.New().
+		WithEventStore(es).
+		WithSnapshotStore(ss).
+		WithDatabasePath(filepath.Join(storePath, "netbridge_ports.db")).
+		Build(ctx)
 	if err != nil {
 		shutdown.CloseAll(es, ss)
 		return nil, fmt.Errorf("engine container: netbridge: %w", err)

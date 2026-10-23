@@ -78,7 +78,8 @@ Netbridge is constructed via the builder in `builder.go`.
 | Method | Required | Default if omitted |
 |---|---|---|
 | `WithEventStore(asynx/models.Store)` | Yes | Build returns `ErrBuildFailed`. |
-| `WithStore(PortStore)` | No | In-memory `PortStore` (`store.NewPortMemory()`). |
+| `WithStore(PortStore)` | No | In-memory `PortStore` (`store.NewPortMemory()`), unless `WithDatabasePath` is set. Takes precedence over it; the caller owns a store it injects. |
+| `WithDatabasePath(path)` | No | SQLite read model at `path` (`store.NewPortSQLite`), opened by `Build` and closed by `Shutdown`. The engine container sets it to `netbridge_ports.db` in the store directory. |
 | `WithStrategies([]Strategy)` | No | Auto-discovered: UPnP probed first, NAT-PMP probed second; only those whose `Available(ctx)` returned `true` are retained. |
 | `WithEphemeralPortRange(start, end)` | No | `config.GetNetbridge().EphemeralPortStart` / `EphemeralPortEnd` (defaults to `49152` / `65535` from embedded `default.yaml`). |
 
@@ -86,7 +87,7 @@ Netbridge is constructed via the builder in `builder.go`.
 
 1. Validates `eventStore` is non-nil → wraps `ErrBuildFailed` if missing.
 2. Constructs an Asynx instance for the `ports.PortAllocation` aggregate with sharding `{Shards: 8, QueueDepth: 1000}`.
-3. Resolves the read model (injected or in-memory).
+3. Resolves the read model (injected, SQLite at `WithDatabasePath`, or in-memory).
 4. Resolves the ephemeral port range.
 5. Kicks off **strategy discovery** in a background goroutine (or, if `WithStrategies` was set, ships the injected slice through the channel synchronously). The result is delivered through a buffered channel of size 1.
 6. Calls the internal `newNetbridge` constructor, which subscribes the projection handler (`projections.HandlePortEvent`) to the `port.*` event family.
@@ -287,7 +288,7 @@ Save/Delete errors are silently ignored — the read model is best-effort. The A
 | `FindByPort(ctx, port int)` | `*PortAllocation, error` (alias for `FindByKey`) |
 | `FindByOwner(ctx, ownerKey)` | `[]PortAllocation, error` |
 
-The package ships two implementations: in-memory (`memory.go`, default) and SQLite-backed (`sqlite.go`, used in production via `NewPortSQLite`). Both delegate to the generic adapter store. `FindByOwner` is implemented as a linear scan of `FindAll()` — not indexed.
+The package ships two implementations: in-memory (`memory.go`, the builder default, for tests) and SQLite-backed (`sqlite.go`, used by the engine container through `WithDatabasePath`). Both delegate to the generic adapter store. The production read model must be durable: the event store it is projected from is, and an in-memory read model starts empty over existing port aggregates on every process start. `FindByOwner` is implemented as a linear scan of `FindAll()` — not indexed.
 
 ---
 
@@ -392,6 +393,7 @@ Note: `domain/netbridge.Protocol` and `domain/netbridge.PortDef` come from the *
 - **Concurrent, bounded strategy discovery.** Probing starts in a goroutine at `Build()` time. A call never waits more than the discovery wait (3 s) for it; the result arrives through a buffered channel and is read under the allocation mutex by the first call that finds it.
 - **No interface-leak of strategies.** UPnP, NAT-PMP, and IGD types are confined to `internal/strategies`. The public `Netbridge` interface mentions ports and protocols only.
 - **Event log is the source of truth.** The read model is rebuildable from the asynx stream. Read-model writes during projection are silently ignored if they fail.
+- **A read model behind the event store heals.** Before claiming a port `Allocate` reads its aggregate; one that is already live (the read model missed it: allocations made before the database existed, a lost projection, an in-memory model after a restart) is saved into the read model and the search moves on, so `AllocatePort`'s `ErrValidation` is never how a stale port is discovered and `DeallocateByOwner` can later release it. At most 64 such ports are adopted per call; beyond that `Allocate` returns `ErrNoPortAvailable`.
 - **Serialized allocation.** `Allocate` and `DeallocateByOwner` hold one mutex and wait for the read model to reflect their commands before returning. The read model is projected asynchronously: without the wait, a second allocation could pick the port the first just took and its `AllocatePort` would be rejected with `ErrValidation`.
 - **Port stability.** An arrow keeps the numbers of its first execution for as long as its runtime lives (see §9). A partial allocation left by a `Required` failure stays held under the owner key and is released with the rest by `DeallocateByOwner` when the runtime is forgotten.
 

@@ -3,6 +3,7 @@ package netbridge
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,6 +16,10 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/store"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/strategies"
 )
+
+// maxAllocateAttempts bounds how many ports Allocate adopts into the read model
+// before giving up; each adoption is one stale allocation found.
+const maxAllocateAttempts = 64
 
 const (
 	// strategyWait is how long an allocation waits for router discovery that
@@ -76,9 +81,11 @@ type netbridgeService struct {
 	// projected asynchronously, so two allocations in flight at once (or back to
 	// back before the projection runs) would pick the same candidate and the
 	// second command would be rejected.
-	mu        sync.Mutex
-	portStart int
-	portEnd   int
+	mu sync.Mutex
+	// ownsReadModel is set when Build opened the read model itself.
+	ownsReadModel bool
+	portStart     int
+	portEnd       int
 }
 
 // New constructs a Netbridge from already-created dependencies.
@@ -140,31 +147,56 @@ func (n *netbridgeService) Allocate(
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	port, err := findAvailablePort(ctx, preferred, n.portStart, n.portEnd, protocol, n.readModel)
-	if err != nil {
-		return 0, err
-	}
-
-	forwarded := false
-	for _, s := range n.resolveStrategies(ctx) {
-		if err := s.Forward(ctx, port, protocol); err == nil {
-			forwarded = true
-			break
+	for attempt := 0; attempt < maxAllocateAttempts; attempt++ {
+		port, err := findAvailablePort(ctx, preferred, n.portStart, n.portEnd, protocol, n.readModel)
+		if err != nil {
+			return 0, err
 		}
+		if n.adoptIfClaimed(ctx, port) {
+			continue
+		}
+
+		forwarded := false
+		for _, s := range n.resolveStrategies(ctx) {
+			if err := s.Forward(ctx, port, protocol); err == nil {
+				forwarded = true
+				break
+			}
+		}
+
+		_, err = n.ax.Send(ctx, commands.AllocatePort{
+			Port:      port,
+			Protocol:  protocol,
+			OwnerKey:  ownerKey,
+			Forwarded: forwarded,
+		})
+		if err != nil {
+			return 0, err
+		}
+		n.waitForProjection()
+
+		return port, nil
 	}
 
-	_, err = n.ax.Send(ctx, commands.AllocatePort{
-		Port:      port,
-		Protocol:  protocol,
-		OwnerKey:  ownerKey,
-		Forwarded: forwarded,
-	})
-	if err != nil {
-		return 0, err
-	}
-	n.waitForProjection()
+	return 0, ErrNoPortAvailable
+}
 
-	return port, nil
+// adoptIfClaimed reports whether the event store already holds a live
+// allocation of port that the read model did not know about, and records it in
+// the read model so the search moves on and DeallocateByOwner can release it.
+// The read model falls behind the event store when it starts empty over
+// existing events (a process restart with the in-memory store, a database
+// created after allocations were made) or when a projection was lost.
+func (n *netbridgeService) adoptIfClaimed(
+	ctx context.Context,
+	port int,
+) bool {
+	current, err := n.ax.Get(ctx, strconv.Itoa(port))
+	if err != nil || current.Port == 0 {
+		return false
+	}
+
+	return n.readModel.Save(ctx, current) == nil
 }
 
 // DeallocateByOwner releases all ports allocated to the given owner key.
@@ -195,11 +227,19 @@ func (n *netbridgeService) DeallocateByOwner(
 	return nil
 }
 
-// Shutdown drains the port-allocation aggregate.
+// Shutdown drains the port-allocation aggregate, then closes the read model if
+// Build opened it: the drain is what finishes the projections that write to it.
 func (n *netbridgeService) Shutdown(
 	ctx context.Context,
 ) error {
-	return n.ax.Shutdown(ctx)
+	err := n.ax.Shutdown(ctx)
+	if n.ownsReadModel {
+		if closeErr := n.readModel.Close(); err == nil {
+			err = closeErr
+		}
+	}
+
+	return err
 }
 
 func (n *netbridgeService) waitForProjection() {
