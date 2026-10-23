@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 	"github.com/rabbytesoftware/quiver.core/internal/adapter/eventstore/sqlite"
 	"github.com/rabbytesoftware/quiver.core/internal/core/config"
 	"github.com/rabbytesoftware/quiver.core/internal/domain/netbridge"
+	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/commands"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/mocks"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/ports"
 	"github.com/rabbytesoftware/quiver.core/internal/engine/netbridge/internal/store"
@@ -761,12 +763,23 @@ func TestAllocate_MoreStaleAllocationsThanAttempts_ReportsNoPortAvailable(
 	ss := asynxstore.NewSnapshots()
 	ctx := context.Background()
 	start := testEphemeralPortStart
-	end := start + maxAllocateAttempts + 8
+	end := start + maxAllocateAttempts + 40
 
+	// The aggregates are written straight through the command: all that matters
+	// is that the event store holds them, not that the OS lets this test bind
+	// them (a CI runner has some of this range in use).
 	before := buildOver(t, es, ss, nil, start, end)
-	for i := 0; i < maxAllocateAttempts+4; i++ {
-		_, err := before.Allocate(ctx, "owner-a", netbridge.ProtocolTCP, 0)
+	for port := start; port <= end; port++ {
+		_, err := before.ax.Send(ctx, commands.AllocatePort{Port: port, Protocol: netbridge.ProtocolTCP, OwnerKey: "owner-a"})
 		require.NoError(t, err)
+	}
+	before.waitForProjection()
+
+	// Hold a few ports of the range so the test cannot depend on them being free.
+	for port := start; port < start+5; port++ {
+		if ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port)); err == nil {
+			t.Cleanup(func() { _ = ln.Close() })
+		}
 	}
 
 	after := buildOver(t, es, ss, store.NewPortMemory(), start, end)
